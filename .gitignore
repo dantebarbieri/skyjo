@@ -1,0 +1,13 @@
+# Rust
+target/
+Cargo.lock
+
+# Node / Frontend
+node_modules/
+dist/
+
+# WASM build output
+pkg/
+
+# OS
+.DS_Store
