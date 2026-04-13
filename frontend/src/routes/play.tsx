@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -271,21 +272,27 @@ function GameSetup({
           </div>
         </div>
 
-        <Button onClick={handleStart} className="w-full">
-          Start Game
-        </Button>
-
         {hasSavedGame && (
-          <Button onClick={onResume} variant="secondary" className="w-full">
+          <Button onClick={onResume} className="w-full">
             Resume Saved Game
           </Button>
         )}
 
-        <div className="flex gap-2">
+        <Button onClick={handleStart} variant={hasSavedGame ? 'secondary' : 'default'} className="w-full">
+          Start New Game
+        </Button>
+
+        <Link to="/play/online">
+          <Button variant="outline" className="w-full">
+            Play Online
+          </Button>
+        </Link>
+
+        <div className="flex justify-center pt-2">
           <Button
-            variant="outline"
+            variant="ghost"
             size="sm"
-            className="flex-1"
+            className="text-muted-foreground"
             onClick={() => fileInputRef.current?.click()}
           >
             Import Game
@@ -412,7 +419,7 @@ function PlayBoard({
   const isPlayPhase = action_needed.type === 'ChooseDraw'
     || action_needed.type === 'ChooseDeckDrawAction'
     || action_needed.type === 'ChooseDiscardDrawPlacement';
-  const hasDrawnCard = action_needed.type === 'ChooseDeckDrawAction'
+  const hasDrawnCard = (action_needed.type === 'ChooseDeckDrawAction' && action_needed.drawn_card != null)
     || action_needed.type === 'ChooseDiscardDrawPlacement';
 
   // Prompt message
@@ -570,7 +577,7 @@ function PlayBoard({
             {hasDrawnCard ? (
               <div className="ring-2 ring-green-400 rounded-lg">
                 <SkyjoCard
-                  slot={{ Revealed: action_needed.drawn_card }}
+                  slot={{ Revealed: action_needed.drawn_card! }}
                   size={cardSizes.draw}
                 />
               </div>

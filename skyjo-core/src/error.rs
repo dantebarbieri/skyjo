@@ -11,6 +11,10 @@ pub enum SkyjoError {
     EmptyDiscardPile,
     GameAlreadyOver,
     InvalidAction(String),
+    NotYourTurn {
+        expected: usize,
+        got: usize,
+    },
 }
 
 impl fmt::Display for SkyjoError {
@@ -27,6 +31,9 @@ impl fmt::Display for SkyjoError {
             Self::EmptyDiscardPile => write!(f, "discard pile is empty"),
             Self::GameAlreadyOver => write!(f, "game is already over"),
             Self::InvalidAction(msg) => write!(f, "invalid action: {msg}"),
+            Self::NotYourTurn { expected, got } => {
+                write!(f, "not your turn: expected player {expected}, got {got}")
+            }
         }
     }
 }

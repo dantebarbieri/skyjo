@@ -7,6 +7,9 @@ WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 COPY skyjo-core/ skyjo-core/
 COPY skyjo-wasm/ skyjo-wasm/
+# Stub skyjo-server to satisfy workspace
+COPY skyjo-server/Cargo.toml skyjo-server/Cargo.toml
+RUN mkdir -p skyjo-server/src && echo "fn main() {}" > skyjo-server/src/main.rs
 
 RUN cd skyjo-wasm && wasm-pack build --release --target web --out-dir ../frontend/pkg
 
@@ -25,13 +28,30 @@ COPY frontend/ .
 COPY --from=wasm-build /app/frontend/pkg/ pkg/
 RUN pnpm build
 
-# Stage 3: Serve with nginx
-FROM nginx:alpine
+# Stage 3: Build server binary
+FROM rust:latest AS server-build
 
-COPY --from=frontend-build /app/dist/ /usr/share/nginx/html/
-COPY frontend/nginx.conf /etc/nginx/conf.d/default.conf
+WORKDIR /app
+COPY Cargo.toml Cargo.lock ./
+COPY skyjo-core/ skyjo-core/
+COPY skyjo-server/ skyjo-server/
+# Stub skyjo-wasm to satisfy workspace
+COPY skyjo-wasm/Cargo.toml skyjo-wasm/Cargo.toml
+RUN mkdir -p skyjo-wasm/src && echo "" > skyjo-wasm/src/lib.rs
 
-EXPOSE 80
+RUN cargo build --release --package skyjo-server
+
+# Stage 4: Final image — Rust server serves static files + WebSocket
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+
+COPY --from=server-build /app/target/release/skyjo-server /usr/local/bin/
+COPY --from=frontend-build /app/dist/ /var/www/static/
+
+EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD wget -qO- http://localhost/ || exit 1
+    CMD timeout 3 bash -c 'cat < /dev/null > /dev/tcp/localhost/8080' || exit 1
+
+CMD ["skyjo-server", "--static-dir", "/var/www/static", "--port", "8080"]

@@ -1,5 +1,5 @@
 [workspace]
-members = ["skyjo-core", "skyjo-wasm"]
+members = ["skyjo-core", "skyjo-wasm", "skyjo-server"]
 resolver = "3"
 
 [profile.release]

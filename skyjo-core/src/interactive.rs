@@ -25,7 +25,8 @@ pub enum ActionNeeded {
     },
     ChooseDeckDrawAction {
         player: usize,
-        drawn_card: CardValue,
+        /// None when viewed by a non-active player (network play privacy).
+        drawn_card: Option<CardValue>,
     },
     ChooseDiscardDrawPlacement {
         player: usize,
@@ -242,7 +243,7 @@ impl InteractiveGame {
             },
             Phase::WaitingForDeckDrawAction { drawn_card } => ActionNeeded::ChooseDeckDrawAction {
                 player: self.current_player,
-                drawn_card: *drawn_card,
+                drawn_card: Some(*drawn_card),
             },
             Phase::WaitingForDiscardPlacement { drawn_card, .. } => {
                 ActionNeeded::ChooseDiscardDrawPlacement {
@@ -623,7 +624,8 @@ impl InteractiveGame {
     }
 
     /// Get the game state from a specific player's perspective (hides other players' hidden cards).
-    pub fn get_player_state(&self, _player: usize) -> InteractiveGameState {
+    /// For non-active players, the drawn card in ChooseDeckDrawAction is hidden (set to None).
+    pub fn get_player_state(&self, player: usize) -> InteractiveGameState {
         let boards: Vec<Vec<VisibleSlot>> = self.boards.iter().map(|b| b.visible_view()).collect();
 
         let discard_tops: Vec<Option<CardValue>> = self
@@ -634,6 +636,18 @@ impl InteractiveGame {
 
         let discard_sizes: Vec<usize> = self.discard_piles.iter().map(|p| p.len()).collect();
 
+        let mut action_needed = self.get_action_needed();
+
+        // Strip drawn_card from ChooseDeckDrawAction for non-active players
+        if let ActionNeeded::ChooseDeckDrawAction {
+            player: active_player,
+            ref mut drawn_card,
+        } = action_needed
+            && player != active_player
+        {
+            *drawn_card = None;
+        }
+
         InteractiveGameState {
             num_players: self.num_players,
             player_names: self.player_names.clone(),
@@ -641,7 +655,7 @@ impl InteractiveGame {
             num_cols: self.rules.num_cols(),
             round_number: self.round_number,
             current_player: self.current_player,
-            action_needed: self.get_action_needed(),
+            action_needed,
             boards,
             discard_tops,
             discard_sizes,
@@ -650,6 +664,17 @@ impl InteractiveGame {
             going_out_player: self.going_out_player,
             is_final_turn: self.going_out_player.is_some(),
             last_column_clears: self.last_column_clears.clone(),
+        }
+    }
+
+    /// Get the index of the player who needs to act, or None if the game is in RoundOver/GameOver.
+    pub fn current_player_index(&self) -> Option<usize> {
+        match &self.phase {
+            Phase::SetupFlips { next_player, .. } => Some(*next_player),
+            Phase::WaitingForDraw
+            | Phase::WaitingForDeckDrawAction { .. }
+            | Phase::WaitingForDiscardPlacement { .. } => Some(self.current_player),
+            Phase::RoundOver | Phase::GameOver => None,
         }
     }
 
@@ -844,8 +869,8 @@ mod tests {
         // Draw from deck
         let result = game.apply_action(PlayerAction::DrawFromDeck).unwrap();
         match &result {
-            ActionNeeded::ChooseDeckDrawAction { drawn_card, .. } => {
-                assert!((-2..=12).contains(drawn_card));
+            ActionNeeded::ChooseDeckDrawAction { drawn_card: Some(card), .. } => {
+                assert!((-2i8..=12).contains(&card));
             }
             other => panic!("Expected ChooseDeckDrawAction, got {:?}", other),
         }

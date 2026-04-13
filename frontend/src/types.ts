@@ -163,7 +163,7 @@ export type VisibleSlot =
 export type ActionNeeded =
   | { type: 'ChooseInitialFlips'; player: number; count: number }
   | { type: 'ChooseDraw'; player: number; drawable_piles: number[] }
-  | { type: 'ChooseDeckDrawAction'; player: number; drawn_card: CardValue }
+  | { type: 'ChooseDeckDrawAction'; player: number; drawn_card: CardValue | null }
   | { type: 'ChooseDiscardDrawPlacement'; player: number; drawn_card: CardValue }
   | { type: 'RoundOver'; round_number: number; round_scores: number[]; raw_round_scores: number[]; cumulative_scores: number[]; going_out_player: number | null; end_of_round_clears: ColumnClearEvent[] }
   | { type: 'GameOver'; final_scores: number[]; winners: number[]; round_number: number; round_scores: number[]; raw_round_scores: number[]; going_out_player: number | null; end_of_round_clears: ColumnClearEvent[] };
