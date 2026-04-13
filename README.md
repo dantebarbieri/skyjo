@@ -1,11 +1,18 @@
 # Skyjo Simulator
 
-A web-based [Skyjo](https://www.magilano.com/en/skyjo/) card game simulator powered by a Rust engine compiled to WebAssembly. Run thousands of games in seconds, compare AI strategies, and replay every turn with a visual board.
+A web-based [Skyjo](https://magilano.com/en/products/skyjo) card game — play it in your browser or simulate thousands of games in seconds. Powered by a Rust engine compiled to WebAssembly.
 
 **[Live Demo →](https://skyjo.danteb.com)**
 
 ## Features
 
+### Play
+- **Local multiplayer** — play with friends on the same device (2–8 players)
+- **Play vs bots** — challenge AI opponents using any available strategy, or mix humans and bots
+- **Save & resume** — save your game to a file and pick up where you left off
+- **Networked multiplayer** — planned for a future release
+
+### Simulate
 - **Batch simulation** — run up to millions of games and view aggregate statistics (win rates, score distributions, average rounds)
 - **Configurable strategies** — pit different AI strategies against each other
 - **Rule variants** — swap in alternate rule sets (e.g., "Aunt Janet Rules")

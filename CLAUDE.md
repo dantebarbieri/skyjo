@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Skyjo board game simulator. Rust core compiled to WebAssembly, with a TypeScript/HTML/CSS frontend for visualization. The simulator runs configurable game simulations and records full game histories for replay and statistical analysis.
+Skyjo board game simulator and playable web app. Rust core compiled to WebAssembly, with a TypeScript/HTML/CSS frontend. Users can **play Skyjo** (local multiplayer or vs bots) or **run simulations** (batch games with configurable AI strategies, full replay, and statistical analysis). Networked multiplayer is planned for the future.
 
 ### Game Rules (Skyjo)
 
@@ -70,7 +70,8 @@ The WASM module is built to `frontend/pkg/` via `wasm-pack build --target web --
 - **Game replay**: Step through `GameHistory` turn-by-turn. Board state is reconstructed in TypeScript from the history (deal → flips → turns → end-of-round). Column-major board layout (index = col * numRows + row).
 - **Skyjo card component**: CSS-only cards replicating real Skyjo aesthetics — correct color scheme (purple/blue/green/yellow/red), hexagonal mosaic pattern overlay, corner numbers in white circles
 - **Real-time visualization**: Live game view during simulation with speed controls
-- Key files: `src/App.tsx` (root), `src/hooks/use-simulation.ts` (worker management), `src/hooks/use-replay.ts` (replay state), `src/lib/replay-engine.ts` (board reconstruction), `src/components/skyjo-card.tsx` (card rendering), `src/types.ts` (TypeScript interfaces + worker message types), `src/worker.ts` (WASM simulation loop)
+- **Interactive play mode** (`src/routes/play.tsx`): Full playable Skyjo — local multiplayer (multiple humans on one device), vs bots (any AI strategy), or mixed. Features: configurable player count (2–8), per-player human/bot assignment, bot speed control, save/resume/import/export game state, end-of-round scoring sheet, and play-again flow. Bot turns are automated via `src/hooks/use-bot-turns.ts`; human turns use click-based interaction (flip cards, draw from deck/discard, place/swap). Game state is driven by `src/hooks/use-interactive-game.ts` which calls into WASM for action validation and state transitions. Networked multiplayer is planned but not yet implemented.
+- Key files: `src/App.tsx` (root), `src/hooks/use-simulation.ts` (worker management), `src/hooks/use-replay.ts` (replay state), `src/hooks/use-interactive-game.ts` (play mode state), `src/hooks/use-bot-turns.ts` (bot automation), `src/lib/replay-engine.ts` (board reconstruction), `src/components/skyjo-card.tsx` (card rendering), `src/types.ts` (TypeScript interfaces + worker message types), `src/worker.ts` (WASM simulation loop)
 
 ## Build Commands
 
