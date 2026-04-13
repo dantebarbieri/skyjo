@@ -472,6 +472,8 @@ function openReplay(history: GameHistory) {
   const nextBtn = $('#btn-next') as HTMLButtonElement;
   const roundsNav = $('#replay-rounds') as HTMLElement;
   const autoplayBtn = $('#btn-autoplay') as HTMLButtonElement;
+  const skipRoundStartBtn = $('#btn-skip-round-start') as HTMLButtonElement;
+  const skipRoundEndBtn = $('#btn-skip-round-end') as HTMLButtonElement;
   const speedSelect = $('#replay-speed') as HTMLSelectElement;
   const pauseRoundsCheckbox = $('#replay-pause-rounds') as HTMLInputElement;
 
@@ -537,6 +539,26 @@ function openReplay(history: GameHistory) {
     } else {
       startAutoplay();
     }
+  };
+
+  skipRoundStartBtn.onclick = () => {
+    stopAutoplay();
+    const curRound = steps[currentStep].roundIndex;
+    currentStep = roundStarts[curRound];
+    render();
+  };
+
+  skipRoundEndBtn.onclick = () => {
+    stopAutoplay();
+    const curRound = steps[currentStep].roundIndex;
+    // Find the last step of the current round
+    const nextRoundStart = roundStarts[curRound + 1];
+    if (nextRoundStart !== undefined) {
+      currentStep = nextRoundStart - 1;
+    } else {
+      currentStep = steps.length - 1;
+    }
+    render();
   };
 
   speedSelect.onchange = () => {
