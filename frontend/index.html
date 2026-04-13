@@ -19,6 +19,7 @@
       <div>
         <label for="seed">Seed:</label>
         <input type="number" id="seed" value="42" min="0" />
+        <button type="button" id="btn-random-seed">Randomize</button>
       </div>
       <div>
         <label for="max-turns">Max turns/round:</label>
@@ -55,20 +56,34 @@
 
   <div id="error-display" hidden></div>
 
-  <section id="progress-section" hidden>
-    <h2>Progress <span id="sim-status" class="status-running"></span></h2>
+  <section id="progress-section">
+    <h2>Progress <span id="sim-status"></span></h2>
     <div class="progress-bar">
       <div id="progress-bar-fill" class="progress-bar-fill"></div>
     </div>
-    <p id="progress-text">0 / 0 games (0%)</p>
-    <p class="progress-details">
+    <p id="progress-text"></p>
+    <p class="progress-details" id="progress-details" hidden>
       Elapsed: <span id="elapsed-time">-</span> |
       ETA: <span id="eta">-</span> |
       Speed: <span id="games-per-sec">-</span>
     </p>
   </section>
 
-  <section id="stats-section" hidden>
+  <section id="realtime-section">
+    <h2>Live Game <span id="realtime-game-counter"></span></h2>
+    <div id="realtime-controls" hidden>
+      <label>Speed:</label>
+      <button class="speed-btn" data-speed="slow">Slow</button>
+      <button class="speed-btn active" data-speed="normal">Normal</button>
+      <button class="speed-btn" data-speed="fast">Fast</button>
+    </div>
+    <div id="realtime-waiting" class="realtime-waiting">
+      <p>Run a simulation to watch live games</p>
+    </div>
+    <div id="realtime-container" hidden></div>
+  </section>
+
+  <section id="stats-section">
     <h2>Results</h2>
     <p>
       Games: <span id="stat-num-games"></span> |
@@ -88,18 +103,6 @@
       </thead>
       <tbody id="stats-table-body"></tbody>
     </table>
-  </section>
-
-  <section id="realtime-section" hidden>
-    <h2>Real-Time Visualization</h2>
-    <p class="placeholder-notice">
-      Real-time game visualization is planned for a future update.
-      This will show a live view of the table with all players, cards revealing and being
-      replaced, the deck and discard pile — all updating in real time as the simulation runs.
-    </p>
-    <div id="realtime-container" class="realtime-placeholder">
-      <p>Coming soon</p>
-    </div>
   </section>
 
   <section id="game-list-section" hidden>

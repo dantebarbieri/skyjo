@@ -3,6 +3,7 @@ import type { GameHistory, GameStats, ProgressStats, SimConfig, WorkerRequest, W
 
 let paused = false;
 let stopped = false;
+let realtimeRequested = false;
 let resumeResolver: (() => void) | null = null;
 
 function post(msg: WorkerResponse) {
@@ -24,6 +25,7 @@ function waitForResume(): Promise<void> {
 async function runSimulation(config: SimConfig) {
   paused = false;
   stopped = false;
+  realtimeRequested = config.realtimeVisualization;
 
   const numPlayers = config.strategies.length;
   const totalGames = config.num_games;
@@ -67,9 +69,10 @@ async function runSimulation(config: SimConfig) {
     });
 
     let stats: GameStats;
+    const needHistory = config.withHistories || (config.realtimeVisualization && realtimeRequested);
 
     try {
-      if (config.withHistories) {
+      if (needHistory) {
         const resultJson = simulate_one_with_history(gameConfig);
         const result = JSON.parse(resultJson);
         if (result.error) {
@@ -77,7 +80,13 @@ async function runSimulation(config: SimConfig) {
           return;
         }
         stats = result.stats;
-        histories.push(result.history);
+        if (config.withHistories) {
+          histories.push(result.history);
+        }
+        if (config.realtimeVisualization && realtimeRequested) {
+          post({ type: 'realtimeGame', history: result.history });
+          realtimeRequested = false;
+        }
       } else {
         const resultJson = simulate_one(gameConfig);
         const result = JSON.parse(resultJson);
@@ -183,6 +192,9 @@ self.addEventListener('message', (e: MessageEvent<WorkerRequest>) => {
         resumeResolver = null;
         resolve();
       }
+      break;
+    case 'requestRealtimeGame':
+      realtimeRequested = true;
       break;
   }
 });

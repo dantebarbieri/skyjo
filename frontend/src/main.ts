@@ -4,6 +4,7 @@ import init, {
 } from '../pkg/skyjo_wasm.js';
 import type { GameHistory, ProgressStats, SimConfig, WorkerResponse } from './types';
 import { buildAllSteps, renderReplayStep, type ReplayStep } from './replay';
+import { RealtimePlayer, type Speed } from './realtime';
 
 let strategies: string[] = [];
 let rules: string[] = [];
@@ -11,6 +12,7 @@ let worker: Worker | null = null;
 let simRunning = false;
 let simPaused = false;
 let currentHistories: GameHistory[] = [];
+let realtimePlayer: RealtimePlayer | null = null;
 
 const $ = (sel: string) => document.querySelector(sel)!;
 
@@ -35,15 +37,32 @@ function setupForm() {
   }
 
   updateStrategySelects(parseInt(playerCountSelect.value));
+  updatePreview();
 
   playerCountSelect.addEventListener('change', () => {
     updateStrategySelects(parseInt(playerCountSelect.value));
+    updatePreview();
+  });
+
+  $('#btn-random-seed').addEventListener('click', () => {
+    const seedInput = document.getElementById('seed') as HTMLInputElement;
+    seedInput.value = String(Math.floor(Math.random() * 1_000_000));
   });
 
   $('#btn-simulate').addEventListener('click', () => startSimulation(false));
   $('#btn-simulate-histories').addEventListener('click', () => startSimulation(true));
   $('#btn-pause').addEventListener('click', togglePause);
   $('#btn-stop').addEventListener('click', stopSimulation);
+
+  // Wire speed buttons (once)
+  const speedBtns = document.querySelectorAll('.speed-btn');
+  speedBtns.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      speedBtns.forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      realtimePlayer?.setSpeed((btn as HTMLElement).dataset.speed as Speed);
+    });
+  });
 }
 
 function updateStrategySelects(count: number) {
@@ -74,7 +93,45 @@ function updateStrategySelects(count: number) {
     div.appendChild(label);
     div.appendChild(select);
     container.appendChild(div);
+
+    select.addEventListener('change', updatePreview);
   }
+  updatePreview();
+}
+
+function getPlayerStrategies(): string[] {
+  const playerCount = parseInt(($('#player-count') as HTMLSelectElement).value);
+  const strats: string[] = [];
+  for (let i = 0; i < playerCount; i++) {
+    const select = document.getElementById(`strategy-${i}`) as HTMLSelectElement | null;
+    strats.push(select ? select.value : strategies[0]);
+  }
+  return strats;
+}
+
+function updatePreview() {
+  if (simRunning) return;
+
+  const strats = getPlayerStrategies();
+
+  // Update stats table with player names and dashes
+  const tbody = $('#stats-table-body') as HTMLTableSectionElement;
+  tbody.innerHTML = '';
+  for (let p = 0; p < strats.length; p++) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>Player ${p + 1} (${strats[p]})</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+    `;
+    tbody.appendChild(tr);
+  }
+  ($('#stat-num-games') as HTMLElement).textContent = '-';
+  ($('#stat-avg-rounds') as HTMLElement).textContent = '-';
+  ($('#stat-avg-turns') as HTMLElement).textContent = '-';
 }
 
 function getSimConfig(withHistories: boolean): SimConfig {
@@ -97,6 +154,7 @@ function getSimConfig(withHistories: boolean): SimConfig {
     strategies: strats,
     rules: rulesName,
     withHistories,
+    realtimeVisualization: true,
     maxTurnsPerRound: maxTurns,
   };
 }
@@ -113,18 +171,28 @@ function startSimulation(withHistories: boolean) {
   currentHistories = [];
   ($('#game-list-section') as HTMLElement).hidden = true;
   ($('#replay-section') as HTMLElement).hidden = true;
-  ($('#stats-section') as HTMLElement).hidden = false;
-  ($('#progress-section') as HTMLElement).hidden = false;
-  ($('#realtime-section') as HTMLElement).hidden = false;
+  ($('#progress-details') as HTMLElement).hidden = false;
+
+  // Transition realtime section to live mode
+  ($('#realtime-waiting') as HTMLElement).hidden = true;
+  ($('#realtime-container') as HTMLElement).hidden = false;
+  ($('#realtime-controls') as HTMLElement).hidden = false;
 
   // Clear stats table
-  ($('#stats-table-body') as HTMLElement).innerHTML = '';
   ($('#stat-num-games') as HTMLElement).textContent = '0';
   ($('#stat-avg-rounds') as HTMLElement).textContent = '-';
   ($('#stat-avg-turns') as HTMLElement).textContent = '-';
 
   setSimState(true, false);
   updateProgress(0, config.num_games, 0);
+
+  // Set up realtime player
+  const rtContainer = $('#realtime-container') as HTMLElement;
+  rtContainer.innerHTML = '';
+  realtimePlayer = new RealtimePlayer(rtContainer);
+  realtimePlayer.setOnNeedNextGame(() => {
+    worker?.postMessage({ type: 'requestRealtimeGame' });
+  });
 
   // Create worker
   worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
@@ -139,6 +207,10 @@ function startSimulation(withHistories: boolean) {
       case 'progress':
         renderStats(msg.stats);
         updateProgress(msg.gamesCompleted, msg.totalGames, msg.elapsedMs);
+        break;
+
+      case 'realtimeGame':
+        realtimePlayer?.loadGame(msg.history);
         break;
 
       case 'complete':
@@ -190,6 +262,16 @@ function cleanupWorker() {
     worker.terminate();
     worker = null;
   }
+  if (realtimePlayer) {
+    realtimePlayer.stop();
+    realtimePlayer = null;
+  }
+
+  // Hide live game, restore waiting state
+  ($('#realtime-container') as HTMLElement).hidden = true;
+  ($('#realtime-controls') as HTMLElement).hidden = true;
+  ($('#realtime-waiting') as HTMLElement).hidden = false;
+  ($('#realtime-game-counter') as HTMLElement).textContent = '';
 }
 
 function setSimState(running: boolean, paused: boolean) {
@@ -265,10 +347,11 @@ function renderStats(stats: ProgressStats) {
   const tbody = $('#stats-table-body') as HTMLTableSectionElement;
   tbody.innerHTML = '';
 
+  const strats = getPlayerStrategies();
   for (let p = 0; p < stats.num_players; p++) {
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td>Player ${p + 1}</td>
+      <td>Player ${p + 1} (${strats[p] ?? ''})</td>
       <td>${stats.wins_per_player[p]}</td>
       <td>${(stats.win_rate_per_player[p] * 100).toFixed(1)}%</td>
       <td>${stats.avg_score_per_player[p].toFixed(1)}</td>

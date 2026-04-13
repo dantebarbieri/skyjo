@@ -96,6 +96,7 @@ export interface SimConfig {
   strategies: string[];
   rules: string;
   withHistories: boolean;
+  realtimeVisualization: boolean;
   maxTurnsPerRound: number;
 }
 
@@ -103,7 +104,8 @@ export type WorkerRequest =
   | { type: 'start'; config: SimConfig }
   | { type: 'pause' }
   | { type: 'resume' }
-  | { type: 'stop' };
+  | { type: 'stop' }
+  | { type: 'requestRealtimeGame' };
 
 export interface ProgressStats {
   num_games: number;
@@ -121,4 +123,5 @@ export type WorkerResponse =
   | { type: 'ready' }
   | { type: 'progress'; stats: ProgressStats; gamesCompleted: number; totalGames: number; elapsedMs: number }
   | { type: 'complete'; stats: ProgressStats; gamesCompleted: number; totalGames: number; elapsedMs: number; histories: GameHistory[] | null }
+  | { type: 'realtimeGame'; history: GameHistory }
   | { type: 'error'; message: string };
