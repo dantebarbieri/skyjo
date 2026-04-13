@@ -27,6 +27,9 @@ pub struct RoundHistory {
     pub end_of_round_clears: Vec<ColumnClearEvent>,
     pub round_scores: Vec<i32>,
     pub cumulative_scores: Vec<i32>,
+    /// True if this round was forcefully ended by the turn limit safety valve.
+    #[serde(default)]
+    pub truncated: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

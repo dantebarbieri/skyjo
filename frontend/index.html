@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Skyjo Simulator</title>
+  <link rel="stylesheet" href="/src/styles.css" />
+</head>
+<body>
+  <h1>Skyjo Simulator</h1>
+
+  <section id="config-section">
+    <h2>Configuration</h2>
+    <form id="config-form" onsubmit="return false;">
+      <div>
+        <label for="num-games">Number of games:</label>
+        <input type="number" id="num-games" value="100" min="1" max="1000000" />
+      </div>
+      <div>
+        <label for="seed">Seed:</label>
+        <input type="number" id="seed" value="42" min="0" />
+      </div>
+      <div>
+        <label for="max-turns">Max turns/round:</label>
+        <input type="number" id="max-turns" value="10000" min="100" max="100000" />
+      </div>
+      <div>
+        <label for="rules-select">Rules:</label>
+        <select id="rules-select"></select>
+      </div>
+      <div>
+        <label for="player-count">Number of players:</label>
+        <select id="player-count">
+          <option value="2">2</option>
+          <option value="3">3</option>
+          <option value="4" selected>4</option>
+          <option value="5">5</option>
+          <option value="6">6</option>
+          <option value="7">7</option>
+          <option value="8">8</option>
+        </select>
+      </div>
+      <fieldset>
+        <legend>Player Strategies</legend>
+        <div id="strategy-selects"></div>
+      </fieldset>
+      <div class="button-row">
+        <button type="button" id="btn-simulate">Run Simulation</button>
+        <button type="button" id="btn-simulate-histories">Run &amp; Save Histories</button>
+        <button type="button" id="btn-pause" disabled>Pause</button>
+        <button type="button" id="btn-stop" disabled>Stop</button>
+      </div>
+    </form>
+  </section>
+
+  <div id="error-display" hidden></div>
+
+  <section id="progress-section" hidden>
+    <h2>Progress <span id="sim-status" class="status-running"></span></h2>
+    <div class="progress-bar">
+      <div id="progress-bar-fill" class="progress-bar-fill"></div>
+    </div>
+    <p id="progress-text">0 / 0 games (0%)</p>
+    <p class="progress-details">
+      Elapsed: <span id="elapsed-time">-</span> |
+      ETA: <span id="eta">-</span> |
+      Speed: <span id="games-per-sec">-</span>
+    </p>
+  </section>
+
+  <section id="stats-section" hidden>
+    <h2>Results</h2>
+    <p>
+      Games: <span id="stat-num-games"></span> |
+      Avg rounds/game: <span id="stat-avg-rounds"></span> |
+      Avg turns/game: <span id="stat-avg-turns"></span>
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>Player</th>
+          <th>Wins</th>
+          <th>Win Rate</th>
+          <th>Avg Score</th>
+          <th>Min Score</th>
+          <th>Max Score</th>
+        </tr>
+      </thead>
+      <tbody id="stats-table-body"></tbody>
+    </table>
+  </section>
+
+  <section id="realtime-section" hidden>
+    <h2>Real-Time Visualization</h2>
+    <p class="placeholder-notice">
+      Real-time game visualization is planned for a future update.
+      This will show a live view of the table with all players, cards revealing and being
+      replaced, the deck and discard pile — all updating in real time as the simulation runs.
+    </p>
+    <div id="realtime-container" class="realtime-placeholder">
+      <p>Coming soon</p>
+    </div>
+  </section>
+
+  <section id="game-list-section" hidden>
+    <h2>Game Histories</h2>
+    <table id="game-list-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Seed</th>
+          <th>Rounds</th>
+          <th>Turns</th>
+          <th>Col Clears</th>
+          <th>Winner</th>
+          <th>Scores</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="game-list-body"></tbody>
+    </table>
+  </section>
+
+  <section id="replay-section" hidden>
+    <h2>Game Replay</h2>
+    <nav class="replay-rounds" id="replay-rounds"></nav>
+    <nav class="replay-nav">
+      <button id="btn-prev" disabled>Previous</button>
+      <span id="step-counter"></span>
+      <button id="btn-next" disabled>Next</button>
+    </nav>
+    <div id="replay-container"></div>
+  </section>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

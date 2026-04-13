@@ -1,0 +1,344 @@
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 1rem;
+  line-height: 1.5;
+}
+
+h1, h2, h3, h4 {
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+}
+
+section {
+  margin-bottom: 2rem;
+}
+
+form > div, .strategy-select-row {
+  margin-bottom: 0.5rem;
+}
+
+label {
+  display: inline-block;
+  min-width: 10rem;
+}
+
+input[type="number"], select {
+  padding: 0.25rem 0.5rem;
+}
+
+.button-row {
+  margin-top: 1rem;
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.button-row button {
+  padding: 0.5rem 1rem;
+}
+
+.button-row button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+#error-display {
+  color: #c00;
+  background: #fee;
+  border: 1px solid #c00;
+  padding: 0.75rem;
+  margin: 1rem 0;
+}
+
+/* Progress section */
+.progress-bar {
+  width: 100%;
+  height: 1.5rem;
+  background: #e0e0e0;
+  border-radius: 4px;
+  overflow: hidden;
+  margin: 0.5rem 0;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: #4caf50;
+  width: 0%;
+  transition: width 0.1s ease-out;
+  border-radius: 4px;
+}
+
+#progress-text {
+  margin: 0.25rem 0;
+  font-weight: bold;
+}
+
+.progress-details {
+  margin: 0.25rem 0;
+  color: #555;
+}
+
+/* Simulation status badges */
+#sim-status {
+  font-size: 0.8em;
+  padding: 0.15rem 0.5rem;
+  border-radius: 3px;
+  vertical-align: middle;
+  margin-left: 0.5rem;
+}
+
+.status-running {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.status-paused {
+  background: #fff3e0;
+  color: #e65100;
+}
+
+.status-complete {
+  background: #e3f2fd;
+  color: #1565c0;
+}
+
+/* Stats table */
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1rem 0;
+}
+
+th, td {
+  border: 1px solid #ccc;
+  padding: 0.4rem 0.8rem;
+  text-align: right;
+}
+
+th {
+  background: #f5f5f5;
+  text-align: center;
+}
+
+td:first-child, th:first-child {
+  text-align: left;
+}
+
+/* Game list table */
+#game-list-table {
+  font-size: 0.9rem;
+}
+
+.replay-btn {
+  cursor: pointer;
+  padding: 0.2rem 0.6rem;
+  background: #f5f5f5;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+}
+
+.replay-btn:hover {
+  background: #e0e0e0;
+}
+
+/* Truncated game highlighting */
+.truncated-row {
+  background: #fff8e1;
+}
+
+.truncated-badge {
+  display: inline-block;
+  background: #f44336;
+  color: #fff;
+  font-size: 0.75em;
+  font-weight: bold;
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+  vertical-align: middle;
+}
+
+/* Round navigation */
+.replay-rounds {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.5rem;
+}
+
+.replay-rounds button {
+  padding: 0.3rem 0.6rem;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  background: #f5f5f5;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.replay-rounds button:hover {
+  background: #e0e0e0;
+}
+
+.replay-rounds button.active-round {
+  background: #1976d2;
+  color: #fff;
+  border-color: #1976d2;
+}
+
+.replay-rounds button.truncated-badge {
+  background: #f44336;
+  border-color: #f44336;
+  color: #fff;
+}
+
+.replay-rounds button.truncated-badge.active-round {
+  background: #b71c1c;
+  border-color: #b71c1c;
+}
+
+/* Replay navigation */
+.replay-nav {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.replay-nav button {
+  padding: 0.4rem 1rem;
+}
+
+/* Board display */
+.boards-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+}
+
+.player-board {
+  border: 1px solid #ddd;
+  padding: 0.75rem;
+  border-radius: 4px;
+}
+
+.player-board.active-player {
+  border-color: #007bff;
+  border-width: 2px;
+}
+
+.board-grid {
+  display: grid;
+  gap: 4px;
+}
+
+.card {
+  width: 3rem;
+  height: 3.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #999;
+  border-radius: 3px;
+  font-weight: bold;
+  font-size: 1.1rem;
+}
+
+.card.hidden {
+  background: #6c8ebf;
+  color: #fff;
+}
+
+.card.cleared {
+  background: #eee;
+  border-style: dashed;
+  color: #aaa;
+}
+
+.card.negative {
+  background: #b5e6b5;
+}
+
+.card.zero {
+  background: #ddd;
+}
+
+.card.low {
+  background: #fff3b0;
+}
+
+.card.mid {
+  background: #ffcc80;
+}
+
+.card.high {
+  background: #ff8a80;
+}
+
+.turn-description {
+  font-style: italic;
+  margin: 0.5rem 0;
+}
+
+/* Deck & discard piles */
+.piles-container {
+  display: flex;
+  gap: 2rem;
+  margin-bottom: 1rem;
+}
+
+.pile-display {
+  text-align: center;
+}
+
+.pile-label {
+  font-weight: bold;
+  font-size: 0.85rem;
+  margin-bottom: 0.25rem;
+  color: #555;
+}
+
+.pile-card {
+  width: 3rem;
+  height: 3.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #999;
+  border-radius: 3px;
+  font-weight: bold;
+  font-size: 1.1rem;
+  margin: 0 auto;
+}
+
+.hidden-hint {
+  font-size: 0.7rem;
+  color: #999;
+  font-style: italic;
+  margin-top: 0.2rem;
+}
+
+/* Real-time visualization placeholder */
+.placeholder-notice {
+  color: #666;
+  font-style: italic;
+}
+
+.realtime-placeholder {
+  border: 2px dashed #ccc;
+  border-radius: 8px;
+  padding: 3rem;
+  text-align: center;
+  color: #999;
+  background: #fafafa;
+  min-height: 200px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.realtime-placeholder p {
+  font-size: 1.2rem;
+  margin: 0;
+}

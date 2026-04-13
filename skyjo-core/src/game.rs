@@ -1,6 +1,14 @@
 use rand::seq::SliceRandom;
-use rand::rngs::SmallRng;
+// Use StdRng (ChaCha12) instead of StdRng to ensure identical RNG sequences
+// across all platforms. StdRng uses different algorithms on 32-bit (WASM)
+// vs 64-bit (native), causing different game outcomes for the same seed.
+use rand::rngs::StdRng;
 use rand::SeedableRng;
+
+/// Default safety limit: maximum turns per round to prevent infinite loops.
+/// In standard Skyjo (150 cards, 4 cols × 3 rows), a round typically takes
+/// 30-100 turns. 10,000 is generous enough to never trigger in normal play.
+pub const DEFAULT_MAX_TURNS_PER_ROUND: usize = 10_000;
 
 use crate::board::PlayerBoard;
 use crate::card::CardValue;
@@ -12,7 +20,7 @@ use crate::strategy::{DeckDrawAction, DrawChoice, Strategy, StrategyView};
 pub struct Game {
     rules: Box<dyn Rules>,
     strategies: Vec<Box<dyn Strategy>>,
-    rng: SmallRng,
+    rng: StdRng,
     num_players: usize,
     _seed: u64,
 
@@ -27,6 +35,8 @@ pub struct Game {
 
     // Track who went out last round (for determining round starter)
     last_round_goer: Option<usize>,
+
+    max_turns_per_round: usize,
 }
 
 impl Game {
@@ -47,7 +57,7 @@ impl Game {
         let rules_name = rules.name().to_string();
 
         Ok(Game {
-            rng: SmallRng::seed_from_u64(seed),
+            rng: StdRng::seed_from_u64(seed),
             num_players,
             _seed: seed,
             boards: Vec::new(),
@@ -64,9 +74,16 @@ impl Game {
                 winners: Vec::new(),
             },
             last_round_goer: None,
+            max_turns_per_round: DEFAULT_MAX_TURNS_PER_ROUND,
             rules,
             strategies,
         })
+    }
+
+    /// Set the maximum number of turns allowed per round.
+    /// Rounds exceeding this limit are forcefully ended and marked as truncated.
+    pub fn set_max_turns_per_round(&mut self, limit: usize) {
+        self.max_turns_per_round = limit;
     }
 
     /// Run the entire game to completion. Returns the finished GameHistory.
@@ -156,10 +173,19 @@ impl Game {
         let mut turns_after_goer: usize = 0;
         let mut current = starter;
         let mut turns: Vec<TurnRecord> = Vec::new();
+        let mut truncated = false;
 
         loop {
             // If someone has gone out and we've given everyone else a turn, stop
             if going_out_player.is_some() && turns_after_goer >= self.num_players - 1 {
+                break;
+            }
+
+            // Safety: prevent infinite rounds from buggy strategies
+            if turns.len() >= self.max_turns_per_round {
+                // Force end: treat the current player as going out
+                going_out_player.get_or_insert(current);
+                truncated = true;
                 break;
             }
 
@@ -258,6 +284,7 @@ impl Game {
             end_of_round_clears,
             round_scores,
             cumulative_scores: self.cumulative_scores.clone(),
+            truncated,
         });
 
         Ok(())

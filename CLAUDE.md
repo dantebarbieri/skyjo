@@ -44,14 +44,29 @@ The core is designed around **trait-based extensibility** for both player strate
 
 ### WASM Bridge (`skyjo-wasm`)
 
-Thin wasm-bindgen layer exposing simulation and replay to JS. Passes `GameHistory` and stats as serialized JSON (via `serde_json` / `serde-wasm-bindgen`). Keeps the interface minimal — the frontend drives visualization, the WASM module drives computation.
+Thin wasm-bindgen layer exposing simulation and replay to JS via JSON strings. Six exported functions:
+- `simulate(config_json)` — batch simulation, returns `AggregateStats` as JSON
+- `simulate_with_histories(config_json)` — batch simulation, returns `{ stats, histories }` as JSON
+- `simulate_one(config_json)` — single game, returns `GameStats` as JSON (used by Web Worker for incremental progress)
+- `simulate_one_with_history(config_json)` — single game, returns `{ stats, history }` as JSON
+- `get_available_strategies()` — returns strategy name list as JSON
+- `get_available_rules()` — returns rule set name list as JSON
+
+Batch config: `{ num_games, seed, strategies: string[], rules?: string }`. Single game config: `{ seed, strategies: string[], rules?: string }`. Strategy/rule names are mapped to concrete types via match statements in `lib.rs`. All serialization uses `serde_json` (string-based JSON, not `serde-wasm-bindgen`).
+
+The WASM module is built to `frontend/pkg/` via `wasm-pack build --target web --out-dir ../frontend/pkg`. The `pkg/` directory is gitignored in `frontend/.gitignore`.
 
 ### Frontend (`frontend`)
 
-- Consumes WASM module for running simulations and retrieving results
-- **Stats dashboard**: Aggregate visualizations (win rates by strategy, score distributions, game length histograms)
-- **Game replay**: Step through a specific `GameHistory` turn-by-turn, visualizing the board state, draws, discards, and column clears
-- **Configuration UI**: Select number of players (2–8), strategies per player, rule variants, number of games to simulate
+- Vanilla TypeScript + HTML + CSS (no framework), bundled with Vite
+- **Async simulation via Web Worker**: Simulations run in a dedicated Web Worker (`src/worker.ts`) to avoid blocking the main thread. The worker loads WASM independently, runs games one at a time via `simulate_one()`, accumulates stats incrementally, and posts progress updates to the main thread every ~50ms.
+- **Live progress**: Progress bar, elapsed time, ETA, games/sec, and live-updating stats table that updates as games complete.
+- **Pause/Resume/Stop**: Worker supports pause/resume/stop messages. Main thread controls via buttons.
+- **Configuration UI**: Number of players (2–8), strategy per player, rule variant, game count, seed
+- **Stats table**: Per-player win rates, average/min/max scores, average rounds/turns per game — all live-updating during simulation
+- **Game replay**: Step through `GameHistory` turn-by-turn. Board state is reconstructed in TypeScript from the history (deal → flips → turns → end-of-round). Column-major board layout (index = col * numRows + row).
+- **Real-time visualization**: Placeholder section for future live game view during simulation.
+- Key files: `index.html`, `src/main.ts` (WASM init, form, worker management), `src/worker.ts` (WASM simulation loop, incremental stats), `src/replay.ts` (board reconstruction, rendering), `src/types.ts` (TypeScript interfaces + worker message types)
 
 ## Build Commands
 
@@ -61,18 +76,21 @@ cd skyjo-core && cargo build
 cd skyjo-core && cargo test
 cd skyjo-core && cargo test <test_name>    # single test
 
-# Build WASM
-cd skyjo-wasm && wasm-pack build --target web
+# Build WASM (outputs to frontend/pkg/)
+cd skyjo-wasm && wasm-pack build --target web --out-dir ../frontend/pkg
 
 # Frontend dev
 cd frontend && npm install
-cd frontend && npm run dev                  # dev server
+cd frontend && npm run dev                  # dev server (Vite)
 cd frontend && npm run build                # production build
+
+# Full rebuild (WASM + frontend)
+cd skyjo-wasm && wasm-pack build --target web --out-dir ../frontend/pkg && cd ../frontend && npm run build
 
 # Lint
 cd skyjo-core && cargo clippy -- -D warnings
 cd skyjo-wasm && cargo clippy -- -D warnings
-cd frontend && npm run lint
+cd frontend && npm run lint                 # tsc --noEmit
 ```
 
 ## Key Design Principles
