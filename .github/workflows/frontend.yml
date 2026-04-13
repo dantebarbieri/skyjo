@@ -41,6 +41,8 @@ jobs:
           restore-keys: cargo-wasm-
       - name: Install wasm-pack
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - name: Verify lockfile
+        run: cargo check --locked --manifest-path skyjo-wasm/Cargo.toml
       - name: Build WASM
         run: cd skyjo-wasm && wasm-pack build --target web --out-dir ../frontend/pkg
 
@@ -57,5 +59,7 @@ jobs:
         run: cd frontend && pnpm install --frozen-lockfile
       - name: Type check
         run: cd frontend && pnpm lint
+      - name: Test
+        run: cd frontend && pnpm test
       - name: Build
         run: cd frontend && pnpm build

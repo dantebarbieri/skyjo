@@ -50,7 +50,7 @@ jobs:
             target
           key: cargo-clippy-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: cargo-clippy-
-      - run: cargo clippy --workspace -- -D warnings
+      - run: cargo clippy --workspace --locked -- -D warnings
 
   test:
     name: Tests
@@ -66,4 +66,4 @@ jobs:
             target
           key: cargo-test-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: cargo-test-
-      - run: cargo test --manifest-path skyjo-core/Cargo.toml
+      - run: cargo test --locked --manifest-path skyjo-core/Cargo.toml
