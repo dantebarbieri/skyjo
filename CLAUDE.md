@@ -58,15 +58,19 @@ The WASM module is built to `frontend/pkg/` via `wasm-pack build --target web --
 
 ### Frontend (`frontend`)
 
-- Vanilla TypeScript + HTML + CSS (no framework), bundled with Vite
+- **React + TypeScript + Tailwind CSS + shadcn/ui**, bundled with Vite
+- **Component architecture**: React components in `src/components/`, custom hooks in `src/hooks/`, pure logic in `src/lib/`
 - **Async simulation via Web Worker**: Simulations run in a dedicated Web Worker (`src/worker.ts`) to avoid blocking the main thread. The worker loads WASM independently, runs games one at a time via `simulate_one()`, accumulates stats incrementally, and posts progress updates to the main thread every ~50ms.
 - **Live progress**: Progress bar, elapsed time, ETA, games/sec, and live-updating stats table that updates as games complete.
 - **Pause/Resume/Stop**: Worker supports pause/resume/stop messages. Main thread controls via buttons.
-- **Configuration UI**: Number of players (2–8), strategy per player, rule variant, game count, seed
-- **Stats table**: Per-player win rates, average/min/max scores, average rounds/turns per game — all live-updating during simulation
+- **Configuration UI**: Number of players (2–8), strategy per player, rule variant, game count, seed — all using shadcn/ui Select/Input/Button components
+- **Stats table**: Per-player win rates, average/min/max scores, average rounds/turns per game — shadcn Table, live-updating during simulation
+- **Game list**: Paginated game histories table (shadcn Table + Pagination), with per-game scoring sheet view
+- **Scoring sheet**: Round-by-round scorepad (rows=rounds, cols=players) matching the physical Skyjo scorepad
 - **Game replay**: Step through `GameHistory` turn-by-turn. Board state is reconstructed in TypeScript from the history (deal → flips → turns → end-of-round). Column-major board layout (index = col * numRows + row).
-- **Real-time visualization**: Placeholder section for future live game view during simulation.
-- Key files: `index.html`, `src/main.ts` (WASM init, form, worker management), `src/worker.ts` (WASM simulation loop, incremental stats), `src/replay.ts` (board reconstruction, rendering), `src/types.ts` (TypeScript interfaces + worker message types)
+- **Skyjo card component**: CSS-only cards replicating real Skyjo aesthetics — correct color scheme (purple/blue/green/yellow/red), hexagonal mosaic pattern overlay, corner numbers in white circles
+- **Real-time visualization**: Live game view during simulation with speed controls
+- Key files: `src/App.tsx` (root), `src/hooks/use-simulation.ts` (worker management), `src/hooks/use-replay.ts` (replay state), `src/lib/replay-engine.ts` (board reconstruction), `src/components/skyjo-card.tsx` (card rendering), `src/types.ts` (TypeScript interfaces + worker message types), `src/worker.ts` (WASM simulation loop)
 
 ## Build Commands
 
