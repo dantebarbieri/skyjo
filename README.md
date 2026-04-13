@@ -92,4 +92,6 @@ cd frontend && pnpm lint
 
 ## License
 
+MIT — see [LICENSE](LICENSE).
+
 This project is not affiliated with Magilano GmbH.
