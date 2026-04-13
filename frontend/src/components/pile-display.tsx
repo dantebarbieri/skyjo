@@ -22,7 +22,7 @@ export default function PileDisplay({ state, showDeckTop = true }: PileDisplayPr
   }
 
   return (
-    <div className="flex gap-6 items-start justify-center">
+    <div className="flex gap-3 sm:gap-6 items-start justify-center">
       <PileCard
         value={deckValue}
         label="Deck"

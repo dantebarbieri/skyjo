@@ -74,7 +74,7 @@ export default function ReplayControls({
         >
           Previous
         </Button>
-        <span className="text-sm text-muted-foreground font-mono min-w-32 text-center">
+        <span className="text-sm text-muted-foreground font-mono min-w-24 sm:min-w-32 text-center">
           Step {currentStep + 1} / {totalSteps}
         </span>
         <Button
@@ -102,7 +102,7 @@ export default function ReplayControls({
         <div className="flex items-center gap-1.5">
           <span className="text-sm">Speed:</span>
           <Select value={String(speed)} onValueChange={(v) => onSetSpeed(parseInt(v))}>
-            <SelectTrigger className="w-24 h-8">
+            <SelectTrigger className="w-20 sm:w-24 h-8">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>

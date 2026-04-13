@@ -33,9 +33,9 @@ export default function ScoringSheet({ history, onClose }: ScoringSheetProps) {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="w-20 text-center">Round</TableHead>
+              <TableHead className="w-14 sm:w-20 text-center">Round</TableHead>
               {Array.from({ length: num_players }, (_, p) => (
-                <TableHead key={p} className="text-center min-w-24">
+                <TableHead key={p} className="text-center min-w-16 sm:min-w-24">
                   <div className="font-medium">P{p + 1}</div>
                   <div className="text-[10px] text-muted-foreground font-normal">
                     {strategy_names[p]}

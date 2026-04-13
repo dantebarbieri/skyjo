@@ -167,9 +167,9 @@ export default function ConfigPanel({
 
         <fieldset className="border rounded-lg p-3">
           <legend className="text-sm font-medium px-1">Player Strategies</legend>
-          <div className="flex items-center gap-2 mb-2">
+          <div className="flex items-center gap-2 mb-2 flex-wrap">
             <Select value={bulkStrategy} onValueChange={setBulkStrategy}>
-              <SelectTrigger className="w-48">
+              <SelectTrigger className="w-36 sm:w-48">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -189,7 +189,7 @@ export default function ConfigPanel({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             {playerStrategies.map((strat, i) => (
               <div key={i} className="flex items-center gap-2">
-                <label className="text-sm text-muted-foreground w-20 shrink-0">
+                <label className="text-sm text-muted-foreground w-16 sm:w-20 shrink-0">
                   Player {i + 1}:
                 </label>
                 <Select value={strat} onValueChange={(v) => updateStrategy(i, v)}>

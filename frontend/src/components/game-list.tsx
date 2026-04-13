@@ -115,7 +115,7 @@ export default function GameList({ histories, onView, selectedIndex }: GameListP
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
           <CardTitle>Game Histories</CardTitle>
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <span>{histories.length} games</span>
@@ -136,10 +136,10 @@ export default function GameList({ histories, onView, selectedIndex }: GameListP
             placeholder="Search seed..."
             value={seedFilter}
             onChange={(e) => { setSeedFilter(e.target.value); setPage(0); }}
-            className="w-32 h-8 text-sm"
+            className="w-24 sm:w-32 h-8 text-sm"
           />
           <Select value={winnerFilter} onValueChange={(v) => { setWinnerFilter(v); setPage(0); }}>
-            <SelectTrigger className="w-32 h-8">
+            <SelectTrigger className="w-24 sm:w-32 h-8">
               <SelectValue placeholder="Winner" />
             </SelectTrigger>
             <SelectContent>
@@ -161,12 +161,12 @@ export default function GameList({ histories, onView, selectedIndex }: GameListP
           <TableHeader>
             <TableRow>
               <TableHead className="w-12 cursor-pointer select-none" onClick={() => toggleSort('index')}>#{sortIndicator('index')}</TableHead>
-              <TableHead>Seed</TableHead>
+              <TableHead className="hidden sm:table-cell">Seed</TableHead>
               <TableHead className="text-right cursor-pointer select-none" onClick={() => toggleSort('rounds')}>Rounds{sortIndicator('rounds')}</TableHead>
               <TableHead className="text-right cursor-pointer select-none" onClick={() => toggleSort('turns')}>Turns{sortIndicator('turns')}</TableHead>
-              <TableHead className="text-right cursor-pointer select-none" onClick={() => toggleSort('clears')}>Col Clears{sortIndicator('clears')}</TableHead>
+              <TableHead className="text-right cursor-pointer select-none hidden md:table-cell" onClick={() => toggleSort('clears')}>Col Clears{sortIndicator('clears')}</TableHead>
               <TableHead>Winner</TableHead>
-              <TableHead className="cursor-pointer select-none" onClick={() => toggleSort('score')}>Scores{sortIndicator('score')}</TableHead>
+              <TableHead className="cursor-pointer select-none hidden md:table-cell" onClick={() => toggleSort('score')}>Scores{sortIndicator('score')}</TableHead>
               <TableHead className="w-20"></TableHead>
             </TableRow>
           </TableHeader>
@@ -190,7 +190,7 @@ export default function GameList({ histories, onView, selectedIndex }: GameListP
                   className={selectedIndex === originalIndex ? 'bg-accent' : ''}
                 >
                   <TableCell className="font-mono text-sm">{originalIndex + 1}</TableCell>
-                  <TableCell className="font-mono text-sm">{h.seed}</TableCell>
+                  <TableCell className="font-mono text-sm hidden sm:table-cell">{h.seed}</TableCell>
                   <TableCell className="text-right">{h.rounds.length}</TableCell>
                   <TableCell className="text-right">
                     {totalTurns}
@@ -198,9 +198,9 @@ export default function GameList({ histories, onView, selectedIndex }: GameListP
                       <Badge variant="destructive" className="ml-1 text-[10px] px-1 py-0">!</Badge>
                     )}
                   </TableCell>
-                  <TableCell className="text-right">{totalClears}</TableCell>
+                  <TableCell className="text-right hidden md:table-cell">{totalClears}</TableCell>
                   <TableCell>{winnerStr}</TableCell>
-                  <TableCell>
+                  <TableCell className="hidden md:table-cell">
                     {h.final_scores.map((s, p) => {
                       const isGoingOut = isSingleRound && h.rounds[0].going_out_player === p;
                       return (

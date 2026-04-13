@@ -43,14 +43,14 @@ export default function StatsTable({ stats, strategyNames, gamesCompleted, onExp
               <TableHead className="text-right">Wins</TableHead>
               <TableHead className="text-right">Win Rate</TableHead>
               <TableHead className="text-right">Avg Score</TableHead>
-              <TableHead className="text-right">Min Score</TableHead>
-              <TableHead className="text-right">Max Score</TableHead>
+              <TableHead className="text-right hidden sm:table-cell">Min Score</TableHead>
+              <TableHead className="text-right hidden sm:table-cell">Max Score</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {Array.from({ length: stats.num_players }, (_, p) => (
               <TableRow key={p}>
-                <TableCell className="font-medium">
+                <TableCell className="font-medium max-w-[8rem] sm:max-w-none truncate">
                   Player {p + 1} ({strategyNames[p] ?? ''})
                 </TableCell>
                 <TableCell className="text-right">{stats.wins_per_player[p]}</TableCell>
@@ -60,8 +60,8 @@ export default function StatsTable({ stats, strategyNames, gamesCompleted, onExp
                 <TableCell className="text-right">
                   {stats.avg_score_per_player[p].toFixed(1)}
                 </TableCell>
-                <TableCell className="text-right">{stats.min_score_per_player[p]}</TableCell>
-                <TableCell className="text-right">{stats.max_score_per_player[p]}</TableCell>
+                <TableCell className="text-right hidden sm:table-cell">{stats.min_score_per_player[p]}</TableCell>
+                <TableCell className="text-right hidden sm:table-cell">{stats.max_score_per_player[p]}</TableCell>
               </TableRow>
             ))}
           </TableBody>
