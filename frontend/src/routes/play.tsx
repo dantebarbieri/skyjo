@@ -2,6 +2,7 @@ import { useState, useCallback, useRef } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { useDocumentTitle } from '@/hooks/use-document-title';
 import {
   Select,
   SelectContent,
@@ -877,6 +878,7 @@ function loadBotSpeed(): BotSpeed {
 }
 
 export default function PlayRoute() {
+  useDocumentTitle('Play');
   const wasm = useWasmContext();
   const game = useInteractiveGame();
   const [botSpeed, setBotSpeed] = useState<BotSpeed>(loadBotSpeed);

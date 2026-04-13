@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import SkyjoCard from '@/components/skyjo-card';
 import ScoringSheet from '@/components/scoring-sheet';
 import { cn } from '@/lib/utils';
+import { useDocumentTitle } from '@/hooks/use-document-title';
 import type { Slot, GameHistory } from '@/types';
 
 // --- Table of Contents ---
@@ -732,6 +733,7 @@ function ScoringSection() {
 // --- Main Rules Route ---
 
 export default function RulesRoute() {
+  useDocumentTitle('Rules');
   return (
     <>
       <h1 className="text-3xl font-bold mb-6">How to Play Skyjo</h1>

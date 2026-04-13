@@ -3,6 +3,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { useWasmContext } from '@/contexts/wasm-context';
 import { useSimulation } from '@/hooks/use-simulation';
 import { useCache } from '@/hooks/use-cache';
+import { useDocumentTitle } from '@/hooks/use-document-title';
 import ConfigPanel from '@/components/config-panel';
 import ProgressSection from '@/components/progress-section';
 import StatsTable from '@/components/stats-table';
@@ -14,6 +15,7 @@ import ScoringSheet from '@/components/scoring-sheet';
 import type { GameHistory, SimConfig, ProgressStats } from '@/types';
 
 export default function SimulatorRoute() {
+  useDocumentTitle('Simulator');
   const wasm = useWasmContext();
   const sim = useSimulation();
   const cache = useCache();
