@@ -60,6 +60,30 @@
     </div>
   </section>
 
+  <section id="cache-section">
+    <h2>Cached Simulations <span id="cache-size-badge"></span></h2>
+    <div class="button-row">
+      <button type="button" id="btn-cache-clear">Clear Cache</button>
+      <button type="button" id="btn-cache-import">Import</button>
+      <input type="file" id="cache-import-file" accept=".json" hidden />
+    </div>
+    <table id="cache-table" hidden>
+      <thead>
+        <tr>
+          <th>Strategies</th>
+          <th>Rules</th>
+          <th>Games</th>
+          <th>Seed</th>
+          <th>Histories</th>
+          <th>Saved</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="cache-table-body"></tbody>
+    </table>
+    <p id="cache-empty-msg">No cached simulations</p>
+  </section>
+
   <div id="error-display" hidden></div>
 
   <section id="progress-section">
@@ -90,7 +114,7 @@
   </section>
 
   <section id="stats-section">
-    <h2>Results</h2>
+    <h2>Results <button type="button" id="btn-export-result" hidden>Export Result</button></h2>
     <p>
       Games: <span id="stat-num-games"></span> |
       Avg rounds/game: <span id="stat-avg-rounds"></span> |

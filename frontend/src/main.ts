@@ -6,6 +6,17 @@ import init, {
 import type { GameHistory, ProgressStats, SimConfig, WorkerResponse } from './types';
 import { buildAllSteps, renderReplayStep, type ReplayStep } from './replay';
 import { RealtimePlayer, type Speed } from './realtime';
+import {
+  getCacheEntry,
+  getCacheHistories,
+  saveCacheEntry,
+  listCacheEntries,
+  deleteCacheEntry,
+  clearCache,
+  exportCacheEntry,
+  importCacheEntry,
+  getCacheSizeEstimate,
+} from './cache';
 
 let strategies: string[] = [];
 let rules: string[] = [];
@@ -14,6 +25,15 @@ let simRunning = false;
 let simPaused = false;
 let currentHistories: GameHistory[] = [];
 let realtimePlayer: RealtimePlayer | null = null;
+
+// Current in-memory result for export (survives even when too large for cache)
+let currentResult: {
+  config: SimConfig;
+  stats: ProgressStats;
+  gamesCompleted: number;
+  totalGames: number;
+  elapsedMs: number;
+} | null = null;
 
 const $ = (sel: string) => document.querySelector(sel)!;
 
@@ -59,6 +79,9 @@ function setupForm() {
   $('#btn-simulate-histories').addEventListener('click', () => startSimulation(true));
   $('#btn-pause').addEventListener('click', togglePause);
   $('#btn-stop').addEventListener('click', stopSimulation);
+
+  // Wire cache management panel
+  setupCachePanel();
 
   // Wire speed buttons (once)
   const speedBtns = document.querySelectorAll('.speed-btn');
@@ -205,6 +228,34 @@ function startSimulation(withHistories: boolean) {
   errorDiv.textContent = '';
   errorDiv.hidden = true;
 
+  // Cache check
+  const cached = getCacheEntry(config);
+  if (cached) {
+    const cachedHistories = withHistories ? getCacheHistories(config) : null;
+    if (!withHistories || cachedHistories) {
+      // Full cache hit
+      currentHistories = cachedHistories ?? [];
+      currentResult = {
+        config, stats: cached.stats,
+        gamesCompleted: cached.gamesCompleted, totalGames: cached.totalGames,
+        elapsedMs: cached.elapsedMs,
+      };
+      ($('#game-list-section') as HTMLElement).hidden = !cachedHistories;
+      ($('#replay-section') as HTMLElement).hidden = true;
+      ($('#progress-details') as HTMLElement).hidden = false;
+      renderStats(cached.stats);
+      updateProgress(cached.gamesCompleted, cached.totalGames, cached.elapsedMs);
+      if (cachedHistories) renderGameList(cachedHistories);
+      updateExportButton();
+
+      const statusEl = $('#sim-status') as HTMLElement;
+      statusEl.textContent = 'Cached';
+      statusEl.className = 'status-cached';
+      return;
+    }
+    // Need histories but cache only has stats — fall through to run simulation
+  }
+
   // Reset UI
   currentHistories = [];
   ($('#game-list-section') as HTMLElement).hidden = true;
@@ -257,6 +308,22 @@ function startSimulation(withHistories: boolean) {
         if (msg.histories) {
           currentHistories = msg.histories;
           renderGameList(msg.histories);
+        }
+        // Track current result in memory for export
+        currentResult = {
+          config, stats: msg.stats,
+          gamesCompleted: msg.gamesCompleted, totalGames: msg.totalGames,
+          elapsedMs: msg.elapsedMs,
+        };
+        updateExportButton();
+        // Auto-save complete runs to cache
+        if (msg.gamesCompleted === msg.totalGames) {
+          saveCacheEntry(config, msg.stats, {
+            elapsedMs: msg.elapsedMs,
+            gamesCompleted: msg.gamesCompleted,
+            totalGames: msg.totalGames,
+          }, msg.histories);
+          renderCachePanel();
         }
         setSimState(false, false);
         cleanupWorker();
@@ -633,6 +700,235 @@ function renderRoundsNav(
     }
     container.appendChild(btn);
   }
+}
+
+// Cache management UI
+
+function renderCachePanel() {
+  const entries = listCacheEntries();
+  const table = $('#cache-table') as HTMLTableElement;
+  const tbody = $('#cache-table-body') as HTMLTableSectionElement;
+  const emptyMsg = $('#cache-empty-msg') as HTMLElement;
+  const badge = $('#cache-size-badge') as HTMLElement;
+
+  const size = getCacheSizeEstimate();
+  if (size.entries > 0) {
+    const kb = (size.used / 1024).toFixed(1);
+    badge.textContent = `${size.entries} entries, ${kb} KB`;
+  } else {
+    badge.textContent = '';
+  }
+
+  if (entries.length === 0) {
+    table.hidden = true;
+    emptyMsg.hidden = false;
+    return;
+  }
+
+  table.hidden = false;
+  emptyMsg.hidden = true;
+  tbody.innerHTML = '';
+
+  for (const entry of entries) {
+    const tr = document.createElement('tr');
+    const strats = entry.config.strategies.map((s, i) => `P${i + 1}:${s}`).join(', ');
+    const saved = new Date(entry.savedAt);
+    const timeStr = saved.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+    tr.innerHTML = `
+      <td>${strats}</td>
+      <td>${entry.config.rules}</td>
+      <td>${entry.totalGames}</td>
+      <td>${entry.config.seed}</td>
+      <td>${entry.hasHistories ? 'Yes' : 'No'}</td>
+      <td>${timeStr}</td>
+      <td></td>
+    `;
+
+    const actionsCell = tr.querySelector('td:last-child')!;
+
+    const loadBtn = document.createElement('button');
+    loadBtn.className = 'cache-action-btn';
+    loadBtn.textContent = 'Load';
+    loadBtn.addEventListener('click', () => loadCacheEntry(entry));
+
+    const exportBtn = document.createElement('button');
+    exportBtn.className = 'cache-action-btn';
+    exportBtn.textContent = 'Export';
+    exportBtn.addEventListener('click', () => downloadCacheEntry(entry.key, entry.config));
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'cache-action-btn delete';
+    deleteBtn.textContent = 'Delete';
+    deleteBtn.addEventListener('click', () => {
+      deleteCacheEntry(entry.key);
+      renderCachePanel();
+    });
+
+    actionsCell.appendChild(loadBtn);
+    actionsCell.appendChild(exportBtn);
+    actionsCell.appendChild(deleteBtn);
+
+    tbody.appendChild(tr);
+  }
+}
+
+function loadCacheEntry(entry: ReturnType<typeof listCacheEntries>[number]) {
+  restoreConfigForm(entry.config);
+
+  currentResult = {
+    config: entry.config, stats: entry.stats,
+    gamesCompleted: entry.gamesCompleted, totalGames: entry.totalGames,
+    elapsedMs: entry.elapsedMs,
+  };
+
+  renderStats(entry.stats);
+  updateProgress(entry.gamesCompleted, entry.totalGames, entry.elapsedMs);
+  ($('#progress-details') as HTMLElement).hidden = false;
+
+  const statusEl = $('#sim-status') as HTMLElement;
+  statusEl.textContent = 'Cached';
+  statusEl.className = 'status-cached';
+
+  if (entry.hasHistories) {
+    const histories = getCacheHistories(entry.config);
+    if (histories) {
+      currentHistories = histories;
+      renderGameList(histories);
+      ($('#game-list-section') as HTMLElement).hidden = false;
+    }
+  } else {
+    currentHistories = [];
+    ($('#game-list-section') as HTMLElement).hidden = true;
+  }
+  ($('#replay-section') as HTMLElement).hidden = true;
+  updateExportButton();
+}
+
+function restoreConfigForm(config: SimConfig) {
+  (document.getElementById('num-games') as HTMLInputElement).value = String(config.num_games);
+  (document.getElementById('seed') as HTMLInputElement).value = String(config.seed);
+  (document.getElementById('max-turns') as HTMLInputElement).value = String(config.maxTurnsPerRound);
+  (document.getElementById('rules-select') as HTMLSelectElement).value = config.rules;
+  updateRulesInfo(config.rules);
+
+  const playerCount = config.strategies.length;
+  ($('#player-count') as HTMLSelectElement).value = String(playerCount);
+  updateStrategySelects(playerCount);
+
+  for (let i = 0; i < config.strategies.length; i++) {
+    const select = document.getElementById(`strategy-${i}`) as HTMLSelectElement | null;
+    if (select) select.value = config.strategies[i];
+  }
+}
+
+function updateExportButton() {
+  ($('#btn-export-result') as HTMLButtonElement).hidden = !currentResult;
+}
+
+function exportCurrentResult() {
+  if (!currentResult) return;
+  const exportObj: import('./types').CacheExportFile = {
+    format: 'skyjo-sim-cache',
+    version: 1,
+    config: currentResult.config,
+    stats: currentResult.stats,
+    gamesCompleted: currentResult.gamesCompleted,
+    totalGames: currentResult.totalGames,
+    elapsedMs: currentResult.elapsedMs,
+    histories: currentHistories.length > 0 ? currentHistories : null,
+    exportedAt: Date.now(),
+  };
+  const json = JSON.stringify(exportObj);
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const c = currentResult.config;
+  a.download = `skyjo-sim-${c.seed}-${c.num_games}g.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function downloadCacheEntry(key: string, config: SimConfig) {
+  const json = exportCacheEntry(key);
+  if (!json) return;
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `skyjo-sim-${config.seed}-${config.num_games}g.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function handleCacheImport(file: File) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    const json = reader.result as string;
+    let parsed: import('./types').CacheExportFile;
+    try {
+      parsed = JSON.parse(json);
+    } catch {
+      showError('Invalid JSON file');
+      return;
+    }
+    if (parsed.format !== 'skyjo-sim-cache' || parsed.version !== 1 || !parsed.config || !parsed.stats) {
+      showError('Invalid cache file format');
+      return;
+    }
+
+    // Always try to save to cache (best-effort)
+    importCacheEntry(json);
+    renderCachePanel();
+
+    // Load directly into the UI from the file data (bypasses cache size limits)
+    restoreConfigForm(parsed.config);
+    currentResult = {
+      config: parsed.config, stats: parsed.stats,
+      gamesCompleted: parsed.gamesCompleted, totalGames: parsed.totalGames,
+      elapsedMs: parsed.elapsedMs,
+    };
+    currentHistories = parsed.histories ?? [];
+
+    renderStats(parsed.stats);
+    updateProgress(parsed.gamesCompleted, parsed.totalGames, parsed.elapsedMs);
+    ($('#progress-details') as HTMLElement).hidden = false;
+
+    const statusEl = $('#sim-status') as HTMLElement;
+    statusEl.textContent = 'Imported';
+    statusEl.className = 'status-cached';
+
+    if (currentHistories.length > 0) {
+      renderGameList(currentHistories);
+      ($('#game-list-section') as HTMLElement).hidden = false;
+    } else {
+      ($('#game-list-section') as HTMLElement).hidden = true;
+    }
+    ($('#replay-section') as HTMLElement).hidden = true;
+    updateExportButton();
+  };
+  reader.readAsText(file);
+}
+
+function setupCachePanel() {
+  $('#btn-cache-clear').addEventListener('click', () => {
+    clearCache();
+    renderCachePanel();
+  });
+
+  const fileInput = $('#cache-import-file') as HTMLInputElement;
+  $('#btn-cache-import').addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files && fileInput.files[0]) {
+      handleCacheImport(fileInput.files[0]);
+      fileInput.value = '';
+    }
+  });
+
+  $('#btn-export-result').addEventListener('click', exportCurrentResult);
+
+  renderCachePanel();
 }
 
 main().catch((e) => {

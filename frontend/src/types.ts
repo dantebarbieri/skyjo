@@ -88,6 +88,32 @@ export interface SimWithHistories {
   histories: GameHistory[];
 }
 
+// Cache types
+
+export interface CacheEntry {
+  version: 1;
+  key: string;
+  config: SimConfig;
+  stats: ProgressStats;
+  gamesCompleted: number;
+  totalGames: number;
+  elapsedMs: number;
+  hasHistories: boolean;
+  savedAt: number;
+}
+
+export interface CacheExportFile {
+  format: 'skyjo-sim-cache';
+  version: 1;
+  config: SimConfig;
+  stats: ProgressStats;
+  gamesCompleted: number;
+  totalGames: number;
+  elapsedMs: number;
+  histories: GameHistory[] | null;
+  exportedAt: number;
+}
+
 // Worker message types
 
 export interface SimConfig {
