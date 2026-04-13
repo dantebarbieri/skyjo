@@ -10,6 +10,7 @@ pub enum SkyjoError {
     EmptyDeck,
     EmptyDiscardPile,
     GameAlreadyOver,
+    InvalidAction(String),
 }
 
 impl fmt::Display for SkyjoError {
@@ -25,6 +26,7 @@ impl fmt::Display for SkyjoError {
             Self::EmptyDeck => write!(f, "deck is empty and cannot be reshuffled"),
             Self::EmptyDiscardPile => write!(f, "discard pile is empty"),
             Self::GameAlreadyOver => write!(f, "game is already over"),
+            Self::InvalidAction(msg) => write!(f, "invalid action: {msg}"),
         }
     }
 }

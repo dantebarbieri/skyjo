@@ -4,6 +4,8 @@ import type {
   ActionNeeded,
   PlayerAction,
   PlayConfig,
+  PlayerType,
+  BotActionResponse,
 } from '@/types';
 
 export type PlayPhase =
@@ -37,9 +39,12 @@ interface UseInteractiveGame {
   showStartingPlayer: boolean;
   startingPlayerIndex: number;
   hasSavedGame: boolean;
+  playerTypes: PlayerType[];
+  gameId: number | null;
 
   createGame: (config: PlayConfig) => void;
   applyAction: (action: PlayerAction) => void;
+  applyBotTurn: (strategyName: string) => void;
   continueToNextRound: () => void;
   resetGame: () => void;
   dismissStartingPlayer: () => void;
@@ -157,6 +162,7 @@ export function useInteractiveGame(): UseInteractiveGame {
   const [showStartingPlayer, setShowStartingPlayer] = useState(false);
   const [startingPlayerIndex, setStartingPlayerIndex] = useState(0);
   const [hasSavedGame, setHasSavedGame] = useState(() => loadSavedGame() !== null);
+  const [playerTypes, setPlayerTypes] = useState<PlayerType[]>([]);
   const gameIdRef = useRef<number | null>(null);
   const configRef = useRef<PlayConfig | null>(null);
   const actionsRef = useRef<PlayerAction[]>([]);
@@ -207,6 +213,7 @@ export function useInteractiveGame(): UseInteractiveGame {
       gameIdRef.current = result.game_id;
       configRef.current = config;
       actionsRef.current = [];
+      setPlayerTypes(config.player_types);
       setGameState(result.state);
       setRoundHistory([]);
       setShowStartingPlayer(false);
@@ -282,6 +289,65 @@ export function useInteractiveGame(): UseInteractiveGame {
     }
   }, [gameState, autoSave]);
 
+  const applyBotTurn = useCallback((strategyName: string) => {
+    if (gameIdRef.current === null || !wasmMod) return;
+
+    try {
+      setError(null);
+      const resultJson = wasmMod.apply_bot_action(gameIdRef.current, strategyName);
+      const result = JSON.parse(resultJson);
+      if (result.error) {
+        setError(result.error);
+        return;
+      }
+
+      const botAction: PlayerAction = result.action;
+      const newState: InteractiveGameState = result.state;
+      const newPhase = derivePhase(newState);
+
+      // Track the bot's action for persistence (same as human actions)
+      actionsRef.current = [...actionsRef.current, botAction];
+
+      // Detect transition from initial_flips → playing (starting player popup)
+      if (
+        gameState &&
+        gameState.action_needed.type === 'ChooseInitialFlips' &&
+        newPhase === 'playing'
+      ) {
+        setStartingPlayerIndex(newState.current_player);
+        setShowStartingPlayer(true);
+      }
+
+      // Capture round data when round ends
+      if (newPhase === 'round_over' && newState.action_needed.type === 'RoundOver') {
+        const a = newState.action_needed;
+        setRoundHistory(prev => [...prev, {
+          roundNumber: a.round_number,
+          roundScores: a.round_scores,
+          cumulativeScores: a.cumulative_scores,
+          goingOutPlayer: a.going_out_player,
+        }]);
+      }
+
+      // Capture final round data when game ends
+      if (newPhase === 'game_over' && newState.action_needed.type === 'GameOver') {
+        const a = newState.action_needed;
+        setRoundHistory(prev => [...prev, {
+          roundNumber: a.round_number,
+          roundScores: a.round_scores,
+          cumulativeScores: a.final_scores,
+          goingOutPlayer: a.going_out_player,
+        }]);
+      }
+
+      setGameState(newState);
+      setPhase(newPhase);
+      autoSave();
+    } catch (e) {
+      setError(String(e));
+    }
+  }, [gameState, autoSave]);
+
   const continueToNextRound = useCallback(() => {
     if (gameIdRef.current === null || !wasmMod) return;
 
@@ -330,6 +396,11 @@ export function useInteractiveGame(): UseInteractiveGame {
       gameIdRef.current = result.gameId;
       configRef.current = saveData.config;
       actionsRef.current = [...saveData.actions];
+      // Backwards compat: old saves don't have player_types
+      setPlayerTypes(
+        saveData.config.player_types ||
+        Array(saveData.config.num_players).fill('Human' as PlayerType)
+      );
       setGameState(result.state);
       setRoundHistory(result.roundHistory);
       setShowStartingPlayer(false);
@@ -382,6 +453,7 @@ export function useInteractiveGame(): UseInteractiveGame {
     }
     configRef.current = null;
     actionsRef.current = [];
+    setPlayerTypes([]);
     setGameState(null);
     setPhase('setup');
     setError(null);
@@ -400,8 +472,11 @@ export function useInteractiveGame(): UseInteractiveGame {
     showStartingPlayer,
     startingPlayerIndex,
     hasSavedGame,
+    playerTypes,
+    gameId: gameIdRef.current,
     createGame,
     applyAction,
+    applyBotTurn,
     continueToNextRound,
     resetGame,
     dismissStartingPlayer,

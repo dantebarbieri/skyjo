@@ -8,6 +8,7 @@ use crate::card::{CardValue, Slot, VisibleSlot};
 use crate::error::{Result, SkyjoError};
 use crate::history::ColumnClearEvent;
 use crate::rules::Rules;
+use crate::strategy::{DeckDrawAction, DrawChoice, Strategy, StrategyView};
 
 /// What the game needs from the current player.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -593,6 +594,74 @@ impl InteractiveGame {
             last_column_clears: self.last_column_clears.clone(),
         }
     }
+
+    /// Compute the action a bot strategy would take in the current game state.
+    /// Uses the game's RNG for deterministic bot behavior.
+    pub fn get_bot_action(&mut self, strategy: &dyn Strategy) -> Result<PlayerAction> {
+        match &self.phase {
+            Phase::SetupFlips { next_player, flips_remaining } => {
+                let player = *next_player;
+                let remaining = *flips_remaining;
+                let view = self.build_strategy_view(player);
+                let positions = strategy.choose_initial_flips(&view, remaining, &mut self.rng);
+                if positions.is_empty() {
+                    return Err(SkyjoError::InvalidAction("Strategy returned no flip positions".into()));
+                }
+                Ok(PlayerAction::InitialFlip { position: positions[0] })
+            }
+            Phase::WaitingForDraw => {
+                let view = self.build_strategy_view(self.current_player);
+                let choice = strategy.choose_draw(&view, &mut self.rng);
+                match choice {
+                    DrawChoice::DrawFromDeck => Ok(PlayerAction::DrawFromDeck),
+                    DrawChoice::DrawFromDiscard(pile_index) => Ok(PlayerAction::DrawFromDiscard { pile_index }),
+                }
+            }
+            Phase::WaitingForDeckDrawAction { drawn_card } => {
+                let drawn_card = *drawn_card;
+                let view = self.build_strategy_view(self.current_player);
+                let action = strategy.choose_deck_draw_action(&view, drawn_card, &mut self.rng);
+                match action {
+                    DeckDrawAction::Keep(position) => Ok(PlayerAction::KeepDeckDraw { position }),
+                    DeckDrawAction::DiscardAndFlip(position) => Ok(PlayerAction::DiscardAndFlip { position }),
+                }
+            }
+            Phase::WaitingForDiscardPlacement { drawn_card, .. } => {
+                let drawn_card = *drawn_card;
+                let view = self.build_strategy_view(self.current_player);
+                let position = strategy.choose_discard_draw_placement(&view, drawn_card, &mut self.rng);
+                Ok(PlayerAction::PlaceDiscardDraw { position })
+            }
+            Phase::RoundOver => Ok(PlayerAction::ContinueToNextRound),
+            Phase::GameOver => Err(SkyjoError::InvalidAction("Game is over, no action needed".into())),
+        }
+    }
+
+    /// Build a StrategyView for the given player from the current game state.
+    /// All boards are shown as visible slots (hidden cards have no value revealed).
+    fn build_strategy_view(&self, player: usize) -> StrategyView {
+        let my_board = self.boards[player].visible_view();
+        let mut opponent_boards = Vec::with_capacity(self.num_players - 1);
+        let mut opponent_indices = Vec::with_capacity(self.num_players - 1);
+        for i in 0..self.num_players {
+            if i != player {
+                opponent_boards.push(self.boards[i].visible_view());
+                opponent_indices.push(i);
+            }
+        }
+        StrategyView {
+            my_index: player,
+            my_board,
+            num_rows: self.rules.num_rows(),
+            num_cols: self.rules.num_cols(),
+            opponent_boards,
+            opponent_indices,
+            discard_piles: self.discard_piles.clone(),
+            deck_remaining: self.deck.len(),
+            cumulative_scores: self.cumulative_scores.clone(),
+            is_final_turn: self.going_out_player.is_some(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -903,5 +972,134 @@ mod tests {
             max_actions -= 1;
             assert!(max_actions > 0, "Game did not complete in time");
         }
+    }
+
+    #[test]
+    fn bot_action_random_produces_valid_actions() {
+        use crate::strategies::RandomStrategy;
+        let mut game = InteractiveGame::new(
+            Box::new(StandardRules),
+            2,
+            vec!["Bot1".to_string(), "Bot2".to_string()],
+            42,
+        )
+        .unwrap();
+
+        let strategy = RandomStrategy;
+        // Play through initial flips (2 per player = 4 actions)
+        for _ in 0..4 {
+            let action = game.get_bot_action(&strategy).unwrap();
+            assert!(matches!(action, PlayerAction::InitialFlip { .. }));
+            game.apply_action(action).unwrap();
+        }
+
+        // Should now be in playing phase
+        let action_needed = game.get_action_needed();
+        assert!(matches!(action_needed, ActionNeeded::ChooseDraw { .. }));
+
+        // Get a draw action
+        let action = game.get_bot_action(&strategy).unwrap();
+        assert!(matches!(action, PlayerAction::DrawFromDeck | PlayerAction::DrawFromDiscard { .. }));
+        game.apply_action(action).unwrap();
+    }
+
+    #[test]
+    fn bot_action_greedy_produces_valid_actions() {
+        use crate::strategies::GreedyStrategy;
+        let mut game = InteractiveGame::new(
+            Box::new(StandardRules),
+            2,
+            vec!["Bot1".to_string(), "Bot2".to_string()],
+            99,
+        )
+        .unwrap();
+
+        let strategy = GreedyStrategy;
+        // Play through initial flips
+        for _ in 0..4 {
+            let action = game.get_bot_action(&strategy).unwrap();
+            assert!(matches!(action, PlayerAction::InitialFlip { .. }));
+            game.apply_action(action).unwrap();
+        }
+
+        // Play a full turn
+        let action = game.get_bot_action(&strategy).unwrap();
+        assert!(matches!(action, PlayerAction::DrawFromDeck | PlayerAction::DrawFromDiscard { .. }));
+        game.apply_action(action).unwrap();
+
+        let action = game.get_bot_action(&strategy).unwrap();
+        assert!(matches!(
+            action,
+            PlayerAction::KeepDeckDraw { .. }
+            | PlayerAction::DiscardAndFlip { .. }
+            | PlayerAction::PlaceDiscardDraw { .. }
+        ));
+        game.apply_action(action).unwrap();
+    }
+
+    #[test]
+    fn bot_full_game_plays_to_completion() {
+        use crate::strategies::GreedyStrategy;
+        let mut game = InteractiveGame::new(
+            Box::new(StandardRules),
+            3,
+            vec!["Bot1".to_string(), "Bot2".to_string(), "Bot3".to_string()],
+            777,
+        )
+        .unwrap();
+
+        let strategy = GreedyStrategy;
+        let mut max_actions = 10_000;
+
+        loop {
+            let action_needed = game.get_action_needed();
+            if matches!(action_needed, ActionNeeded::GameOver { .. }) {
+                break;
+            }
+
+            let action = game.get_bot_action(&strategy).unwrap();
+            game.apply_action(action).unwrap();
+
+            max_actions -= 1;
+            assert!(max_actions > 0, "Bot game did not complete in time");
+        }
+
+        if let ActionNeeded::GameOver { winners, final_scores, .. } = game.get_action_needed() {
+            assert!(!winners.is_empty());
+            assert_eq!(final_scores.len(), 3);
+            assert!(final_scores.iter().any(|&s| s >= 100));
+        } else {
+            panic!("Expected GameOver");
+        }
+    }
+
+    #[test]
+    fn bot_action_returns_error_on_game_over() {
+        use crate::strategies::RandomStrategy;
+        let mut game = InteractiveGame::new(
+            Box::new(StandardRules),
+            2,
+            vec!["Bot1".to_string(), "Bot2".to_string()],
+            777,
+        )
+        .unwrap();
+
+        let strategy = RandomStrategy;
+        let mut max_actions = 10_000;
+
+        loop {
+            let action_needed = game.get_action_needed();
+            if matches!(action_needed, ActionNeeded::GameOver { .. }) {
+                break;
+            }
+            let action = game.get_bot_action(&strategy).unwrap();
+            game.apply_action(action).unwrap();
+            max_actions -= 1;
+            assert!(max_actions > 0, "Game did not complete");
+        }
+
+        // Now get_bot_action should error
+        let result = game.get_bot_action(&strategy);
+        assert!(result.is_err());
     }
 }

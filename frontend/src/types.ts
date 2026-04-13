@@ -199,6 +199,31 @@ export interface InteractiveGameState {
 export interface PlayConfig {
   num_players: number;
   player_names: string[];
+  player_types: PlayerType[];
   rules: string;
   seed: number;
+}
+
+/** Player type: "Human" or "Bot:<StrategyName>" (e.g. "Bot:Random", "Bot:Greedy") */
+export type PlayerType = 'Human' | `Bot:${string}`;
+
+export type BotSpeed = 'slow' | 'normal' | 'fast' | 'instant';
+
+export const BOT_SPEED_MS: Record<BotSpeed, number> = {
+  slow: 1500,
+  normal: 600,
+  fast: 150,
+  instant: 0,
+};
+
+export const BOT_SPEED_LABELS: Record<BotSpeed, string> = {
+  slow: 'Slow',
+  normal: 'Normal',
+  fast: 'Fast',
+  instant: 'Instant',
+};
+
+export interface BotActionResponse {
+  action: PlayerAction;
+  state: InteractiveGameState;
 }

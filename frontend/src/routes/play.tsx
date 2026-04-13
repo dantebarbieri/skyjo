@@ -27,15 +27,19 @@ import {
 import SkyjoCard from '@/components/skyjo-card';
 import { useWasmContext } from '@/contexts/wasm-context';
 import { useInteractiveGame, type RoundRecord } from '@/hooks/use-interactive-game';
+import { useBotTurns } from '@/hooks/use-bot-turns';
 import { cn } from '@/lib/utils';
 import type {
   PlayConfig,
+  PlayerType,
+  BotSpeed,
   InteractiveGameState,
   ActionNeeded,
   PlayerAction,
   VisibleSlot,
   Slot,
 } from '@/types';
+import { BOT_SPEED_LABELS } from '@/types';
 
 // --- Helpers ---
 
@@ -65,12 +69,14 @@ function computeVisibleScore(board: VisibleSlot[]): number {
 
 function GameSetup({
   rules,
+  strategies,
   onStart,
   hasSavedGame,
   onResume,
   onImport,
 }: {
   rules: string[];
+  strategies: string[];
   onStart: (config: PlayConfig) => void;
   hasSavedGame: boolean;
   onResume: () => void;
@@ -79,8 +85,18 @@ function GameSetup({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [numPlayers, setNumPlayers] = useState(2);
   const [playerNames, setPlayerNames] = useState<string[]>(['', '']);
+  const [playerTypes, setPlayerTypes] = useState<PlayerType[]>(['Human', 'Human']);
   const [selectedRules, setSelectedRules] = useState('Standard');
   const [seed, setSeed] = useState(() => Math.floor(Math.random() * 1000000));
+
+  // Build dropdown options: "Human" + "Bot - <Strategy>" for each strategy
+  const typeOptions: { value: PlayerType; label: string }[] = [
+    { value: 'Human', label: 'Human' },
+    ...strategies.map((s) => ({
+      value: `Bot:${s}` as PlayerType,
+      label: `Bot - ${s}`,
+    })),
+  ];
 
   const handleNumPlayersChange = useCallback((value: string) => {
     const n = parseInt(value);
@@ -88,6 +104,11 @@ function GameSetup({
     setPlayerNames((prev) => {
       const next = [...prev];
       while (next.length < n) next.push('');
+      return next.slice(0, n);
+    });
+    setPlayerTypes((prev) => {
+      const next = [...prev];
+      while (next.length < n) next.push('Human');
       return next.slice(0, n);
     });
   }, []);
@@ -100,15 +121,28 @@ function GameSetup({
     });
   }, []);
 
+  const handleTypeChange = useCallback((index: number, type: PlayerType) => {
+    setPlayerTypes((prev) => {
+      const next = [...prev];
+      next[index] = type;
+      return next;
+    });
+  }, []);
+
   const handleStart = useCallback(() => {
-    const names = playerNames.map((name, i) => name.trim() || `Player ${i + 1}`);
+    const names = playerNames.map((name, i) => {
+      if (name.trim()) return name.trim();
+      if (playerTypes[i] === 'Human') return `Player ${i + 1}`;
+      return `Bot (${playerTypes[i].slice(4)})`;
+    });
     onStart({
       num_players: numPlayers,
       player_names: names,
+      player_types: playerTypes.slice(0, numPlayers),
       rules: selectedRules,
       seed,
     });
-  }, [numPlayers, playerNames, selectedRules, seed, onStart]);
+  }, [numPlayers, playerNames, playerTypes, selectedRules, seed, onStart]);
 
   return (
     <Card>
@@ -150,15 +184,36 @@ function GameSetup({
         </div>
 
         <div className="space-y-2">
-          <label className="text-sm font-medium">Player Names</label>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <label className="text-sm font-medium">Players</label>
+          <div className="space-y-2">
             {Array.from({ length: numPlayers }, (_, i) => (
-              <Input
-                key={i}
-                placeholder={`Player ${i + 1}`}
-                value={playerNames[i] || ''}
-                onChange={(e) => handleNameChange(i, e.target.value)}
-              />
+              <div key={i} className="flex gap-2 items-center">
+                <span className="text-sm text-muted-foreground w-6 shrink-0">{i + 1}.</span>
+                <Select
+                  value={playerTypes[i] || 'Human'}
+                  onValueChange={(v) => handleTypeChange(i, v as PlayerType)}
+                >
+                  <SelectTrigger className="w-40 shrink-0">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {typeOptions.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Input
+                  placeholder={
+                    playerTypes[i] === 'Human'
+                      ? `Player ${i + 1}`
+                      : `Bot (${playerTypes[i]?.slice(4) || ''})`
+                  }
+                  value={playerNames[i] || ''}
+                  onChange={(e) => handleNameChange(i, e.target.value)}
+                />
+              </div>
             ))}
           </div>
         </div>
@@ -811,9 +866,39 @@ function RoundScorecard({
 
 // --- Main Play Route ---
 
+const BOT_SPEED_STORAGE_KEY = 'skyjo-bot-speed';
+
+function loadBotSpeed(): BotSpeed {
+  try {
+    const v = localStorage.getItem(BOT_SPEED_STORAGE_KEY);
+    if (v === 'slow' || v === 'normal' || v === 'fast' || v === 'instant') return v;
+  } catch { /* ignore */ }
+  return 'normal';
+}
+
 export default function PlayRoute() {
   const wasm = useWasmContext();
   const game = useInteractiveGame();
+  const [botSpeed, setBotSpeed] = useState<BotSpeed>(loadBotSpeed);
+
+  const hasBots = game.playerTypes.some((t) => t !== 'Human');
+
+  const handleBotSpeedChange = useCallback((value: string) => {
+    const speed = value as BotSpeed;
+    setBotSpeed(speed);
+    try { localStorage.setItem(BOT_SPEED_STORAGE_KEY, speed); } catch { /* ignore */ }
+  }, []);
+
+  // Auto-play bot turns
+  useBotTurns({
+    gameState: game.gameState,
+    phase: game.phase,
+    playerTypes: game.playerTypes,
+    botSpeed,
+    applyBotTurn: game.applyBotTurn,
+    continueToNextRound: game.continueToNextRound,
+    showStartingPlayer: game.showStartingPlayer,
+  });
 
   return (
     <>
@@ -828,6 +913,7 @@ export default function PlayRoute() {
       {game.phase === 'setup' && (
         <GameSetup
           rules={wasm.rules}
+          strategies={wasm.strategies}
           onStart={game.createGame}
           hasSavedGame={game.hasSavedGame}
           onResume={game.resumeGame}
@@ -839,6 +925,23 @@ export default function PlayRoute() {
         game.gameState && (
           <Card>
             <CardContent className="pt-6">
+              {hasBots && (
+                <div className="flex items-center gap-2 mb-4">
+                  <label className="text-sm font-medium">Bot Speed:</label>
+                  <Select value={botSpeed} onValueChange={handleBotSpeedChange}>
+                    <SelectTrigger className="w-32">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(Object.entries(BOT_SPEED_LABELS) as [BotSpeed, string][]).map(([key, label]) => (
+                        <SelectItem key={key} value={key}>
+                          {label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
               <PlayBoard state={game.gameState} onAction={game.applyAction} />
             </CardContent>
           </Card>

@@ -54,12 +54,16 @@ fn make_rules_factory(name: &str) -> Result<Box<dyn Fn() -> Box<dyn Rules>>, Str
 fn make_strategies(names: &[String]) -> Result<Vec<Box<dyn Strategy>>, String> {
     names
         .iter()
-        .map(|name| match name.as_str() {
-            "Random" => Ok(Box::new(RandomStrategy) as Box<dyn Strategy>),
-            "Greedy" => Ok(Box::new(GreedyStrategy) as Box<dyn Strategy>),
-            _ => Err(format!("Unknown strategy: {name}")),
-        })
+        .map(|name| make_strategy(name))
         .collect()
+}
+
+fn make_strategy(name: &str) -> Result<Box<dyn Strategy>, String> {
+    match name {
+        "Random" => Ok(Box::new(RandomStrategy)),
+        "Greedy" => Ok(Box::new(GreedyStrategy)),
+        _ => Err(format!("Unknown strategy: {name}")),
+    }
 }
 
 fn make_rules(name: &str) -> Result<Box<dyn Rules>, String> {
@@ -340,6 +344,31 @@ pub fn apply_action(game_id: u32, action_json: &str) -> String {
             game.apply_action(action).map_err(|e| format!("Action failed: {e}"))?;
             let state = game.get_full_state();
             Ok(ActionResponse { state })
+        })
+    })
+}
+
+#[derive(Serialize)]
+struct BotActionResponse {
+    action: PlayerAction,
+    state: skyjo_core::InteractiveGameState,
+}
+
+/// Compute and apply the action a bot strategy would take, returning both the action and new state.
+#[wasm_bindgen]
+pub fn apply_bot_action(game_id: u32, strategy_name: &str) -> String {
+    to_json_or_error(|| {
+        let strategy = make_strategy(strategy_name)?;
+
+        INTERACTIVE_GAMES.with(|games| {
+            let mut games = games.borrow_mut();
+            let game = games.get_mut(&game_id).ok_or("Game not found")?;
+            let action = game.get_bot_action(&*strategy)
+                .map_err(|e| format!("Bot action failed: {e}"))?;
+            game.apply_action(action.clone())
+                .map_err(|e| format!("Applying bot action failed: {e}"))?;
+            let state = game.get_full_state();
+            Ok(BotActionResponse { action, state })
         })
     })
 }
