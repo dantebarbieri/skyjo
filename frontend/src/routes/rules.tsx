@@ -417,7 +417,7 @@ function TurnFlowSection() {
             </div>
 
             {phase === 'drew_from_deck' && !flipMode && (
-              <div className="flex justify-center gap-2">
+              <div className="flex flex-col sm:flex-row justify-center items-center gap-2">
                 <Button variant="outline" size="sm" onClick={handleDiscardAndFlip}>
                   Discard & Flip Instead
                 </Button>

@@ -30,6 +30,7 @@ import { useWasmContext } from '@/contexts/wasm-context';
 import { useInteractiveGame, type RoundRecord } from '@/hooks/use-interactive-game';
 import { useBotTurns } from '@/hooks/use-bot-turns';
 import { cn } from '@/lib/utils';
+import { useResponsiveCardSize } from '@/hooks/use-responsive-card-size';
 import type {
   PlayConfig,
   PlayerType,
@@ -194,7 +195,7 @@ function GameSetup({
                   value={playerTypes[i] || 'Human'}
                   onValueChange={(v) => handleTypeChange(i, v as PlayerType)}
                 >
-                  <SelectTrigger className="w-40 shrink-0">
+                  <SelectTrigger className="w-28 sm:w-40 shrink-0">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -226,7 +227,7 @@ function GameSetup({
               type="number"
               value={seed}
               onChange={(e) => setSeed(parseInt(e.target.value) || 0)}
-              className="w-40"
+              className="w-28 sm:w-40"
             />
             <Button
               variant="outline"
@@ -292,6 +293,7 @@ function PlayBoard({
 }) {
   const { action_needed, boards, num_rows, num_cols, current_player } = state;
   const [wantsFlip, setWantsFlip] = useState(false);
+  const cardSizes = useResponsiveCardSize();
 
   // Get the player whose turn it is for initial flips
   const activePlayer = action_needed.type === 'ChooseInitialFlips'
@@ -414,7 +416,7 @@ function PlayBoard({
 
       {/* Draw area */}
       {(isChooseDraw || isDeckDrawAction || isDiscardPlacement) && (
-        <div className="flex items-center justify-center gap-8">
+        <div className="flex items-center justify-center gap-3 sm:gap-6 md:gap-8">
           {/* Deck */}
           <button
             onClick={handleDrawDeck}
@@ -433,7 +435,7 @@ function PlayBoard({
                 isChooseDraw && 'ring-2 ring-blue-400'
               )}
             >
-              <SkyjoCard slot={{ Hidden: 0 }} size="lg" />
+              <SkyjoCard slot={{ Hidden: 0 }} size={cardSizes.draw} />
             </div>
           </button>
 
@@ -468,9 +470,9 @@ function PlayBoard({
                 )}
               >
                 {top !== null ? (
-                  <SkyjoCard slot={{ Revealed: top }} size="lg" />
+                  <SkyjoCard slot={{ Revealed: top }} size={cardSizes.draw} />
                 ) : (
-                  <SkyjoCard slot="Cleared" size="lg" />
+                  <SkyjoCard slot="Cleared" size={cardSizes.draw} />
                 )}
               </div>
             </button>
@@ -490,7 +492,7 @@ function PlayBoard({
                           ? action_needed.drawn_card
                           : 0,
                   }}
-                  size="lg"
+                  size={cardSizes.draw}
                 />
               </div>
             </div>
@@ -535,10 +537,10 @@ function PlayBoard({
       )}
 
       {/* Player boards */}
-      <div className="flex flex-wrap gap-4 justify-center">
+      <div className="flex flex-wrap gap-2 sm:gap-4 justify-center">
         {boards.map((board, playerIdx) => {
           const isActive = playerIdx === activePlayer;
-          const cardSize = isActive ? 'md' : 'sm';
+          const cardSize = isActive ? cardSizes.boardActive : cardSizes.board;
 
           return (
             <div
@@ -557,7 +559,7 @@ function PlayBoard({
                 )}
               </h4>
               <div
-                className="grid gap-1"
+                className="grid gap-0.5 sm:gap-1"
                 style={{ gridTemplateColumns: `repeat(${num_cols}, 1fr)` }}
               >
                 {Array.from({ length: num_rows }, (_, r) =>
@@ -636,7 +638,7 @@ function RoundSummary({
         )}
 
         {/* All boards revealed */}
-        <div className="flex flex-wrap gap-4 justify-center">
+        <div className="flex flex-wrap gap-2 sm:gap-4 justify-center">
           {state.boards.map((board, playerIdx) => (
             <div
               key={playerIdx}
@@ -652,7 +654,7 @@ function RoundSummary({
                 )}
               </h4>
               <div
-                className="grid gap-1"
+                className="grid gap-0.5 sm:gap-1"
                 style={{ gridTemplateColumns: `repeat(${state.num_cols}, 1fr)` }}
               >
                 {Array.from({ length: state.num_rows }, (_, r) =>
@@ -796,9 +798,9 @@ function RoundScorecard({
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-20 text-center">Round</TableHead>
+                <TableHead className="w-14 sm:w-20 text-center">Round</TableHead>
                 {playerNames.map((name, i) => (
-                  <TableHead key={i} className="text-center min-w-20">
+                  <TableHead key={i} className="text-center min-w-14 sm:min-w-20">
                     {name}
                   </TableHead>
                 ))}
@@ -904,7 +906,7 @@ export default function PlayRoute() {
 
   return (
     <>
-      <h1 className="text-3xl font-bold mb-6">Play Skyjo</h1>
+      <h1 className="text-2xl sm:text-3xl font-bold mb-6">Play Skyjo</h1>
 
       {game.error && (
         <div className="rounded-lg border border-destructive bg-destructive/10 p-4 text-destructive mb-4">
@@ -931,7 +933,7 @@ export default function PlayRoute() {
                 <div className="flex items-center gap-2 mb-4">
                   <label className="text-sm font-medium">Bot Speed:</label>
                   <Select value={botSpeed} onValueChange={handleBotSpeedChange}>
-                    <SelectTrigger className="w-32">
+                    <SelectTrigger className="w-24 sm:w-32">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
