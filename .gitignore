@@ -9,5 +9,8 @@ dist/
 # WASM build output
 pkg/
 
+# Claude Code
+.claude/settings.local.json
+
 # OS
 .DS_Store
