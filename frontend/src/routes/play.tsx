@@ -25,6 +25,13 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
+import { Undo2, Trash2 } from 'lucide-react';
 import SkyjoCard from '@/components/skyjo-card';
 import { useWasmContext } from '@/contexts/wasm-context';
 import { useInteractiveGame, type RoundRecord } from '@/hooks/use-interactive-game';
@@ -76,6 +83,7 @@ function GameSetup({
   hasSavedGame,
   onResume,
   onImport,
+  lastConfig,
 }: {
   rules: string[];
   strategies: string[];
@@ -83,12 +91,29 @@ function GameSetup({
   hasSavedGame: boolean;
   onResume: () => void;
   onImport: (json: string) => void;
+  lastConfig: PlayConfig | null;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [numPlayers, setNumPlayers] = useState(2);
-  const [playerNames, setPlayerNames] = useState<string[]>(['', '']);
-  const [playerTypes, setPlayerTypes] = useState<PlayerType[]>(['Human', 'Human']);
-  const [selectedRules, setSelectedRules] = useState('Standard');
+  const [numPlayers, setNumPlayers] = useState(() => lastConfig?.num_players ?? 2);
+  const [playerNames, setPlayerNames] = useState<string[]>(() => {
+    if (!lastConfig) return ['', ''];
+    // Strip strategy suffix from bot names: "Name (Strategy)" → "Name"
+    // If the result is "Bot" (the default), use empty string so placeholder shows
+    return lastConfig.player_names.map((name, i) => {
+      if (lastConfig.player_types[i] !== 'Human') {
+        const stripped = name.replace(/\s*\([^)]*\)\s*$/, '');
+        return stripped === 'Bot' ? '' : stripped;
+      }
+      // For humans, clear default names like "Player 1" back to empty
+      return name.replace(/^Player \d+$/, '');
+    });
+  });
+  const [playerTypes, setPlayerTypes] = useState<PlayerType[]>(
+    () => lastConfig?.player_types ?? ['Human', 'Human']
+  );
+  const [selectedRules, setSelectedRules] = useState(
+    () => lastConfig?.rules ?? 'Standard'
+  );
   const [seed, setSeed] = useState(() => Math.floor(Math.random() * 1000000));
 
   // Build dropdown options: "Human" + "Bot - <Strategy>" for each strategy
@@ -133,9 +158,16 @@ function GameSetup({
 
   const handleStart = useCallback(() => {
     const names = playerNames.map((name, i) => {
-      if (name.trim()) return name.trim();
+      const strategy = playerTypes[i]?.slice(4) || '';
+      if (name.trim()) {
+        // For bots with custom names, append strategy in parentheses
+        if (playerTypes[i] !== 'Human') {
+          return `${name.trim()} (${strategy})`;
+        }
+        return name.trim();
+      }
       if (playerTypes[i] === 'Human') return `Player ${i + 1}`;
-      return `Bot (${playerTypes[i].slice(4)})`;
+      return `Bot (${strategy})`;
     });
     onStart({
       num_players: numPlayers,
@@ -287,9 +319,11 @@ function GameSetup({
 function PlayBoard({
   state,
   onAction,
+  playerTypes,
 }: {
   state: InteractiveGameState;
   onAction: (action: PlayerAction) => void;
+  playerTypes: PlayerType[];
 }) {
   const { action_needed, boards, num_rows, num_cols, current_player } = state;
   const [wantsFlip, setWantsFlip] = useState(false);
@@ -300,8 +334,12 @@ function PlayBoard({
     ? action_needed.player
     : current_player;
 
+  // Disable all UI interactions when it's a bot's turn
+  const isBotTurn = playerTypes[activePlayer] !== 'Human';
+
   const handleCardClick = useCallback(
     (playerIndex: number, position: number) => {
+      if (isBotTurn) return;
       if (action_needed.type === 'ChooseInitialFlips') {
         // Only the flip player can click during initial flips
         if (playerIndex !== action_needed.player) return;
@@ -339,37 +377,49 @@ function PlayBoard({
         }
       }
     },
-    [action_needed, current_player, boards, wantsFlip, onAction]
+    [action_needed, current_player, boards, wantsFlip, onAction, isBotTurn]
   );
 
   const handleDrawDeck = useCallback(() => {
+    if (isBotTurn) return;
     if (action_needed.type === 'ChooseDraw') {
       onAction({ type: 'DrawFromDeck' });
     }
-  }, [action_needed, onAction]);
+  }, [action_needed, onAction, isBotTurn]);
 
   const handleDrawDiscard = useCallback(
     (pileIndex: number) => {
+      if (isBotTurn) return;
       if (action_needed.type === 'ChooseDraw') {
         onAction({ type: 'DrawFromDiscard', pile_index: pileIndex });
       }
     },
-    [action_needed, onAction]
+    [action_needed, onAction, isBotTurn]
   );
 
   const handleToggleFlipMode = useCallback(() => {
+    if (isBotTurn) return;
     setWantsFlip((prev) => !prev);
-  }, []);
+  }, [isBotTurn]);
 
-  // Determine what's interactive
-  const isChooseDraw = action_needed.type === 'ChooseDraw';
-  const isDeckDrawAction = action_needed.type === 'ChooseDeckDrawAction';
-  const isDiscardPlacement = action_needed.type === 'ChooseDiscardDrawPlacement';
-  const isInitialFlips = action_needed.type === 'ChooseInitialFlips';
+  // Determine what's interactive (never interactive during bot turns)
+  const isChooseDraw = !isBotTurn && action_needed.type === 'ChooseDraw';
+  const isDeckDrawAction = !isBotTurn && action_needed.type === 'ChooseDeckDrawAction';
+  const isDiscardPlacement = !isBotTurn && action_needed.type === 'ChooseDiscardDrawPlacement';
+  const isInitialFlips = !isBotTurn && action_needed.type === 'ChooseInitialFlips';
+
+  // Whether the game is in a draw/play phase (for stable layout, regardless of bot turn)
+  const isPlayPhase = action_needed.type === 'ChooseDraw'
+    || action_needed.type === 'ChooseDeckDrawAction'
+    || action_needed.type === 'ChooseDiscardDrawPlacement';
+  const hasDrawnCard = action_needed.type === 'ChooseDeckDrawAction'
+    || action_needed.type === 'ChooseDiscardDrawPlacement';
 
   // Prompt message
   let prompt = '';
-  if (isInitialFlips) {
+  if (isBotTurn) {
+    prompt = `${getPlayerName(state, activePlayer)} is thinking...`;
+  } else if (isInitialFlips) {
     const remaining = action_needed.count;
     prompt = `Click ${remaining} hidden card${remaining !== 1 ? 's' : ''} to flip`;
   } else if (isChooseDraw) {
@@ -386,6 +436,7 @@ function PlayBoard({
 
   // Which cards are clickable on a given player's board
   const getCardInteractive = (playerIdx: number, pos: number): boolean => {
+    if (isBotTurn) return false;
     if (isInitialFlips) {
       if (playerIdx !== action_needed.player) return false;
       return boards[playerIdx][pos] === 'Hidden';
@@ -398,15 +449,48 @@ function PlayBoard({
     return false;
   };
 
+  const hasGoneOut = state.going_out_player !== null;
+
   return (
     <div className="space-y-4">
+      {/* Info / going-out banner — always present to avoid layout shift */}
+      <div
+        className={cn(
+          'rounded-lg border p-3 text-center transition-all duration-300',
+          hasGoneOut
+            ? 'border-orange-400 border-2 bg-orange-50 dark:bg-orange-950/30'
+            : 'border-border bg-muted/30'
+        )}
+      >
+        {hasGoneOut ? (
+          <>
+            <p className="text-sm font-bold text-orange-600 dark:text-orange-400">
+              ⚠ {getPlayerName(state, state.going_out_player!)} has gone out!
+            </p>
+            <p className="text-xs text-orange-500 dark:text-orange-400/80 mt-0.5">
+              Each remaining player gets one final turn.
+            </p>
+          </>
+        ) : (
+          <>
+            <p className="text-sm font-medium text-muted-foreground">
+              🎮 Local Game · {state.num_players} players
+            </p>
+            <p className="text-xs text-muted-foreground/70 mt-0.5">
+              Round {state.round_number + 1} · {state.deck_remaining} cards in deck
+            </p>
+          </>
+        )}
+      </div>
+
       {/* Status bar */}
       <div className="text-center space-y-1">
-        <h3 className="text-lg font-semibold">
-          {getPlayerName(state, activePlayer)}'s Turn
-          {state.is_final_turn && (
-            <span className="text-sm text-orange-500 ml-2">(Final Turn!)</span>
-          )}
+        <h3 className={cn(
+          'text-lg font-semibold',
+          state.is_final_turn && 'text-orange-600 dark:text-orange-400'
+        )}>
+          {getPlayerName(state, activePlayer)}'s{' '}
+          {state.is_final_turn ? 'Final Turn!' : 'Turn'}
         </h3>
         <p className="text-sm text-muted-foreground">
           Round {state.round_number + 1}
@@ -414,8 +498,8 @@ function PlayBoard({
         <p className="text-sm font-medium text-primary">{prompt}</p>
       </div>
 
-      {/* Draw area */}
-      {(isChooseDraw || isDeckDrawAction || isDiscardPlacement) && (
+      {/* Draw area — always rendered during play phase for layout stability */}
+      {isPlayPhase && (
         <div className="flex items-center justify-center gap-3 sm:gap-6 md:gap-8">
           {/* Deck */}
           <button
@@ -478,51 +562,60 @@ function PlayBoard({
             </button>
           ))}
 
-          {/* Drawn card display */}
-          {(isDeckDrawAction || isDiscardPlacement) && (
-            <div className="flex flex-col items-center gap-1">
-              <span className="text-xs text-muted-foreground">Drawn</span>
+          {/* Drawn card / placeholder — stable slot */}
+          <div className="flex flex-col items-center gap-1">
+            <span className="text-xs text-muted-foreground">
+              {hasDrawnCard ? 'Drawn' : 'Drawn'}
+            </span>
+            {hasDrawnCard ? (
               <div className="ring-2 ring-green-400 rounded-lg">
                 <SkyjoCard
-                  slot={{
-                    Revealed:
-                      action_needed.type === 'ChooseDeckDrawAction'
-                        ? action_needed.drawn_card
-                        : action_needed.type === 'ChooseDiscardDrawPlacement'
-                          ? action_needed.drawn_card
-                          : 0,
-                  }}
+                  slot={{ Revealed: action_needed.drawn_card }}
                   size={cardSizes.draw}
                 />
               </div>
+            ) : (
+              <SkyjoCard slot="Cleared" size={cardSizes.draw} />
+            )}
+          </div>
+
+          {/* Action icon buttons — always present, enabled/disabled contextually */}
+          <TooltipProvider>
+            <div className="flex flex-col items-center gap-2">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant={wantsFlip ? 'default' : 'outline'}
+                    size="icon"
+                    disabled={!isDeckDrawAction}
+                    onClick={handleToggleFlipMode}
+                    className="h-9 w-9"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="right">
+                  {wantsFlip ? 'Back to Place Mode' : 'Discard & Flip'}
+                </TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    disabled={!isDiscardPlacement}
+                    onClick={() => onAction({ type: 'UndoDrawFromDiscard' })}
+                    className="h-9 w-9"
+                  >
+                    <Undo2 className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="right">
+                  Undo
+                </TooltipContent>
+              </Tooltip>
             </div>
-          )}
-        </div>
-      )}
-
-      {/* Discard & Flip toggle */}
-      {isDeckDrawAction && (
-        <div className="flex justify-center">
-          <Button
-            variant={wantsFlip ? 'default' : 'outline'}
-            size="sm"
-            onClick={handleToggleFlipMode}
-          >
-            {wantsFlip ? 'Back to Place Mode' : 'Discard & Flip Instead'}
-          </Button>
-        </div>
-      )}
-
-      {/* Undo discard draw */}
-      {isDiscardPlacement && (
-        <div className="flex justify-center">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => onAction({ type: 'UndoDrawFromDiscard' })}
-          >
-            Undo — Put Back & Choose Again
-          </Button>
+          </TooltipProvider>
         </div>
       )}
 
@@ -547,15 +640,16 @@ function PlayBoard({
               key={playerIdx}
               className={cn(
                 'rounded-lg border p-3 transition-colors',
-                isActive
-                  ? 'border-blue-500 border-2'
-                  : 'border-border'
+                isActive && !state.is_final_turn && 'border-blue-500 border-2',
+                isActive && state.is_final_turn && 'border-orange-500 border-2 bg-orange-50/50 dark:bg-orange-950/20',
+                !isActive && playerIdx === state.going_out_player && 'border-orange-300 border-2 opacity-75',
+                !isActive && playerIdx !== state.going_out_player && 'border-border'
               )}
             >
               <h4 className="text-sm font-medium mb-2">
                 {getPlayerName(state, playerIdx)}
                 {playerIdx === state.going_out_player && (
-                  <span className="text-xs text-orange-500 ml-1">(went out)</span>
+                  <span className="text-xs font-semibold text-orange-500 ml-1">✓ went out</span>
                 )}
               </h4>
               <div
@@ -619,7 +713,7 @@ function RoundSummary({
 }) {
   if (actionNeeded.type !== 'RoundOver') return null;
 
-  const { round_scores, cumulative_scores, going_out_player, end_of_round_clears } = actionNeeded;
+  const { round_scores, raw_round_scores, cumulative_scores, going_out_player, end_of_round_clears } = actionNeeded;
 
   return (
     <Card>
@@ -685,18 +779,29 @@ function RoundSummary({
               </tr>
             </thead>
             <tbody>
-              {state.player_names.map((name, i) => (
-                <tr key={i} className="border-b last:border-0">
-                  <td className="py-2 pr-4 font-medium">
-                    {name}
-                    {i === going_out_player && ' *'}
-                  </td>
-                  <td className="text-center py-2 px-2">{round_scores[i]}</td>
-                  <td className="text-center py-2 px-2 font-bold">
-                    {cumulative_scores[i]}
-                  </td>
-                </tr>
-              ))}
+              {state.player_names.map((name, i) => {
+                const wasPenalized = round_scores[i] !== raw_round_scores[i];
+                return (
+                  <tr key={i} className="border-b last:border-0">
+                    <td className="py-2 pr-4 font-medium">
+                      {name}
+                      {i === going_out_player && ' *'}
+                    </td>
+                    <td className={cn(
+                      'text-center py-2 px-2',
+                      wasPenalized && 'text-destructive'
+                    )}>
+                      {wasPenalized
+                        ? <>{raw_round_scores[i]} → <span className="font-bold">{round_scores[i]}</span></>
+                        : round_scores[i]
+                      }
+                    </td>
+                    <td className="text-center py-2 px-2 font-bold">
+                      {cumulative_scores[i]}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -817,8 +922,8 @@ function RoundScorecard({
                     {round.roundScores.map((score, i) => {
                       const isGoingOut = round.goingOutPlayer === i;
                       const isLowest = score === lowestRoundScore;
-                      const wasPenalized = isGoingOut && score > 0 &&
-                        !round.roundScores.every((s, j) => j === i || s > score);
+                      const rawScore = round.rawRoundScores[i];
+                      const wasPenalized = score !== rawScore;
 
                       return (
                         <TableCell
@@ -833,7 +938,10 @@ function RoundScorecard({
                             isLowest && 'font-bold',
                             wasPenalized && 'text-destructive',
                           )}>
-                            {score}
+                            {wasPenalized
+                              ? <>{rawScore}→{score}</>
+                              : score
+                            }
                             {isGoingOut && <span className="text-[10px] ml-0.5">*</span>}
                           </div>
                           <div className="text-[10px] text-muted-foreground">
@@ -859,7 +967,7 @@ function RoundScorecard({
         </div>
         <div className="text-[10px] text-muted-foreground mt-1">
           * = went out | <strong>Bold</strong> = lowest round score |{' '}
-          <span className="text-destructive">Red</span> = penalized |{' '}
+          <span className="text-destructive">Red (raw→penalized)</span> = penalty applied |{' '}
           <span className="italic">Small number</span> = cumulative score
         </div>
       </CardContent>
@@ -922,6 +1030,7 @@ export default function PlayRoute() {
           hasSavedGame={game.hasSavedGame}
           onResume={game.resumeGame}
           onImport={game.importGame}
+          lastConfig={game.lastConfig}
         />
       )}
 
@@ -946,7 +1055,7 @@ export default function PlayRoute() {
                   </Select>
                 </div>
               )}
-              <PlayBoard state={game.gameState} onAction={game.applyAction} />
+              <PlayBoard state={game.gameState} onAction={game.applyAction} playerTypes={game.playerTypes} />
             </CardContent>
           </Card>
         )}

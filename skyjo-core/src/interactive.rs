@@ -34,6 +34,7 @@ pub enum ActionNeeded {
     RoundOver {
         round_number: usize,
         round_scores: Vec<i32>,
+        raw_round_scores: Vec<i32>,
         cumulative_scores: Vec<i32>,
         going_out_player: Option<usize>,
         end_of_round_clears: Vec<ColumnClearEvent>,
@@ -43,6 +44,7 @@ pub enum ActionNeeded {
         winners: Vec<usize>,
         round_number: usize,
         round_scores: Vec<i32>,
+        raw_round_scores: Vec<i32>,
         going_out_player: Option<usize>,
         end_of_round_clears: Vec<ColumnClearEvent>,
     },
@@ -129,6 +131,7 @@ pub struct InteractiveGame {
 
     // End-of-round data
     last_round_scores: Vec<i32>,
+    last_raw_round_scores: Vec<i32>,
     last_end_of_round_clears: Vec<ColumnClearEvent>,
 }
 
@@ -166,6 +169,7 @@ impl InteractiveGame {
             last_round_goer: None,
             last_column_clears: Vec::new(),
             last_round_scores: Vec::new(),
+            last_raw_round_scores: Vec::new(),
             last_end_of_round_clears: Vec::new(),
             rules,
         };
@@ -249,6 +253,7 @@ impl InteractiveGame {
             Phase::RoundOver => ActionNeeded::RoundOver {
                 round_number: self.round_number,
                 round_scores: self.last_round_scores.clone(),
+                raw_round_scores: self.last_raw_round_scores.clone(),
                 cumulative_scores: self.cumulative_scores.clone(),
                 going_out_player: self.going_out_player,
                 end_of_round_clears: self.last_end_of_round_clears.clone(),
@@ -260,6 +265,7 @@ impl InteractiveGame {
                     winners,
                     round_number: self.round_number,
                     round_scores: self.last_round_scores.clone(),
+                    raw_round_scores: self.last_raw_round_scores.clone(),
                     going_out_player: self.going_out_player,
                     end_of_round_clears: self.last_end_of_round_clears.clone(),
                 }
@@ -476,6 +482,7 @@ impl InteractiveGame {
 
         // Compute raw scores
         let mut round_scores: Vec<i32> = self.boards.iter().map(|b| b.score()).collect();
+        let raw_round_scores = round_scores.clone();
 
         // Apply going-out penalty
         if let Some(goer) = self.going_out_player {
@@ -503,6 +510,7 @@ impl InteractiveGame {
 
         self.last_round_goer = self.going_out_player;
         self.last_round_scores = round_scores;
+        self.last_raw_round_scores = raw_round_scores;
         self.last_end_of_round_clears = end_of_round_clears;
 
         // Check if game is over

@@ -18,6 +18,7 @@ export type PlayPhase =
 export interface RoundRecord {
   roundNumber: number;
   roundScores: number[];
+  rawRoundScores: number[];
   cumulativeScores: number[];
   goingOutPlayer: number | null;
 }
@@ -41,6 +42,7 @@ interface UseInteractiveGame {
   hasSavedGame: boolean;
   playerTypes: PlayerType[];
   gameId: number | null;
+  lastConfig: PlayConfig | null;
 
   createGame: (config: PlayConfig) => void;
   applyAction: (action: PlayerAction) => void;
@@ -116,6 +118,7 @@ function extractRoundHistory(
       roundHistory.push({
         roundNumber: a.round_number,
         roundScores: a.round_scores,
+        rawRoundScores: a.raw_round_scores,
         cumulativeScores: a.cumulative_scores,
         goingOutPlayer: a.going_out_player,
       });
@@ -125,6 +128,7 @@ function extractRoundHistory(
       roundHistory.push({
         roundNumber: a.round_number,
         roundScores: a.round_scores,
+        rawRoundScores: a.raw_round_scores,
         cumulativeScores: a.final_scores,
         goingOutPlayer: a.going_out_player,
       });
@@ -163,6 +167,7 @@ export function useInteractiveGame(): UseInteractiveGame {
   const [startingPlayerIndex, setStartingPlayerIndex] = useState(0);
   const [hasSavedGame, setHasSavedGame] = useState(() => loadSavedGame() !== null);
   const [playerTypes, setPlayerTypes] = useState<PlayerType[]>([]);
+  const [lastConfig, setLastConfig] = useState<PlayConfig | null>(null);
   const gameIdRef = useRef<number | null>(null);
   const configRef = useRef<PlayConfig | null>(null);
   const actionsRef = useRef<PlayerAction[]>([]);
@@ -263,6 +268,7 @@ export function useInteractiveGame(): UseInteractiveGame {
         setRoundHistory(prev => [...prev, {
           roundNumber: a.round_number,
           roundScores: a.round_scores,
+          rawRoundScores: a.raw_round_scores,
           cumulativeScores: a.cumulative_scores,
           goingOutPlayer: a.going_out_player,
         }]);
@@ -274,6 +280,7 @@ export function useInteractiveGame(): UseInteractiveGame {
         setRoundHistory(prev => [...prev, {
           roundNumber: a.round_number,
           roundScores: a.round_scores,
+          rawRoundScores: a.raw_round_scores,
           cumulativeScores: a.final_scores,
           goingOutPlayer: a.going_out_player,
         }]);
@@ -324,6 +331,7 @@ export function useInteractiveGame(): UseInteractiveGame {
         setRoundHistory(prev => [...prev, {
           roundNumber: a.round_number,
           roundScores: a.round_scores,
+          rawRoundScores: a.raw_round_scores,
           cumulativeScores: a.cumulative_scores,
           goingOutPlayer: a.going_out_player,
         }]);
@@ -335,6 +343,7 @@ export function useInteractiveGame(): UseInteractiveGame {
         setRoundHistory(prev => [...prev, {
           roundNumber: a.round_number,
           roundScores: a.round_scores,
+          rawRoundScores: a.raw_round_scores,
           cumulativeScores: a.final_scores,
           goingOutPlayer: a.going_out_player,
         }]);
@@ -451,6 +460,8 @@ export function useInteractiveGame(): UseInteractiveGame {
       wasmMod.destroy_interactive_game(gameIdRef.current);
       gameIdRef.current = null;
     }
+    // Preserve config for "play again" pre-fill
+    setLastConfig(configRef.current);
     configRef.current = null;
     actionsRef.current = [];
     setPlayerTypes([]);
@@ -474,6 +485,7 @@ export function useInteractiveGame(): UseInteractiveGame {
     hasSavedGame,
     playerTypes,
     gameId: gameIdRef.current,
+    lastConfig,
     createGame,
     applyAction,
     applyBotTurn,

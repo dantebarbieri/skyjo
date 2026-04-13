@@ -23,34 +23,60 @@ function TableOfContents() {
   const [active, setActive] = useState('overview');
 
   useEffect(() => {
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting) {
-            setActive(entry.target.id);
+    function updateActive() {
+      const viewportHeight = window.innerHeight;
+      // Target line: 25% from top of viewport
+      const targetLine = viewportHeight * 0.25;
+      // At the bottom of the page, use the last section that's visible
+      const atBottom = window.innerHeight + window.scrollY >= document.body.scrollHeight - 50;
+
+      let bestId = sections[0].id;
+
+      for (const { id } of sections) {
+        const el = document.getElementById(id);
+        if (!el) continue;
+        const rect = el.getBoundingClientRect();
+        // Section is on screen or above the target line
+        if (rect.top <= targetLine + 10) {
+          bestId = id;
+        }
+      }
+
+      // At the very bottom, pick the last section that's on screen
+      if (atBottom) {
+        for (let i = sections.length - 1; i >= 0; i--) {
+          const el = document.getElementById(sections[i].id);
+          if (!el) continue;
+          const rect = el.getBoundingClientRect();
+          if (rect.top < viewportHeight) {
+            bestId = sections[i].id;
+            break;
           }
         }
-      },
-      { rootMargin: '-80px 0px -60% 0px', threshold: 0 }
-    );
+      }
 
-    for (const { id } of sections) {
-      const el = document.getElementById(id);
-      if (el) observer.observe(el);
+      setActive(bestId);
     }
 
-    return () => observer.disconnect();
+    updateActive();
+    window.addEventListener('scroll', updateActive, { passive: true });
+    window.addEventListener('resize', updateActive, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', updateActive);
+      window.removeEventListener('resize', updateActive);
+    };
   }, []);
 
   return (
-    <nav className="hidden lg:block sticky top-20 w-48 shrink-0">
-      <ul className="space-y-1 text-sm">
+    <nav className="sticky top-8 z-10 bg-background py-2 lg:py-0 shrink-0 border-b lg:border-b-0 -mx-3 px-3 sm:-mx-4 sm:px-4 lg:mx-0 lg:px-0 self-start">
+      {/* Horizontal scrollable nav on small/medium screens, vertical sidebar on large */}
+      <ul className="flex lg:flex-col gap-1 text-sm overflow-x-auto pb-1 lg:pb-0 lg:w-48">
         {sections.map(({ id, label }) => (
-          <li key={id}>
+          <li key={id} className="shrink-0">
             <a
               href={`#${id}`}
               className={cn(
-                'block px-3 py-1 rounded-md transition-colors',
+                'block px-3 py-1 rounded-md transition-colors whitespace-nowrap',
                 active === id
                   ? 'bg-accent text-accent-foreground font-medium'
                   : 'text-muted-foreground hover:text-foreground'
@@ -737,7 +763,7 @@ export default function RulesRoute() {
   return (
     <>
       <h1 className="text-3xl font-bold mb-6">How to Play Skyjo</h1>
-      <div className="flex gap-8">
+      <div className="flex flex-col lg:flex-row gap-4 lg:gap-8">
         <TableOfContents />
         <div className="flex-1 space-y-8 min-w-0">
           <OverviewSection />

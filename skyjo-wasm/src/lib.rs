@@ -4,8 +4,9 @@ use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
 
 use skyjo_core::{
-    AggregateStats, Game, GameHistory, GameStats, GreedyStrategy, InteractiveGame, PlayerAction,
-    RandomStrategy, Rules, Simulator, SimulatorConfig, StandardRules, Strategy,
+    AggregateStats, ClearerStrategy, DefensiveStrategy, Game, GameHistory, GameStats,
+    GreedyStrategy, InteractiveGame, PlayerAction, RandomStrategy, Rules, Simulator,
+    SimulatorConfig, StandardRules, StatisticianStrategy, Strategy,
 };
 
 #[derive(Deserialize)]
@@ -40,6 +41,9 @@ fn make_strategy_factory(name: &str) -> Result<Box<dyn Fn() -> Box<dyn Strategy>
     match name {
         "Random" => Ok(Box::new(|| Box::new(RandomStrategy))),
         "Greedy" => Ok(Box::new(|| Box::new(GreedyStrategy))),
+        "Defensive" => Ok(Box::new(|| Box::new(DefensiveStrategy))),
+        "Clearer" => Ok(Box::new(|| Box::new(ClearerStrategy))),
+        "Statistician" => Ok(Box::new(|| Box::new(StatisticianStrategy))),
         _ => Err(format!("Unknown strategy: {name}")),
     }
 }
@@ -59,6 +63,9 @@ fn make_strategy(name: &str) -> Result<Box<dyn Strategy>, String> {
     match name {
         "Random" => Ok(Box::new(RandomStrategy)),
         "Greedy" => Ok(Box::new(GreedyStrategy)),
+        "Defensive" => Ok(Box::new(DefensiveStrategy)),
+        "Clearer" => Ok(Box::new(ClearerStrategy)),
+        "Statistician" => Ok(Box::new(StatisticianStrategy)),
         _ => Err(format!("Unknown strategy: {name}")),
     }
 }
@@ -197,7 +204,7 @@ pub fn simulate_one_with_history(config_json: &str) -> String {
 
 #[wasm_bindgen]
 pub fn get_available_strategies() -> String {
-    serde_json::to_string(&["Random", "Greedy"]).unwrap()
+    serde_json::to_string(&["Random", "Greedy", "Defensive", "Clearer", "Statistician"]).unwrap()
 }
 
 #[wasm_bindgen]

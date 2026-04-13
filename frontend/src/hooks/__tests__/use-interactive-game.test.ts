@@ -328,6 +328,7 @@ describe('useInteractiveGame', () => {
         type: 'RoundOver',
         round_number: 0,
         round_scores: [25, 30],
+        raw_round_scores: [25, 30],
         cumulative_scores: [25, 30],
         going_out_player: 0,
         end_of_round_clears: [],
@@ -352,6 +353,7 @@ describe('useInteractiveGame', () => {
     expect(result.current.roundHistory[0]).toEqual({
       roundNumber: 0,
       roundScores: [25, 30],
+      rawRoundScores: [25, 30],
       cumulativeScores: [25, 30],
       goingOutPlayer: 0,
     });

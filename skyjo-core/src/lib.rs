@@ -17,5 +17,5 @@ pub use history::GameHistory;
 pub use interactive::{ActionNeeded, InteractiveGame, InteractiveGameState, PlayerAction};
 pub use rules::{Rules, StandardRules};
 pub use simulator::{AggregateStats, GameStats, Simulator, SimulatorConfig};
-pub use strategies::{GreedyStrategy, RandomStrategy};
+pub use strategies::{ClearerStrategy, DefensiveStrategy, GreedyStrategy, RandomStrategy, StatisticianStrategy};
 pub use strategy::{DeckDrawAction, DrawChoice, Strategy, StrategyView};
