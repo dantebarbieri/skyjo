@@ -1,0 +1,50 @@
+name: Docker Build
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Dockerfile"
+      - ".dockerignore"
+      - "docker-compose.yml"
+      - "frontend/nginx.conf"
+      - "frontend/src/**"
+      - "frontend/package.json"
+      - "frontend/pnpm-lock.yaml"
+      - "skyjo-core/**"
+      - "skyjo-wasm/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+  pull_request:
+    branches: [main]
+    paths:
+      - "Dockerfile"
+      - ".dockerignore"
+      - "docker-compose.yml"
+      - "frontend/nginx.conf"
+      - "frontend/src/**"
+      - "frontend/package.json"
+      - "frontend/pnpm-lock.yaml"
+      - "skyjo-core/**"
+      - "skyjo-wasm/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
