@@ -64,9 +64,10 @@ export default function ScoringSheet({ history, onClose }: ScoringSheetProps) {
                     const cumScore = round.cumulative_scores[p];
                     const isGoingOut = round.going_out_player === p;
                     const isLowest = roundScore === lowestRoundScore;
-                    // Check if penalty was applied
-                    const expectedCum = prevCumulative[p] + roundScore;
-                    const wasPenalized = cumScore !== expectedCum;
+                    // Detect penalty: going-out player's score was doubled if not solo lowest
+                    // round_scores already contains the penalized value from Rust
+                    const wasPenalized = isGoingOut && roundScore > 0 &&
+                      !round.round_scores.every((s, i) => i === p || s > roundScore);
 
                     return (
                       <TableCell

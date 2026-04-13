@@ -3,9 +3,10 @@ import type { ReplayState } from '@/lib/replay-engine';
 
 interface PileDisplayProps {
   state: ReplayState;
+  showDeckTop?: boolean;
 }
 
-export default function PileDisplay({ state }: PileDisplayProps) {
+export default function PileDisplay({ state, showDeckTop = true }: PileDisplayProps) {
   const discardSize = state.discardPiles[0].length;
   const discardTop = discardSize > 0 ? state.discardPiles[0][discardSize - 1] : null;
 
@@ -13,8 +14,8 @@ export default function PileDisplay({ state }: PileDisplayProps) {
   let deckHint: string | undefined;
 
   if (state.deck.length > 0) {
-    deckValue = state.deck[state.deck.length - 1];
-    deckHint = 'hidden from players';
+    deckValue = showDeckTop ? state.deck[state.deck.length - 1] : null;
+    deckHint = showDeckTop ? 'hidden from players' : undefined;
   } else if (state.deckSize > 0) {
     deckValue = null;
     deckHint = 'shuffled';

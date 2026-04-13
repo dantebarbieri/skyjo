@@ -87,7 +87,7 @@ export default function SkyjoCard({ slot, size = 'md', className, highlight }: S
       <div
         className={cn(
           SIZES[size],
-          'rounded-lg border-2 border-dashed border-muted-foreground/30 bg-muted/30 flex items-center justify-center',
+          'rounded-lg border-2 border-dashed border-muted-foreground/30 bg-muted/30 flex items-center justify-center select-none',
           className
         )}
       />
@@ -100,7 +100,7 @@ export default function SkyjoCard({ slot, size = 'md', className, highlight }: S
         ref={cardRef}
         className={cn(
           SIZES[size],
-          'rounded-lg border-2 border-teal-700 bg-gradient-to-br from-teal-600 to-teal-800 flex items-center justify-center relative overflow-hidden will-change-transform',
+          'rounded-lg border-2 border-teal-700 bg-gradient-to-br from-teal-600 to-teal-800 flex items-center justify-center relative overflow-hidden will-change-transform select-none cursor-default',
           highlight && 'ring-2 ring-blue-400 ring-offset-1',
           className
         )}
@@ -127,7 +127,7 @@ export default function SkyjoCard({ slot, size = 'md', className, highlight }: S
       ref={cardRef}
       className={cn(
         SIZES[size],
-        `rounded-lg border-2 bg-gradient-to-br ${colors.bg} ${colors.text} flex items-center justify-center relative overflow-hidden will-change-transform`,
+        `rounded-lg border-2 bg-gradient-to-br ${colors.bg} ${colors.text} flex items-center justify-center relative overflow-hidden will-change-transform select-none cursor-default`,
         highlight && 'ring-2 ring-blue-400 ring-offset-1',
         className
       )}
@@ -174,18 +174,32 @@ interface PileCardProps {
 export function PileCard({ value, label, count, hint, size = 'md' }: PileCardProps) {
   const slot: Slot = value !== null ? { Revealed: value } : 'Cleared';
 
+  // Scale shadow to simulate physical pile thickness
+  const depth = Math.min(count, 100);
+  const layers = Math.min(Math.ceil(depth / 20), 5);
+  const pileStyle: React.CSSProperties = count > 1 ? {
+    boxShadow: Array.from({ length: layers }, (_, i) => {
+      const offset = (i + 1) * 1;
+      return `${offset}px ${offset}px 0 rgba(0,0,0,0.08)`;
+    }).join(', '),
+  } : {};
+
+  const cardElement = value !== null ? (
+    <SkyjoCard slot={{ Revealed: value }} size={size} />
+  ) : count > 0 ? (
+    <SkyjoCard slot={{ Hidden: 0 }} size={size} />
+  ) : (
+    <SkyjoCard slot={slot} size={size} />
+  );
+
   return (
     <div className="flex flex-col items-center gap-1">
       <div className="text-xs text-muted-foreground font-medium">
         {label} ({count})
       </div>
-      {value !== null ? (
-        <SkyjoCard slot={{ Revealed: value }} size={size} />
-      ) : count > 0 ? (
-        <SkyjoCard slot={{ Hidden: 0 }} size={size} />
-      ) : (
-        <SkyjoCard slot={slot} size={size} />
-      )}
+      <div className="rounded-lg" style={pileStyle}>
+        {cardElement}
+      </div>
       {hint && (
         <div className="text-[10px] text-muted-foreground italic">{hint}</div>
       )}

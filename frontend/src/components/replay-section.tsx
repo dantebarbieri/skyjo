@@ -10,10 +10,11 @@ import type { GameHistory } from '../types';
 
 interface ReplaySectionProps {
   history: GameHistory;
+  gameNumber?: number;
   onClose: () => void;
 }
 
-export default function ReplaySection({ history, onClose }: ReplaySectionProps) {
+export default function ReplaySection({ history, gameNumber, onClose }: ReplaySectionProps) {
   const replay = useReplay(history);
   const sectionRef = useRef<HTMLDivElement>(null);
 
@@ -34,7 +35,7 @@ export default function ReplaySection({ history, onClose }: ReplaySectionProps) 
     <Card ref={sectionRef}>
       <CardHeader>
         <div className="flex items-center justify-between">
-          <CardTitle>Game Replay</CardTitle>
+          <CardTitle>Game Replay{gameNumber != null ? ` — #${gameNumber + 1} (Seed ${history.seed})` : ` — Seed ${history.seed}`}</CardTitle>
           <Button variant="ghost" size="sm" onClick={onClose}>Close</Button>
         </div>
       </CardHeader>

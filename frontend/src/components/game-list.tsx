@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import {
   Table,
   TableBody,
@@ -19,27 +20,93 @@ import {
   PaginationPrevious,
 } from '@/components/ui/pagination';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import ScoringSheet from './scoring-sheet';
+import { cn } from '@/lib/utils';
 import type { GameHistory } from '../types';
+
+type SortField = 'index' | 'rounds' | 'turns' | 'clears' | 'score';
+type SortDir = 'asc' | 'desc';
 
 interface GameListProps {
   histories: GameHistory[];
-  onReplay: (history: GameHistory, index: number) => void;
+  onView: (history: GameHistory, index: number) => void;
   selectedIndex: number | null;
 }
 
 const PAGE_SIZES = [25, 50, 100];
 
-export default function GameList({ histories, onReplay, selectedIndex }: GameListProps) {
+export default function GameList({ histories, onView, selectedIndex }: GameListProps) {
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(25);
-  const [scoringGameIndex, setScoringGameIndex] = useState<number | null>(null);
+  const [seedFilter, setSeedFilter] = useState('');
+  const [winnerFilter, setWinnerFilter] = useState<string>('all');
+  const [sortField, setSortField] = useState<SortField>('index');
+  const [sortDir, setSortDir] = useState<SortDir>('asc');
 
-  const totalPages = Math.ceil(histories.length / pageSize);
-  const pageHistories = useMemo(
-    () => histories.slice(page * pageSize, (page + 1) * pageSize),
-    [histories, page, pageSize]
+  const filteredHistories = useMemo(() => {
+    let result = histories.map((h, i) => ({ history: h, originalIndex: i }));
+
+    if (seedFilter.trim()) {
+      const seedVal = parseInt(seedFilter);
+      if (!isNaN(seedVal)) {
+        result = result.filter(({ history }) => history.seed === seedVal);
+      }
+    }
+
+    if (winnerFilter !== 'all') {
+      const w = parseInt(winnerFilter);
+      result = result.filter(({ history }) => history.winners.includes(w));
+    }
+
+    if (sortField !== 'index') {
+      result.sort((a, b) => {
+        let cmp = 0;
+        switch (sortField) {
+          case 'rounds':
+            cmp = a.history.rounds.length - b.history.rounds.length;
+            break;
+          case 'turns': {
+            const turnsA = a.history.rounds.reduce((s, r) => s + r.turns.length, 0);
+            const turnsB = b.history.rounds.reduce((s, r) => s + r.turns.length, 0);
+            cmp = turnsA - turnsB;
+            break;
+          }
+          case 'clears': {
+            const clearsA = a.history.rounds.reduce((s, r) => s + r.end_of_round_clears.length + r.turns.reduce((ts, t) => ts + t.column_clears.length, 0), 0);
+            const clearsB = b.history.rounds.reduce((s, r) => s + r.end_of_round_clears.length + r.turns.reduce((ts, t) => ts + t.column_clears.length, 0), 0);
+            cmp = clearsA - clearsB;
+            break;
+          }
+          case 'score':
+            cmp = Math.min(...a.history.final_scores) - Math.min(...b.history.final_scores);
+            break;
+        }
+        return sortDir === 'desc' ? -cmp : cmp;
+      });
+    } else if (sortDir === 'desc') {
+      result.reverse();
+    }
+
+    return result;
+  }, [histories, seedFilter, winnerFilter, sortField, sortDir]);
+
+  const totalPages = Math.ceil(filteredHistories.length / pageSize);
+  const pageItems = useMemo(
+    () => filteredHistories.slice(page * pageSize, (page + 1) * pageSize),
+    [filteredHistories, page, pageSize]
   );
+
+  const toggleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortField(field);
+      setSortDir('asc');
+    }
+    setPage(0);
+  };
+
+  const sortIndicator = (field: SortField) =>
+    sortField === field ? (sortDir === 'asc' ? ' \u25B2' : ' \u25BC') : '';
 
   const handlePageChange = (newPage: number) => {
     setPage(Math.max(0, Math.min(newPage, totalPages - 1)));
@@ -64,24 +131,47 @@ export default function GameList({ histories, onReplay, selectedIndex }: GameLis
             </Select>
           </div>
         </div>
+        <div className="flex gap-2 items-center flex-wrap mt-2">
+          <Input
+            placeholder="Search seed..."
+            value={seedFilter}
+            onChange={(e) => { setSeedFilter(e.target.value); setPage(0); }}
+            className="w-32 h-8 text-sm"
+          />
+          <Select value={winnerFilter} onValueChange={(v) => { setWinnerFilter(v); setPage(0); }}>
+            <SelectTrigger className="w-32 h-8">
+              <SelectValue placeholder="Winner" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All winners</SelectItem>
+              {Array.from({ length: histories[0]?.num_players ?? 0 }, (_, i) => (
+                <SelectItem key={i} value={String(i)}>P{i + 1}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {(seedFilter || winnerFilter !== 'all') && (
+            <span className="text-xs text-muted-foreground">
+              {filteredHistories.length} of {histories.length} games
+            </span>
+          )}
+        </div>
       </CardHeader>
       <CardContent className="p-0">
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="w-12">#</TableHead>
+              <TableHead className="w-12 cursor-pointer select-none" onClick={() => toggleSort('index')}>#{sortIndicator('index')}</TableHead>
               <TableHead>Seed</TableHead>
-              <TableHead className="text-right">Rounds</TableHead>
-              <TableHead className="text-right">Turns</TableHead>
-              <TableHead className="text-right">Col Clears</TableHead>
+              <TableHead className="text-right cursor-pointer select-none" onClick={() => toggleSort('rounds')}>Rounds{sortIndicator('rounds')}</TableHead>
+              <TableHead className="text-right cursor-pointer select-none" onClick={() => toggleSort('turns')}>Turns{sortIndicator('turns')}</TableHead>
+              <TableHead className="text-right cursor-pointer select-none" onClick={() => toggleSort('clears')}>Col Clears{sortIndicator('clears')}</TableHead>
               <TableHead>Winner</TableHead>
-              <TableHead>Scores</TableHead>
-              <TableHead className="w-32"></TableHead>
+              <TableHead className="cursor-pointer select-none" onClick={() => toggleSort('score')}>Scores{sortIndicator('score')}</TableHead>
+              <TableHead className="w-20"></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {pageHistories.map((h, localIdx) => {
-              const globalIdx = page * pageSize + localIdx;
+            {pageItems.map(({ history: h, originalIndex }) => {
               const totalTurns = h.rounds.reduce((sum, r) => sum + r.turns.length, 0);
               const totalClears = h.rounds.reduce(
                 (sum, r) =>
@@ -92,13 +182,14 @@ export default function GameList({ histories, onReplay, selectedIndex }: GameLis
               );
               const wasTruncated = h.rounds.some((r) => r.truncated);
               const winnerStr = h.winners.map((w) => `P${w + 1}`).join(', ');
+              const isSingleRound = h.rounds.length === 1;
 
               return (
                 <TableRow
-                  key={globalIdx}
-                  className={selectedIndex === globalIdx ? 'bg-accent' : ''}
+                  key={originalIndex}
+                  className={selectedIndex === originalIndex ? 'bg-accent' : ''}
                 >
-                  <TableCell className="font-mono text-sm">{globalIdx + 1}</TableCell>
+                  <TableCell className="font-mono text-sm">{originalIndex + 1}</TableCell>
                   <TableCell className="font-mono text-sm">{h.seed}</TableCell>
                   <TableCell className="text-right">{h.rounds.length}</TableCell>
                   <TableCell className="text-right">
@@ -110,34 +201,30 @@ export default function GameList({ histories, onReplay, selectedIndex }: GameLis
                   <TableCell className="text-right">{totalClears}</TableCell>
                   <TableCell>{winnerStr}</TableCell>
                   <TableCell>
-                    {h.final_scores.map((s, p) => (
-                      <span key={p}>
-                        {p > 0 && ', '}
-                        <span className={h.winners.includes(p) ? 'font-bold' : ''}>
-                          {s}
+                    {h.final_scores.map((s, p) => {
+                      const isGoingOut = isSingleRound && h.rounds[0].going_out_player === p;
+                      return (
+                        <span key={p}>
+                          {p > 0 && ', '}
+                          <span className={cn(
+                            h.winners.includes(p) && 'font-bold',
+                            isGoingOut && 'underline underline-offset-2',
+                          )}>
+                            {s}
+                          </span>
                         </span>
-                      </span>
-                    ))}
+                      );
+                    })}
                   </TableCell>
                   <TableCell>
-                    <div className="flex gap-1">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-7 text-xs"
-                        onClick={() => onReplay(h, globalIdx)}
-                      >
-                        Replay
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-7 text-xs"
-                        onClick={() => setScoringGameIndex(scoringGameIndex === globalIdx ? null : globalIdx)}
-                      >
-                        Scores
-                      </Button>
-                    </div>
+                    <Button
+                      size="sm"
+                      variant={selectedIndex === originalIndex ? 'default' : 'outline'}
+                      className="h-7 text-xs"
+                      onClick={() => onView(h, originalIndex)}
+                    >
+                      View
+                    </Button>
                   </TableCell>
                 </TableRow>
               );
@@ -145,14 +232,9 @@ export default function GameList({ histories, onReplay, selectedIndex }: GameLis
           </TableBody>
         </Table>
 
-        {scoringGameIndex !== null && histories[scoringGameIndex] && (
-          <div className="border-t p-4">
-            <ScoringSheet
-              history={histories[scoringGameIndex]}
-              onClose={() => setScoringGameIndex(null)}
-            />
-          </div>
-        )}
+        <div className="px-4 py-2 text-[10px] text-muted-foreground border-t">
+          <strong>Bold</strong> = winner | <span className="underline underline-offset-2">Underline</span> = went out (single-round games)
+        </div>
 
         {totalPages > 1 && (
           <div className="flex justify-center py-4">

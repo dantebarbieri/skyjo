@@ -24,7 +24,7 @@ export default function RulesInfo({ rulesName }: RulesInfoProps) {
   ];
 
   return (
-    <Card className="w-full lg:w-64 shrink-0">
+    <Card className="w-full">
       <CardHeader className="pb-2">
         <CardTitle className="text-sm">Rules: {rulesName}</CardTitle>
       </CardHeader>

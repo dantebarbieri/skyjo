@@ -5,9 +5,9 @@ import { buildAllSteps, type ReplayStep } from '@/lib/replay-engine';
 export type RealtimeSpeed = 'slow' | 'normal' | 'fast';
 
 const SPEED_MS: Record<RealtimeSpeed, number> = {
-  slow: 1500,
-  normal: 600,
-  fast: 150,
+  slow: 150,
+  normal: 30,
+  fast: 0,
 };
 
 interface InterstitialInfo {
@@ -59,7 +59,7 @@ export function useRealtime() {
       scores,
     });
 
-    const delay = speedRef.current === 'fast' ? 1000 : 2000;
+    const delay = speedRef.current === 'fast' ? 500 : speedRef.current === 'normal' ? 1000 : 2000;
     timerRef.current = window.setTimeout(() => {
       timerRef.current = null;
       if (stoppedRef.current) return;
@@ -99,6 +99,7 @@ export function useRealtime() {
   }, [getDelayMs, showInterstitial]);
 
   const startGame = useCallback((history: GameHistory) => {
+    stoppedRef.current = false;
     gameCounterRef.current++;
     setGameNumber(gameCounterRef.current);
     strategyNamesRef.current = history.strategy_names;

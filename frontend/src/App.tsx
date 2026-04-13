@@ -1,5 +1,6 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { TooltipProvider } from '@/components/ui/tooltip';
+import { Card, CardContent } from '@/components/ui/card';
 import { useWasm } from '@/hooks/use-wasm';
 import { useSimulation } from '@/hooks/use-simulation';
 import { useCache } from '@/hooks/use-cache';
@@ -10,6 +11,7 @@ import GameList from '@/components/game-list';
 import ReplaySection from '@/components/replay-section';
 import RealtimeSection from '@/components/realtime-section';
 import CachePanel from '@/components/cache-panel';
+import ScoringSheet from '@/components/scoring-sheet';
 import type { GameHistory, SimConfig, ProgressStats } from './types';
 
 export default function App() {
@@ -18,6 +20,15 @@ export default function App() {
   const cache = useCache();
   const [replayHistory, setReplayHistory] = useState<GameHistory | null>(null);
   const [selectedGameIndex, setSelectedGameIndex] = useState<number | null>(null);
+  const progressRef = useRef<HTMLDivElement>(null);
+  const viewRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll to progress when simulation starts
+  useEffect(() => {
+    if (sim.status === 'running') {
+      progressRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [sim.status]);
 
   const handleStartSimulation = useCallback((config: SimConfig) => {
     setReplayHistory(null);
@@ -33,12 +44,16 @@ export default function App() {
     sim.start(config);
   }, [sim, cache]);
 
-  const handleOpenReplay = useCallback((history: GameHistory, index: number) => {
+  const handleViewGame = useCallback((history: GameHistory, index: number) => {
     setReplayHistory(history);
     setSelectedGameIndex(index);
+    // Auto-scroll to the combined view section after render
+    requestAnimationFrame(() => {
+      viewRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
   }, []);
 
-  const handleCloseReplay = useCallback(() => {
+  const handleCloseView = useCallback(() => {
     setReplayHistory(null);
     setSelectedGameIndex(null);
   }, []);
@@ -94,15 +109,20 @@ export default function App() {
               </div>
             )}
 
-            <ProgressSection
-              status={sim.status}
-              gamesCompleted={sim.gamesCompleted}
-              totalGames={sim.totalGames}
-              elapsedMs={sim.elapsedMs}
-              stats={sim.stats}
-            />
+            <div ref={progressRef}>
+              <ProgressSection
+                status={sim.status}
+                gamesCompleted={sim.gamesCompleted}
+                totalGames={sim.totalGames}
+                elapsedMs={sim.elapsedMs}
+                stats={sim.stats}
+                onPause={sim.pause}
+                onResume={sim.resume}
+                onStop={sim.stop}
+              />
+            </div>
 
-            {sim.status === 'running' && (
+            {(sim.status === 'running' || sim.status === 'paused') && (
               <RealtimeSection
                 history={sim.realtimeHistory}
                 strategyNames={sim.config?.strategies ?? []}
@@ -122,16 +142,31 @@ export default function App() {
             {sim.histories && sim.histories.length > 0 && (
               <GameList
                 histories={sim.histories}
-                onReplay={handleOpenReplay}
+                onView={handleViewGame}
                 selectedIndex={selectedGameIndex}
               />
             )}
 
-            {replayHistory && (
-              <ReplaySection
-                history={replayHistory}
-                onClose={handleCloseReplay}
-              />
+            {(selectedGameIndex !== null || replayHistory) && (
+              <div ref={viewRef} className="space-y-6">
+                {selectedGameIndex !== null && sim.histories?.[selectedGameIndex] && (
+                  <Card>
+                    <CardContent className="pt-6">
+                      <ScoringSheet
+                        history={sim.histories[selectedGameIndex]}
+                        onClose={handleCloseView}
+                      />
+                    </CardContent>
+                  </Card>
+                )}
+                {replayHistory && (
+                  <ReplaySection
+                    history={replayHistory}
+                    gameNumber={selectedGameIndex ?? undefined}
+                    onClose={handleCloseView}
+                  />
+                )}
+              </div>
             )}
           </div>
         </div>

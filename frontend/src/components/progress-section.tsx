@@ -1,5 +1,6 @@
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import type { SimStatus } from '@/hooks/use-simulation';
 import type { ProgressStats } from '../types';
@@ -10,6 +11,9 @@ interface ProgressSectionProps {
   totalGames: number;
   elapsedMs: number;
   stats: ProgressStats | null;
+  onPause?: () => void;
+  onResume?: () => void;
+  onStop?: () => void;
 }
 
 function formatDuration(ms: number): string {
@@ -42,6 +46,9 @@ export default function ProgressSection({
   gamesCompleted,
   totalGames,
   elapsedMs,
+  onPause,
+  onResume,
+  onStop,
 }: ProgressSectionProps) {
   if (status === 'idle') return null;
 
@@ -75,6 +82,20 @@ export default function ProgressSection({
             <span>{speed} games/sec</span>
           </span>
         </div>
+        {(status === 'running' || status === 'paused') && (onPause || onResume || onStop) && (
+          <div className="flex gap-2 pt-1">
+            {onPause && onResume && (
+              <Button variant="outline" size="sm" onClick={status === 'paused' ? onResume : onPause}>
+                {status === 'paused' ? 'Resume' : 'Pause'}
+              </Button>
+            )}
+            {onStop && (
+              <Button variant="destructive" size="sm" onClick={onStop}>
+                Stop
+              </Button>
+            )}
+          </div>
+        )}
       </CardContent>
     </Card>
   );

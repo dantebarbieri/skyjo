@@ -1,7 +1,8 @@
-import { useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useRealtime, type RealtimeSpeed } from '@/hooks/use-realtime';
 import PlayerBoard from './player-board';
 import PileDisplay from './pile-display';
@@ -16,6 +17,8 @@ interface RealtimeSectionProps {
 export default function RealtimeSection({ history, strategyNames, onNeedNextGame }: RealtimeSectionProps) {
   const rt = useRealtime();
   const lastHistoryRef = useRef<GameHistory | null>(null);
+  // Default to showing deck top unless a "Human" strategy is present
+  const [showDeckTop, setShowDeckTop] = useState(!strategyNames.some(s => s === 'Human'));
 
   useEffect(() => {
     rt.setOnNeedNextGame(onNeedNextGame);
@@ -26,6 +29,10 @@ export default function RealtimeSection({ history, strategyNames, onNeedNextGame
       lastHistoryRef.current = history;
       rt.loadGame(history);
     }
+    return () => {
+      // Allow re-mount (e.g. React StrictMode) to re-trigger loadGame
+      lastHistoryRef.current = null;
+    };
   }, [history, rt]);
 
   const speeds: RealtimeSpeed[] = ['slow', 'normal', 'fast'];
@@ -53,8 +60,12 @@ export default function RealtimeSection({ history, strategyNames, onNeedNextGame
               <Badge variant="outline">#{rt.gameNumber}</Badge>
             )}
           </div>
-          <div className="flex items-center gap-1">
-            <span className="text-xs text-muted-foreground mr-1">Speed:</span>
+          <div className="flex items-center gap-3">
+            <label className="flex items-center gap-1 text-xs text-muted-foreground">
+              <Checkbox checked={showDeckTop} onCheckedChange={(v) => setShowDeckTop(!!v)} />
+              Deck top
+            </label>
+            <span className="text-xs text-muted-foreground">Speed:</span>
             {speeds.map((s) => (
               <Button
                 key={s}
@@ -91,7 +102,7 @@ export default function RealtimeSection({ history, strategyNames, onNeedNextGame
               <p className="text-xs text-muted-foreground">{rt.step.state.description}</p>
             </div>
 
-            <PileDisplay state={rt.step.state} />
+            <PileDisplay state={rt.step.state} showDeckTop={showDeckTop} />
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
               {rt.step.state.boards.map((board, p) => (
