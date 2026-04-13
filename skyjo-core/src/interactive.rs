@@ -313,7 +313,7 @@ impl InteractiveGame {
                 let displaced = self.boards[self.current_player].replace(position, drawn)?;
                 let target = self.rules.discard_target(self.current_player);
                 self.discard_piles[target].push(displaced);
-                self.last_column_clears = self.check_and_clear_columns(self.current_player);
+                self.last_column_clears = self.check_and_clear_columns(self.current_player, Some(displaced));
                 self.advance_turn();
             }
 
@@ -322,7 +322,7 @@ impl InteractiveGame {
                 let target = self.rules.discard_target(self.current_player);
                 self.discard_piles[target].push(drawn);
                 self.boards[self.current_player].flip(position)?;
-                self.last_column_clears = self.check_and_clear_columns(self.current_player);
+                self.last_column_clears = self.check_and_clear_columns(self.current_player, None);
                 self.advance_turn();
             }
 
@@ -338,7 +338,7 @@ impl InteractiveGame {
                 let displaced = self.boards[self.current_player].replace(position, drawn)?;
                 let target = self.rules.discard_target(self.current_player);
                 self.discard_piles[target].push(displaced);
-                self.last_column_clears = self.check_and_clear_columns(self.current_player);
+                self.last_column_clears = self.check_and_clear_columns(self.current_player, Some(displaced));
                 self.advance_turn();
             }
 
@@ -417,6 +417,7 @@ impl InteractiveGame {
                         player_index: player_idx,
                         column: col,
                         card_value: val,
+                        displaced_card: None,
                     });
                 }
             }
@@ -493,7 +494,7 @@ impl InteractiveGame {
         self.deck.pop().ok_or(SkyjoError::EmptyDeck)
     }
 
-    fn check_and_clear_columns(&mut self, player: usize) -> Vec<ColumnClearEvent> {
+    fn check_and_clear_columns(&mut self, player: usize, displaced_card: Option<CardValue>) -> Vec<ColumnClearEvent> {
         let num_cols = self.boards[player].num_cols;
         let mut clears = Vec::new();
         for col in 0..num_cols {
@@ -507,6 +508,7 @@ impl InteractiveGame {
                     player_index: player,
                     column: col,
                     card_value: val,
+                    displaced_card,
                 });
             }
         }

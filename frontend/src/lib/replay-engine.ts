@@ -145,8 +145,11 @@ function applyTurn(state: ReplayState, turn: TurnRecord): void {
 
   applyColumnClears(state, turn.column_clears);
   if (turn.column_clears.length > 0) {
-    const cols = turn.column_clears.map((c) => c.column).join(', ');
-    state.description += ` Column(s) ${cols} cleared!`;
+    const parts = turn.column_clears.map((c) => {
+      const displaced = c.displaced_card !== null ? ` (discarded ${c.displaced_card})` : '';
+      return `${c.column}${displaced}`;
+    });
+    state.description += ` Column(s) ${parts.join(', ')} cleared!`;
   }
 
   if (turn.went_out) {

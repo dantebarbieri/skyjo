@@ -61,4 +61,7 @@ pub struct ColumnClearEvent {
     pub player_index: usize,
     pub column: usize,
     pub card_value: CardValue,
+    /// The card that was displaced (replaced) by the placement that triggered this clear.
+    /// `None` for end-of-round clears and discard-and-flip clears (no card was replaced).
+    pub displaced_card: Option<CardValue>,
 }

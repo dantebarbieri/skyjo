@@ -13,6 +13,7 @@ export interface ColumnClearEvent {
   player_index: number;
   column: number;
   card_value: CardValue;
+  displaced_card: CardValue | null;
 }
 
 export type TurnAction =

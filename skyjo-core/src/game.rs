@@ -238,6 +238,7 @@ impl Game {
                         player_index: player_idx,
                         column: col,
                         card_value: val,
+                        displaced_card: None,
                     });
                 }
             }
@@ -305,7 +306,7 @@ impl Game {
                         let displaced = self.boards[player].replace(pos, drawn)?;
                         let target = self.rules.discard_target(player);
                         self.discard_piles[target].push(displaced);
-                        let clears = self.check_and_clear_columns(player);
+                        let clears = self.check_and_clear_columns(player, Some(displaced));
                         (
                             TurnAction::DrewFromDeck {
                                 drawn_card: drawn,
@@ -319,7 +320,7 @@ impl Game {
                         let target = self.rules.discard_target(player);
                         self.discard_piles[target].push(drawn);
                         self.boards[player].flip(pos)?;
-                        let clears = self.check_and_clear_columns(player);
+                        let clears = self.check_and_clear_columns(player, None);
                         (
                             TurnAction::DrewFromDeck {
                                 drawn_card: drawn,
@@ -344,7 +345,7 @@ impl Game {
                 let displaced = self.boards[player].replace(pos, drawn)?;
                 let target = self.rules.discard_target(player);
                 self.discard_piles[target].push(displaced);
-                let clears = self.check_and_clear_columns(player);
+                let clears = self.check_and_clear_columns(player, Some(displaced));
                 (
                     TurnAction::DrewFromDiscard {
                         pile_index: pile,
@@ -395,7 +396,7 @@ impl Game {
         self.deck.pop().ok_or(SkyjoError::EmptyDeck)
     }
 
-    fn check_and_clear_columns(&mut self, player: usize) -> Vec<ColumnClearEvent> {
+    fn check_and_clear_columns(&mut self, player: usize, displaced_card: Option<CardValue>) -> Vec<ColumnClearEvent> {
         let num_cols = self.boards[player].num_cols;
         let mut clears = Vec::new();
         for col in 0..num_cols {
@@ -409,6 +410,7 @@ impl Game {
                     player_index: player,
                     column: col,
                     card_value: val,
+                    displaced_card,
                 });
             }
         }

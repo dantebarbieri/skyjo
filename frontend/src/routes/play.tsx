@@ -471,7 +471,10 @@ function PlayBoard({
       {/* Column clear notification */}
       {state.last_column_clears.length > 0 && (
         <div className="text-center text-sm font-medium text-green-600">
-          Column cleared! ({state.last_column_clears.map(c => `column ${c.column + 1}`).join(', ')})
+          Column cleared! ({state.last_column_clears.map(c => {
+            const displaced = c.displaced_card !== null ? `, discarded ${c.displaced_card}` : '';
+            return `column ${c.column + 1}${displaced}`;
+          }).join('; ')})
         </div>
       )}
 
