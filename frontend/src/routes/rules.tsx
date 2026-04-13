@@ -249,6 +249,18 @@ function TurnFlowSection() {
     setFlipMode(false);
   }, [boardValues]);
 
+  const undoDraw = useCallback(() => {
+    if (phase === 'drew_from_discard') {
+      // Put discard draw back
+      setDiscardTop(drawnCard!);
+    }
+    setDrawnCard(null);
+    setPhase('choose_draw');
+    setMessage('Choose: draw from the deck or the discard pile');
+    setHighlightPositions(new Set());
+    setFlipMode(false);
+  }, [phase, drawnCard]);
+
   const handleDrawDeck = useCallback(() => {
     if (phase !== 'choose_draw') return;
     const card = 4; // pre-determined draw
@@ -404,9 +416,28 @@ function TurnFlowSection() {
             </div>
 
             {phase === 'drew_from_deck' && !flipMode && (
-              <div className="flex justify-center">
+              <div className="flex justify-center gap-2">
                 <Button variant="outline" size="sm" onClick={handleDiscardAndFlip}>
                   Discard & Flip Instead
+                </Button>
+                <Button variant="outline" size="sm" onClick={undoDraw}>
+                  Undo — Draw From Discard Instead
+                </Button>
+              </div>
+            )}
+
+            {phase === 'drew_from_deck' && flipMode && (
+              <div className="flex justify-center">
+                <Button variant="outline" size="sm" onClick={undoDraw}>
+                  Undo — Choose Again
+                </Button>
+              </div>
+            )}
+
+            {phase === 'drew_from_discard' && (
+              <div className="flex justify-center">
+                <Button variant="outline" size="sm" onClick={undoDraw}>
+                  Undo — Put Back & Choose Again
                 </Button>
               </div>
             )}

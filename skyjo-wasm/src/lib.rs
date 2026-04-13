@@ -1,9 +1,11 @@
 use wasm_bindgen::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::cell::RefCell;
+use std::collections::HashMap;
 
 use skyjo_core::{
-    AggregateStats, Game, GameHistory, GameStats, RandomStrategy, GreedyStrategy,
-    Rules, Simulator, SimulatorConfig, StandardRules, Strategy,
+    AggregateStats, Game, GameHistory, GameStats, InteractiveGame, PlayerAction,
+    RandomStrategy, GreedyStrategy, Rules, Simulator, SimulatorConfig, StandardRules, Strategy,
 };
 
 #[derive(Deserialize)]
@@ -247,4 +249,105 @@ pub fn get_rules_info(rules_name: &str) -> String {
     };
 
     serde_json::to_string(&info).unwrap()
+}
+
+// --- Interactive Game API ---
+
+thread_local! {
+    static INTERACTIVE_GAMES: RefCell<HashMap<u32, InteractiveGame>> = RefCell::new(HashMap::new());
+    static NEXT_GAME_ID: RefCell<u32> = const { RefCell::new(1) };
+}
+
+#[derive(Deserialize)]
+struct InteractiveGameConfig {
+    num_players: usize,
+    player_names: Vec<String>,
+    rules: Option<String>,
+    seed: u64,
+}
+
+#[derive(Serialize)]
+struct InteractiveGameCreated {
+    game_id: u32,
+    state: skyjo_core::InteractiveGameState,
+}
+
+fn create_interactive_game_inner(config_json: &str) -> Result<InteractiveGameCreated, String> {
+    let config: InteractiveGameConfig =
+        serde_json::from_str(config_json).map_err(|e| format!("Invalid config JSON: {e}"))?;
+
+    let rules_name = config.rules.as_deref().unwrap_or("Standard");
+    let rules = make_rules(rules_name)?;
+
+    let game = InteractiveGame::new(rules, config.num_players, config.player_names, config.seed)
+        .map_err(|e| format!("Game creation failed: {e}"))?;
+
+    let state = game.get_full_state();
+
+    let game_id = NEXT_GAME_ID.with(|id| {
+        let current = *id.borrow();
+        *id.borrow_mut() = current + 1;
+        current
+    });
+
+    INTERACTIVE_GAMES.with(|games| {
+        games.borrow_mut().insert(game_id, game);
+    });
+
+    Ok(InteractiveGameCreated { game_id, state })
+}
+
+#[wasm_bindgen]
+pub fn create_interactive_game(config_json: &str) -> String {
+    to_json_or_error(|| create_interactive_game_inner(config_json))
+}
+
+#[derive(Serialize)]
+struct GameStateResponse {
+    state: skyjo_core::InteractiveGameState,
+}
+
+#[wasm_bindgen]
+pub fn get_game_state(game_id: u32, player_index: usize) -> String {
+    to_json_or_error(|| {
+        INTERACTIVE_GAMES.with(|games| {
+            let games = games.borrow();
+            let game = games.get(&game_id).ok_or("Game not found")?;
+            let state = if player_index == usize::MAX {
+                game.get_full_state()
+            } else {
+                game.get_player_state(player_index)
+            };
+            Ok(GameStateResponse { state })
+        })
+    })
+}
+
+#[derive(Serialize)]
+struct ActionResponse {
+    state: skyjo_core::InteractiveGameState,
+}
+
+#[wasm_bindgen]
+pub fn apply_action(game_id: u32, action_json: &str) -> String {
+    to_json_or_error(|| {
+        let action: PlayerAction =
+            serde_json::from_str(action_json).map_err(|e| format!("Invalid action JSON: {e}"))?;
+
+        INTERACTIVE_GAMES.with(|games| {
+            let mut games = games.borrow_mut();
+            let game = games.get_mut(&game_id).ok_or("Game not found")?;
+            game.apply_action(action).map_err(|e| format!("Action failed: {e}"))?;
+            let state = game.get_full_state();
+            Ok(ActionResponse { state })
+        })
+    })
+}
+
+#[wasm_bindgen]
+pub fn destroy_interactive_game(game_id: u32) -> String {
+    INTERACTIVE_GAMES.with(|games| {
+        let removed = games.borrow_mut().remove(&game_id).is_some();
+        serde_json::json!({ "removed": removed }).to_string()
+    })
 }

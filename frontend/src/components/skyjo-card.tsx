@@ -100,7 +100,7 @@ export default function SkyjoCard({ slot, size = 'md', className, highlight }: S
         ref={cardRef}
         className={cn(
           SIZES[size],
-          'rounded-lg border-2 border-teal-700 bg-gradient-to-br from-teal-600 to-teal-800 flex items-center justify-center relative overflow-hidden will-change-transform select-none cursor-default',
+          'rounded-lg border-[3px] border-white bg-gradient-to-br from-teal-600 to-teal-800 flex items-center justify-center relative overflow-hidden will-change-transform select-none cursor-default',
           highlight && 'ring-2 ring-blue-400 ring-offset-1',
           className
         )}
@@ -109,7 +109,7 @@ export default function SkyjoCard({ slot, size = 'md', className, highlight }: S
           boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
         }}
       >
-        <div className="absolute inset-0 bg-hex-pattern opacity-30" />
+        <div className="absolute inset-0 bg-hex-pattern opacity-50" />
         <span className="relative text-white font-bold text-center leading-tight" style={{ fontSize: size === 'sm' ? '0.5rem' : size === 'md' ? '0.6rem' : '0.7rem' }}>
           SKYJO
         </span>
@@ -127,7 +127,7 @@ export default function SkyjoCard({ slot, size = 'md', className, highlight }: S
       ref={cardRef}
       className={cn(
         SIZES[size],
-        `rounded-lg border-2 bg-gradient-to-br ${colors.bg} ${colors.text} flex items-center justify-center relative overflow-hidden will-change-transform select-none cursor-default`,
+        `rounded-lg border-[3px] border-white bg-gradient-to-br ${colors.bg} ${colors.text} flex items-center justify-center relative overflow-hidden will-change-transform select-none cursor-default`,
         highlight && 'ring-2 ring-blue-400 ring-offset-1',
         className
       )}
@@ -136,8 +136,8 @@ export default function SkyjoCard({ slot, size = 'md', className, highlight }: S
         boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
       }}
     >
-      {/* Hexagonal mosaic pattern overlay */}
-      <div className="absolute inset-0 bg-hex-pattern opacity-20" />
+      {/* Stained-glass mosaic pattern overlay */}
+      <div className="absolute inset-0 bg-hex-pattern opacity-50" />
 
       {/* Top-left corner number in white circle */}
       <div className={cn(

@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 // Module-level cache so WASM functions are accessible after init
 let wasmModule: typeof import('../../pkg/skyjo_wasm.js') | null = null;
 
-interface WasmState {
+export interface WasmState {
   ready: boolean;
   strategies: string[];
   rules: string[];
