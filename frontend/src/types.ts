@@ -151,3 +151,53 @@ export type WorkerResponse =
   | { type: 'complete'; stats: ProgressStats; gamesCompleted: number; totalGames: number; elapsedMs: number; histories: GameHistory[] | null }
   | { type: 'realtimeGame'; history: GameHistory }
   | { type: 'error'; message: string };
+
+// Interactive game types (for Play mode)
+
+export type VisibleSlot =
+  | "Hidden"
+  | { Revealed: CardValue }
+  | "Cleared";
+
+export type ActionNeeded =
+  | { type: 'ChooseInitialFlips'; player: number; count: number }
+  | { type: 'ChooseDraw'; player: number; drawable_piles: number[] }
+  | { type: 'ChooseDeckDrawAction'; player: number; drawn_card: CardValue }
+  | { type: 'ChooseDiscardDrawPlacement'; player: number; drawn_card: CardValue }
+  | { type: 'RoundOver'; round_number: number; round_scores: number[]; cumulative_scores: number[]; going_out_player: number | null; end_of_round_clears: ColumnClearEvent[] }
+  | { type: 'GameOver'; final_scores: number[]; winners: number[]; round_number: number; round_scores: number[]; going_out_player: number | null; end_of_round_clears: ColumnClearEvent[] };
+
+export type PlayerAction =
+  | { type: 'InitialFlip'; position: number }
+  | { type: 'DrawFromDeck' }
+  | { type: 'DrawFromDiscard'; pile_index: number }
+  | { type: 'UndoDrawFromDiscard' }
+  | { type: 'KeepDeckDraw'; position: number }
+  | { type: 'DiscardAndFlip'; position: number }
+  | { type: 'PlaceDiscardDraw'; position: number }
+  | { type: 'ContinueToNextRound' };
+
+export interface InteractiveGameState {
+  num_players: number;
+  player_names: string[];
+  num_rows: number;
+  num_cols: number;
+  round_number: number;
+  current_player: number;
+  action_needed: ActionNeeded;
+  boards: VisibleSlot[][];
+  discard_tops: (CardValue | null)[];
+  discard_sizes: number[];
+  deck_remaining: number;
+  cumulative_scores: number[];
+  going_out_player: number | null;
+  is_final_turn: boolean;
+  last_column_clears: ColumnClearEvent[];
+}
+
+export interface PlayConfig {
+  num_players: number;
+  player_names: string[];
+  rules: string;
+  seed: number;
+}
