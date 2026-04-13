@@ -422,6 +422,8 @@ function openReplay(history: GameHistory) {
 
   const steps = buildAllSteps(history);
   let currentStep = 0;
+  let autoplayTimer: number | null = null;
+  let playing = false;
 
   // Build round index: first step index for each round
   const roundStarts = buildRoundStarts(steps, history);
@@ -431,8 +433,54 @@ function openReplay(history: GameHistory) {
   const prevBtn = $('#btn-prev') as HTMLButtonElement;
   const nextBtn = $('#btn-next') as HTMLButtonElement;
   const roundsNav = $('#replay-rounds') as HTMLElement;
+  const autoplayBtn = $('#btn-autoplay') as HTMLButtonElement;
+  const speedSelect = $('#replay-speed') as HTMLSelectElement;
+  const pauseRoundsCheckbox = $('#replay-pause-rounds') as HTMLInputElement;
 
   renderRoundsNav(roundsNav, history, roundStarts);
+
+  function getSpeed(): number {
+    return parseInt(speedSelect.value);
+  }
+
+  function stopAutoplay() {
+    if (autoplayTimer !== null) {
+      clearTimeout(autoplayTimer);
+      autoplayTimer = null;
+    }
+    playing = false;
+    autoplayBtn.textContent = 'Play';
+  }
+
+  function scheduleNext() {
+    autoplayTimer = window.setTimeout(() => {
+      autoplayTimer = null;
+      if (currentStep >= steps.length - 1) {
+        stopAutoplay();
+        return;
+      }
+
+      const prevRound = steps[currentStep].roundIndex;
+      currentStep++;
+      render();
+
+      // Pause at round boundary if enabled
+      const newRound = steps[currentStep].roundIndex;
+      if (pauseRoundsCheckbox.checked && newRound !== prevRound) {
+        stopAutoplay();
+        return;
+      }
+
+      scheduleNext();
+    }, getSpeed());
+  }
+
+  function startAutoplay() {
+    if (currentStep >= steps.length - 1) return;
+    playing = true;
+    autoplayBtn.textContent = 'Pause';
+    scheduleNext();
+  }
 
   function render() {
     renderReplayStep(container, steps[currentStep], history.strategy_names);
@@ -447,14 +495,34 @@ function openReplay(history: GameHistory) {
     });
   }
 
+  autoplayBtn.onclick = () => {
+    if (playing) {
+      stopAutoplay();
+    } else {
+      startAutoplay();
+    }
+  };
+
+  speedSelect.onchange = () => {
+    // Restart timer with new speed if playing
+    if (playing) {
+      if (autoplayTimer !== null) {
+        clearTimeout(autoplayTimer);
+      }
+      scheduleNext();
+    }
+  };
+
   prevBtn.onclick = () => {
     if (currentStep > 0) {
+      stopAutoplay();
       currentStep--;
       render();
     }
   };
   nextBtn.onclick = () => {
     if (currentStep < steps.length - 1) {
+      stopAutoplay();
       currentStep++;
       render();
     }
@@ -466,6 +534,7 @@ function openReplay(history: GameHistory) {
   function jumpToRound(roundIdx: number) {
     const start = roundStarts[roundIdx];
     if (start !== undefined) {
+      stopAutoplay();
       currentStep = start;
       render();
     }

@@ -1,18 +1,8 @@
-import type { GameHistory, Slot } from './types';
+import type { GameHistory } from './types';
 import { buildAllSteps, renderReplayStep } from './replay';
 import type { ReplayStep } from './replay';
 
 export type Speed = 'slow' | 'normal' | 'fast';
-
-function computeKnownScore(board: Slot[]): number {
-  let sum = 0;
-  for (const slot of board) {
-    if (typeof slot !== 'string' && 'Revealed' in slot) {
-      sum += slot.Revealed;
-    }
-  }
-  return sum;
-}
 
 export class RealtimePlayer {
   private container: HTMLElement;
@@ -141,19 +131,6 @@ export class RealtimePlayer {
   private render(): void {
     const step = this.steps[this.currentStep];
     renderReplayStep(this.container, step, this.strategyNames);
-
-    // Append known scores to each player board
-    const playerBoards = this.container.querySelectorAll('.player-board');
-    const { state } = step;
-    playerBoards.forEach((boardEl, p) => {
-      if (p < state.boards.length) {
-        const score = computeKnownScore(state.boards[p]);
-        const scoreDiv = document.createElement('div');
-        scoreDiv.className = 'known-score';
-        scoreDiv.textContent = `Known score: ${score}`;
-        boardEl.appendChild(scoreDiv);
-      }
-    });
 
     // Update game counter in header
     const counterEl = document.getElementById('realtime-game-counter');

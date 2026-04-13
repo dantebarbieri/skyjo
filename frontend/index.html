@@ -132,6 +132,19 @@
       <span id="step-counter"></span>
       <button id="btn-next" disabled>Next</button>
     </nav>
+    <div class="replay-autoplay">
+      <button id="btn-autoplay">Play</button>
+      <label>Speed:</label>
+      <select id="replay-speed">
+        <option value="1500">Slow</option>
+        <option value="600" selected>Normal</option>
+        <option value="150">Fast</option>
+      </select>
+      <label class="checkbox-label">
+        <input type="checkbox" id="replay-pause-rounds" checked />
+        Pause between rounds
+      </label>
+    </div>
     <div id="replay-container"></div>
   </section>
 

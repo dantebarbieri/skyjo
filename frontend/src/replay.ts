@@ -57,6 +57,25 @@ function slotValue(slot: Slot): CardValue | null {
   return null;
 }
 
+function computeKnownScore(board: Slot[]): number {
+  let sum = 0;
+  for (const slot of board) {
+    if (typeof slot !== 'string' && 'Revealed' in slot) {
+      sum += slot.Revealed;
+    }
+  }
+  return sum;
+}
+
+function computeTrueScore(board: Slot[]): number {
+  let sum = 0;
+  for (const slot of board) {
+    const val = slotValue(slot);
+    if (val !== null) sum += val;
+  }
+  return sum;
+}
+
 function applyColumnClears(
   state: ReplayState,
   clears: ColumnClearEvent[]
@@ -405,6 +424,13 @@ export function renderReplayStep(
       state.numCols
     );
     playerDiv.appendChild(grid);
+
+    const scoresDiv = document.createElement('div');
+    scoresDiv.className = 'board-scores';
+    const known = computeKnownScore(state.boards[p]);
+    const true_ = computeTrueScore(state.boards[p]);
+    scoresDiv.textContent = `Known: ${known} | True: ${true_}`;
+    playerDiv.appendChild(scoresDiv);
 
     boardsDiv.appendChild(playerDiv);
   }
