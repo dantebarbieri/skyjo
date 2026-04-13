@@ -48,8 +48,6 @@ jobs:
 
       # Node + pnpm for frontend
       - uses: pnpm/action-setup@v6
-        with:
-          version: 11.0.0-rc.0
       - uses: actions/setup-node@v6
         with:
           node-version: 22

@@ -11,7 +11,8 @@ export default function NavBar() {
   return (
     <nav className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="mx-auto max-w-7xl px-4 flex items-center h-14 gap-6">
-        <NavLink to="/" className="text-xl font-bold tracking-tight">
+        <NavLink to="/" className="flex items-center gap-2 text-xl font-bold tracking-tight">
+          <img src="/favicon.svg" alt="" className="h-7 w-7 rounded" aria-hidden="true" />
           Skyjo
         </NavLink>
         <div className="flex items-center gap-1">
