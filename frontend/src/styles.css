@@ -28,6 +28,49 @@ input[type="number"], select {
   padding: 0.25rem 0.5rem;
 }
 
+/* Config layout: form + rules info side by side */
+.config-layout {
+  display: flex;
+  gap: 2rem;
+  align-items: flex-start;
+}
+
+.config-layout form {
+  flex: 1;
+}
+
+.rules-info {
+  flex-shrink: 0;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  background: #fafafa;
+  font-size: 0.85rem;
+  min-width: 14rem;
+}
+
+.rules-info h3 {
+  margin: 0 0 0.5rem 0;
+  font-size: 0.95rem;
+}
+
+.rules-info table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.rules-info th {
+  text-align: left;
+  padding: 0.15rem 0.5rem 0.15rem 0;
+  color: #666;
+  font-weight: normal;
+  white-space: nowrap;
+}
+
+.rules-info td {
+  padding: 0.15rem 0;
+}
+
 .button-row {
   margin-top: 1rem;
   display: flex;
@@ -228,6 +271,7 @@ td:first-child, th:first-child {
 
 .replay-autoplay label {
   font-size: 0.9rem;
+  min-width: auto;
 }
 
 .checkbox-label {
@@ -235,6 +279,62 @@ td:first-child, th:first-child {
   align-items: center;
   gap: 0.3rem;
   cursor: pointer;
+}
+
+/* Replay legend */
+.replay-legend {
+  margin-bottom: 1rem;
+  font-size: 0.85rem;
+  color: #555;
+}
+
+.replay-legend summary {
+  cursor: pointer;
+  font-weight: bold;
+  color: #333;
+}
+
+.replay-legend ul {
+  margin: 0.4rem 0 0 0;
+  padding-left: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+}
+
+.replay-legend li {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.legend-swatch {
+  display: inline-block;
+  width: 1rem;
+  height: 1rem;
+  border: 2px solid;
+  border-radius: 2px;
+}
+
+.legend-active {
+  border-color: #1976d2;
+  background: #fff;
+}
+
+.legend-went-out-good {
+  border-color: #4caf50;
+  background: #e8f5e9;
+}
+
+.legend-went-out-penalized {
+  border-color: #f44336;
+  background: #ffebee;
+}
+
+.legend-went-out-safe {
+  border-color: #1976d2;
+  background: #e3f2fd;
 }
 
 /* Board display */
@@ -354,6 +454,10 @@ td:first-child, th:first-child {
   margin-bottom: 1rem;
 }
 
+#realtime-controls label {
+  min-width: auto;
+}
+
 .speed-btn {
   padding: 0.3rem 0.8rem;
   border: 1px solid #ccc;
@@ -373,12 +477,33 @@ td:first-child, th:first-child {
   border-color: #1976d2;
 }
 
+/* Going-out player highlights at round end */
+.went-out-good {
+  border-color: #4caf50 !important;
+  background: #e8f5e9;
+}
+
+.went-out-penalized {
+  border-color: #f44336 !important;
+  background: #ffebee;
+}
+
+.went-out-safe {
+  border-color: #1976d2 !important;
+  background: #e3f2fd;
+}
+
 /* Known/true score under each player board */
 .board-scores {
   text-align: center;
   margin-top: 0.4rem;
   font-size: 0.85rem;
   color: #555;
+}
+
+.board-scores.lowest-score {
+  font-weight: bold;
+  color: #333;
 }
 
 /* Waiting state before simulation starts */

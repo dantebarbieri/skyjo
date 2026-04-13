@@ -23,6 +23,7 @@ export interface ReplayState {
   currentPlayer: number | null;
   roundScores: number[] | null;
   cumulativeScores: number[];
+  goingOutPlayer: number | null;
 }
 
 export interface ReplayStep {
@@ -47,6 +48,7 @@ function cloneState(state: ReplayState): ReplayState {
     discardPiles: cloneDiscardPiles(state.discardPiles),
     cumulativeScores: [...state.cumulativeScores],
     roundScores: state.roundScores ? [...state.roundScores] : null,
+    goingOutPlayer: state.goingOutPlayer,
   };
 }
 
@@ -131,6 +133,7 @@ function buildRoundSteps(
     currentPlayer: null,
     roundScores: null,
     cumulativeScores: [...prevCumulativeScores],
+    goingOutPlayer: null,
   };
   steps.push({
     state: cloneState(state),
@@ -180,6 +183,7 @@ function buildRoundSteps(
     applyColumnClears(state, round.end_of_round_clears);
     state.description = 'Round over. All cards revealed.';
     state.currentPlayer = null;
+    state.goingOutPlayer = round.going_out_player;
     state.roundScores = [...round.round_scores];
     state.cumulativeScores = [...round.cumulative_scores];
     steps.push({
@@ -402,6 +406,13 @@ export function renderReplayStep(
   const boardsDiv = document.createElement('div');
   boardsDiv.className = 'boards-container';
 
+  // Find lowest round score for bold highlighting at round end
+  const isRoundEnd = state.roundScores !== null;
+  let lowestRoundScore = Infinity;
+  if (isRoundEnd) {
+    lowestRoundScore = Math.min(...state.roundScores!);
+  }
+
   for (let p = 0; p < state.boards.length; p++) {
     const playerDiv = document.createElement('div');
     playerDiv.className = 'player-board';
@@ -409,13 +420,25 @@ export function renderReplayStep(
       playerDiv.classList.add('active-player');
     }
 
+    // Going-out player highlighting at round end
+    if (isRoundEnd && state.goingOutPlayer === p) {
+      const roundScore = state.roundScores![p];
+      const isSoloLowest = roundScore === lowestRoundScore
+        && state.roundScores!.filter((s) => s === lowestRoundScore).length === 1;
+      const wouldBePenalized = roundScore > 0 && !isSoloLowest;
+
+      if (isSoloLowest) {
+        playerDiv.classList.add('went-out-good');
+      } else if (wouldBePenalized) {
+        playerDiv.classList.add('went-out-penalized');
+      } else {
+        // Not penalized (score <= 0) but not the lowest
+        playerDiv.classList.add('went-out-safe');
+      }
+    }
+
     const label = document.createElement('h4');
     label.textContent = `Player ${p + 1} (${strategyNames[p]})`;
-    if (state.roundScores !== null) {
-      label.textContent += ` — Round: ${state.roundScores[p]}, Total: ${state.cumulativeScores[p]}`;
-    } else if (state.cumulativeScores[p] !== 0) {
-      label.textContent += ` — Total: ${state.cumulativeScores[p]}`;
-    }
     playerDiv.appendChild(label);
 
     const grid = renderBoardGrid(
@@ -429,7 +452,19 @@ export function renderReplayStep(
     scoresDiv.className = 'board-scores';
     const known = computeKnownScore(state.boards[p]);
     const true_ = computeTrueScore(state.boards[p]);
-    scoresDiv.textContent = `Known: ${known} | True: ${true_}`;
+    if (known === true_) {
+      // All cards revealed (or all cleared) — show single score
+      let scoreText = `Score: ${known}`;
+      if (isRoundEnd && state.goingOutPlayer === p && state.roundScores![p] !== known) {
+        scoreText += ` (${state.roundScores![p]})`;
+      }
+      scoresDiv.textContent = scoreText;
+    } else {
+      scoresDiv.textContent = `Known: ${known} | True: ${true_}`;
+    }
+    if (isRoundEnd && state.roundScores![p] === lowestRoundScore) {
+      scoresDiv.classList.add('lowest-score');
+    }
     playerDiv.appendChild(scoresDiv);
 
     boardsDiv.appendChild(playerDiv);

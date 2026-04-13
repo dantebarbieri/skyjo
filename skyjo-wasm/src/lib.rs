@@ -197,3 +197,54 @@ pub fn get_available_strategies() -> String {
 pub fn get_available_rules() -> String {
     serde_json::to_string(&["Standard"]).unwrap()
 }
+
+#[derive(Serialize)]
+struct RulesInfo {
+    name: String,
+    grid: String,
+    initial_flips: usize,
+    end_threshold: i32,
+    discard_piles: String,
+    column_clear: usize,
+    going_out_penalty: String,
+    reshuffle_on_empty: bool,
+    deck_size: usize,
+}
+
+#[wasm_bindgen]
+pub fn get_rules_info(rules_name: &str) -> String {
+    let rules = match make_rules(rules_name) {
+        Ok(r) => r,
+        Err(e) => return serde_json::json!({ "error": e }).to_string(),
+    };
+
+    let penalty_desc = {
+        // Probe the penalty function to describe its behavior
+        let doubled = rules.apply_going_out_penalty(10, 5, false);
+        let solo_lowest = rules.apply_going_out_penalty(10, 15, true);
+        let negative = rules.apply_going_out_penalty(-5, -10, false);
+        if doubled == 20 && solo_lowest == 10 && negative == -5 {
+            "Score doubled if not solo lowest (non-positive exempt)".to_string()
+        } else {
+            format!("Custom (10 not lowest={doubled}, 10 solo lowest={solo_lowest}, -5 not lowest={negative})")
+        }
+    };
+
+    let info = RulesInfo {
+        name: rules.name().to_string(),
+        grid: format!("{} x {}", rules.num_rows(), rules.num_cols()),
+        initial_flips: rules.initial_flips(),
+        end_threshold: rules.end_threshold(),
+        discard_piles: if rules.discard_pile_count(4) == 1 {
+            "1 (shared)".to_string()
+        } else {
+            format!("{} (per-player)", rules.discard_pile_count(4))
+        },
+        column_clear: rules.column_clear_threshold(),
+        going_out_penalty: penalty_desc,
+        reshuffle_on_empty: rules.reshuffle_on_empty_deck(),
+        deck_size: rules.build_deck().len(),
+    };
+
+    serde_json::to_string(&info).unwrap()
+}

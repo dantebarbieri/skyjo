@@ -1,6 +1,7 @@
 import init, {
   get_available_strategies,
   get_available_rules,
+  get_rules_info,
 } from '../pkg/skyjo_wasm.js';
 import type { GameHistory, ProgressStats, SimConfig, WorkerResponse } from './types';
 import { buildAllSteps, renderReplayStep, type ReplayStep } from './replay';
@@ -38,10 +39,15 @@ function setupForm() {
 
   updateStrategySelects(parseInt(playerCountSelect.value));
   updatePreview();
+  updateRulesInfo(rulesSelect.value);
 
   playerCountSelect.addEventListener('change', () => {
     updateStrategySelects(parseInt(playerCountSelect.value));
     updatePreview();
+  });
+
+  rulesSelect.addEventListener('change', () => {
+    updateRulesInfo(rulesSelect.value);
   });
 
   $('#btn-random-seed').addEventListener('click', () => {
@@ -97,6 +103,38 @@ function updateStrategySelects(count: number) {
     select.addEventListener('change', updatePreview);
   }
   updatePreview();
+}
+
+interface RulesInfo {
+  name: string;
+  grid: string;
+  initial_flips: number;
+  end_threshold: number;
+  discard_piles: string;
+  column_clear: number;
+  going_out_penalty: string;
+  reshuffle_on_empty: boolean;
+  deck_size: number;
+}
+
+function updateRulesInfo(rulesName: string) {
+  const table = $('#rules-info-table') as HTMLTableElement;
+  const info: RulesInfo = JSON.parse(get_rules_info(rulesName));
+
+  const rows: [string, string][] = [
+    ['Grid', info.grid],
+    ['Initial flips', String(info.initial_flips)],
+    ['Deck size', String(info.deck_size)],
+    ['End threshold', `\u2265 ${info.end_threshold}`],
+    ['Discard piles', info.discard_piles],
+    ['Column clear', `${info.column_clear} matching`],
+    ['Going out penalty', info.going_out_penalty],
+    ['Reshuffle on empty', info.reshuffle_on_empty ? 'Yes' : 'No'],
+  ];
+
+  table.innerHTML = rows
+    .map(([label, value]) => `<tr><th>${label}</th><td>${value}</td></tr>`)
+    .join('');
 }
 
 function getPlayerStrategies(): string[] {
@@ -460,17 +498,15 @@ function openReplay(history: GameHistory) {
         return;
       }
 
-      const prevRound = steps[currentStep].roundIndex;
-      currentStep++;
-      render();
-
-      // Pause at round boundary if enabled
-      const newRound = steps[currentStep].roundIndex;
-      if (pauseRoundsCheckbox.checked && newRound !== prevRound) {
+      // Pause before crossing into a new round
+      const nextRound = steps[currentStep + 1].roundIndex;
+      if (pauseRoundsCheckbox.checked && nextRound !== steps[currentStep].roundIndex) {
         stopAutoplay();
         return;
       }
 
+      currentStep++;
+      render();
       scheduleNext();
     }, getSpeed());
   }
