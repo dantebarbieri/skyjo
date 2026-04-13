@@ -49,7 +49,7 @@ jobs:
       # Node + pnpm for frontend
       - uses: pnpm/action-setup@v6
         with:
-          version: latest
+          version: 10
       - uses: actions/setup-node@v6
         with:
           node-version: 22
