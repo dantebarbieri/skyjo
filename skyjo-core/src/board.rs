@@ -319,7 +319,13 @@ mod tests {
     fn invalid_position_errors() {
         let mut board = make_board();
         let out_of_bounds = board.total_slots(); // 12
-        assert_eq!(board.flip(out_of_bounds), Err(SkyjoError::InvalidPosition(out_of_bounds)));
-        assert_eq!(board.replace(out_of_bounds, 5), Err(SkyjoError::InvalidPosition(out_of_bounds)));
+        assert_eq!(
+            board.flip(out_of_bounds),
+            Err(SkyjoError::InvalidPosition(out_of_bounds))
+        );
+        assert_eq!(
+            board.replace(out_of_bounds, 5),
+            Err(SkyjoError::InvalidPosition(out_of_bounds))
+        );
     }
 }

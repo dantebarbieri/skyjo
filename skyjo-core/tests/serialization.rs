@@ -71,8 +71,7 @@ fn column_clear_event_round_trips() {
     };
 
     let json = serde_json::to_string(&event).unwrap();
-    let deserialized: skyjo_core::history::ColumnClearEvent =
-        serde_json::from_str(&json).unwrap();
+    let deserialized: skyjo_core::history::ColumnClearEvent = serde_json::from_str(&json).unwrap();
 
     assert_eq!(event.player_index, deserialized.player_index);
     assert_eq!(event.column, deserialized.column);

@@ -193,7 +193,9 @@ describe('useInteractiveGame', () => {
     });
 
     expect(mockWasm.apply_bot_action).toHaveBeenCalledWith(1, 'Random');
-    expect(result.current.gameState!.action_needed.player).toBe(1);
+    const action = result.current.gameState!.action_needed;
+    expect(action.type).toBe('ChooseInitialFlips');
+    expect((action as { player: number }).player).toBe(1);
   });
 
   it('resetGame clears state back to setup', async () => {

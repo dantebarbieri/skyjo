@@ -1,4 +1,4 @@
-use skyjo_core::{Game, GreedyStrategy, StandardRules, Strategy, Rules};
+use skyjo_core::{Game, GreedyStrategy, Rules, StandardRules, Strategy};
 
 /// Regression test: 100 games with 4 Greedy players should all complete.
 /// Previously, certain seeds caused infinite loops due to SmallRng using

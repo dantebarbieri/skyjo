@@ -1,6 +1,6 @@
-use rand::seq::SliceRandom;
-use rand::rngs::StdRng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
+use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
 
 use crate::board::PlayerBoard;
@@ -84,10 +84,18 @@ pub struct InteractiveGameState {
 
 #[derive(Debug, Clone, PartialEq)]
 enum Phase {
-    SetupFlips { next_player: usize, flips_remaining: usize },
+    SetupFlips {
+        next_player: usize,
+        flips_remaining: usize,
+    },
     WaitingForDraw,
-    WaitingForDeckDrawAction { drawn_card: CardValue },
-    WaitingForDiscardPlacement { drawn_card: CardValue, source_pile: usize },
+    WaitingForDeckDrawAction {
+        drawn_card: CardValue,
+    },
+    WaitingForDiscardPlacement {
+        drawn_card: CardValue,
+        source_pile: usize,
+    },
     RoundOver,
     GameOver,
 }
@@ -147,7 +155,10 @@ impl InteractiveGame {
             discard_piles: Vec::new(),
             cumulative_scores: vec![0; num_players],
             round_number: 0,
-            phase: Phase::SetupFlips { next_player: 0, flips_remaining: 0 }, // overwritten by deal_round
+            phase: Phase::SetupFlips {
+                next_player: 0,
+                flips_remaining: 0,
+            }, // overwritten by deal_round
             going_out_player: None,
             turns_after_goer: 0,
             current_player: 0,
@@ -201,7 +212,10 @@ impl InteractiveGame {
         self.last_column_clears.clear();
 
         // Start with setup flips for player 0
-        self.phase = Phase::SetupFlips { next_player: 0, flips_remaining: self.rules.initial_flips() };
+        self.phase = Phase::SetupFlips {
+            next_player: 0,
+            flips_remaining: self.rules.initial_flips(),
+        };
 
         Ok(())
     }
@@ -209,13 +223,18 @@ impl InteractiveGame {
     /// Get the current action needed from the game.
     pub fn get_action_needed(&self) -> ActionNeeded {
         match &self.phase {
-            Phase::SetupFlips { next_player, flips_remaining } => ActionNeeded::ChooseInitialFlips {
+            Phase::SetupFlips {
+                next_player,
+                flips_remaining,
+            } => ActionNeeded::ChooseInitialFlips {
                 player: *next_player,
                 count: *flips_remaining,
             },
             Phase::WaitingForDraw => ActionNeeded::ChooseDraw {
                 player: self.current_player,
-                drawable_piles: self.rules.drawable_piles(self.current_player, self.num_players),
+                drawable_piles: self
+                    .rules
+                    .drawable_piles(self.current_player, self.num_players),
             },
             Phase::WaitingForDeckDrawAction { drawn_card } => ActionNeeded::ChooseDeckDrawAction {
                 player: self.current_player,
@@ -254,14 +273,23 @@ impl InteractiveGame {
         self.last_column_clears.clear();
 
         match (&self.phase, action) {
-            (Phase::SetupFlips { next_player, flips_remaining }, PlayerAction::InitialFlip { position }) => {
+            (
+                Phase::SetupFlips {
+                    next_player,
+                    flips_remaining,
+                },
+                PlayerAction::InitialFlip { position },
+            ) => {
                 let player = *next_player;
                 let remaining = *flips_remaining;
                 self.boards[player].flip(position)?;
 
                 if remaining > 1 {
                     // Same player, one fewer flip remaining
-                    self.phase = Phase::SetupFlips { next_player: player, flips_remaining: remaining - 1 };
+                    self.phase = Phase::SetupFlips {
+                        next_player: player,
+                        flips_remaining: remaining - 1,
+                    };
                 } else {
                     // This player is done — move to next player or start the game
                     let next = player + 1;
@@ -299,26 +327,38 @@ impl InteractiveGame {
             }
 
             (Phase::WaitingForDraw, PlayerAction::DrawFromDiscard { pile_index }) => {
-                let drawable = self.rules.drawable_piles(self.current_player, self.num_players);
+                let drawable = self
+                    .rules
+                    .drawable_piles(self.current_player, self.num_players);
                 if !drawable.contains(&pile_index) {
                     return Err(SkyjoError::EmptyDiscardPile);
                 }
                 let drawn = self.discard_piles[pile_index]
                     .pop()
                     .ok_or(SkyjoError::EmptyDiscardPile)?;
-                self.phase = Phase::WaitingForDiscardPlacement { drawn_card: drawn, source_pile: pile_index };
+                self.phase = Phase::WaitingForDiscardPlacement {
+                    drawn_card: drawn,
+                    source_pile: pile_index,
+                };
             }
 
-            (Phase::WaitingForDeckDrawAction { drawn_card }, PlayerAction::KeepDeckDraw { position }) => {
+            (
+                Phase::WaitingForDeckDrawAction { drawn_card },
+                PlayerAction::KeepDeckDraw { position },
+            ) => {
                 let drawn = *drawn_card;
                 let displaced = self.boards[self.current_player].replace(position, drawn)?;
                 let target = self.rules.discard_target(self.current_player);
                 self.discard_piles[target].push(displaced);
-                self.last_column_clears = self.check_and_clear_columns(self.current_player, Some(displaced));
+                self.last_column_clears =
+                    self.check_and_clear_columns(self.current_player, Some(displaced));
                 self.advance_turn();
             }
 
-            (Phase::WaitingForDeckDrawAction { drawn_card }, PlayerAction::DiscardAndFlip { position }) => {
+            (
+                Phase::WaitingForDeckDrawAction { drawn_card },
+                PlayerAction::DiscardAndFlip { position },
+            ) => {
                 let drawn = *drawn_card;
                 let target = self.rules.discard_target(self.current_player);
                 self.discard_piles[target].push(drawn);
@@ -327,19 +367,29 @@ impl InteractiveGame {
                 self.advance_turn();
             }
 
-            (Phase::WaitingForDiscardPlacement { drawn_card, source_pile }, PlayerAction::UndoDrawFromDiscard) => {
+            (
+                Phase::WaitingForDiscardPlacement {
+                    drawn_card,
+                    source_pile,
+                },
+                PlayerAction::UndoDrawFromDiscard,
+            ) => {
                 let drawn = *drawn_card;
                 let pile = *source_pile;
                 self.discard_piles[pile].push(drawn);
                 self.phase = Phase::WaitingForDraw;
             }
 
-            (Phase::WaitingForDiscardPlacement { drawn_card, .. }, PlayerAction::PlaceDiscardDraw { position }) => {
+            (
+                Phase::WaitingForDiscardPlacement { drawn_card, .. },
+                PlayerAction::PlaceDiscardDraw { position },
+            ) => {
                 let drawn = *drawn_card;
                 let displaced = self.boards[self.current_player].replace(position, drawn)?;
                 let target = self.rules.discard_target(self.current_player);
                 self.discard_piles[target].push(displaced);
-                self.last_column_clears = self.check_and_clear_columns(self.current_player, Some(displaced));
+                self.last_column_clears =
+                    self.check_and_clear_columns(self.current_player, Some(displaced));
                 self.advance_turn();
             }
 
@@ -495,7 +545,11 @@ impl InteractiveGame {
         self.deck.pop().ok_or(SkyjoError::EmptyDeck)
     }
 
-    fn check_and_clear_columns(&mut self, player: usize, displaced_card: Option<CardValue>) -> Vec<ColumnClearEvent> {
+    fn check_and_clear_columns(
+        &mut self,
+        player: usize,
+        displaced_card: Option<CardValue>,
+    ) -> Vec<ColumnClearEvent> {
         let num_cols = self.boards[player].num_cols;
         let mut clears = Vec::new();
         for col in 0..num_cols {
@@ -562,11 +616,7 @@ impl InteractiveGame {
 
     /// Get the game state from a specific player's perspective (hides other players' hidden cards).
     pub fn get_player_state(&self, _player: usize) -> InteractiveGameState {
-        let boards: Vec<Vec<VisibleSlot>> = self
-            .boards
-            .iter()
-            .map(|b| b.visible_view())
-            .collect();
+        let boards: Vec<Vec<VisibleSlot>> = self.boards.iter().map(|b| b.visible_view()).collect();
 
         let discard_tops: Vec<Option<CardValue>> = self
             .discard_piles
@@ -599,22 +649,31 @@ impl InteractiveGame {
     /// Uses the game's RNG for deterministic bot behavior.
     pub fn get_bot_action(&mut self, strategy: &dyn Strategy) -> Result<PlayerAction> {
         match &self.phase {
-            Phase::SetupFlips { next_player, flips_remaining } => {
+            Phase::SetupFlips {
+                next_player,
+                flips_remaining,
+            } => {
                 let player = *next_player;
                 let remaining = *flips_remaining;
                 let view = self.build_strategy_view(player);
                 let positions = strategy.choose_initial_flips(&view, remaining, &mut self.rng);
                 if positions.is_empty() {
-                    return Err(SkyjoError::InvalidAction("Strategy returned no flip positions".into()));
+                    return Err(SkyjoError::InvalidAction(
+                        "Strategy returned no flip positions".into(),
+                    ));
                 }
-                Ok(PlayerAction::InitialFlip { position: positions[0] })
+                Ok(PlayerAction::InitialFlip {
+                    position: positions[0],
+                })
             }
             Phase::WaitingForDraw => {
                 let view = self.build_strategy_view(self.current_player);
                 let choice = strategy.choose_draw(&view, &mut self.rng);
                 match choice {
                     DrawChoice::DrawFromDeck => Ok(PlayerAction::DrawFromDeck),
-                    DrawChoice::DrawFromDiscard(pile_index) => Ok(PlayerAction::DrawFromDiscard { pile_index }),
+                    DrawChoice::DrawFromDiscard(pile_index) => {
+                        Ok(PlayerAction::DrawFromDiscard { pile_index })
+                    }
                 }
             }
             Phase::WaitingForDeckDrawAction { drawn_card } => {
@@ -623,17 +682,22 @@ impl InteractiveGame {
                 let action = strategy.choose_deck_draw_action(&view, drawn_card, &mut self.rng);
                 match action {
                     DeckDrawAction::Keep(position) => Ok(PlayerAction::KeepDeckDraw { position }),
-                    DeckDrawAction::DiscardAndFlip(position) => Ok(PlayerAction::DiscardAndFlip { position }),
+                    DeckDrawAction::DiscardAndFlip(position) => {
+                        Ok(PlayerAction::DiscardAndFlip { position })
+                    }
                 }
             }
             Phase::WaitingForDiscardPlacement { drawn_card, .. } => {
                 let drawn_card = *drawn_card;
                 let view = self.build_strategy_view(self.current_player);
-                let position = strategy.choose_discard_draw_placement(&view, drawn_card, &mut self.rng);
+                let position =
+                    strategy.choose_discard_draw_placement(&view, drawn_card, &mut self.rng);
                 Ok(PlayerAction::PlaceDiscardDraw { position })
             }
             Phase::RoundOver => Ok(PlayerAction::ContinueToNextRound),
-            Phase::GameOver => Err(SkyjoError::InvalidAction("Game is over, no action needed".into())),
+            Phase::GameOver => Err(SkyjoError::InvalidAction(
+                "Game is over, no action needed".into(),
+            )),
         }
     }
 
@@ -710,7 +774,10 @@ mod tests {
                 assert_eq!(player, 0);
                 assert_eq!(count, 1);
             }
-            other => panic!("Expected ChooseInitialFlips for player 0 (second flip), got {:?}", other),
+            other => panic!(
+                "Expected ChooseInitialFlips for player 0 (second flip), got {:?}",
+                other
+            ),
         }
 
         // Player 0 second flip
@@ -728,7 +795,8 @@ mod tests {
         }
 
         // Player 1 first flip
-        game.apply_action(PlayerAction::InitialFlip { position: 0 }).unwrap();
+        game.apply_action(PlayerAction::InitialFlip { position: 0 })
+            .unwrap();
 
         // Player 1 second flip
         let result = game
@@ -756,10 +824,14 @@ mod tests {
         .unwrap();
 
         // Setup flips for both players (one at a time)
-        game.apply_action(PlayerAction::InitialFlip { position: 0 }).unwrap();
-        game.apply_action(PlayerAction::InitialFlip { position: 1 }).unwrap();
-        game.apply_action(PlayerAction::InitialFlip { position: 0 }).unwrap();
-        game.apply_action(PlayerAction::InitialFlip { position: 1 }).unwrap();
+        game.apply_action(PlayerAction::InitialFlip { position: 0 })
+            .unwrap();
+        game.apply_action(PlayerAction::InitialFlip { position: 1 })
+            .unwrap();
+        game.apply_action(PlayerAction::InitialFlip { position: 0 })
+            .unwrap();
+        game.apply_action(PlayerAction::InitialFlip { position: 1 })
+            .unwrap();
 
         // Draw from deck
         let result = game.apply_action(PlayerAction::DrawFromDeck).unwrap();
@@ -793,10 +865,14 @@ mod tests {
         .unwrap();
 
         // Setup flips (one at a time)
-        game.apply_action(PlayerAction::InitialFlip { position: 0 }).unwrap();
-        game.apply_action(PlayerAction::InitialFlip { position: 1 }).unwrap();
-        game.apply_action(PlayerAction::InitialFlip { position: 0 }).unwrap();
-        game.apply_action(PlayerAction::InitialFlip { position: 1 }).unwrap();
+        game.apply_action(PlayerAction::InitialFlip { position: 0 })
+            .unwrap();
+        game.apply_action(PlayerAction::InitialFlip { position: 1 })
+            .unwrap();
+        game.apply_action(PlayerAction::InitialFlip { position: 0 })
+            .unwrap();
+        game.apply_action(PlayerAction::InitialFlip { position: 1 })
+            .unwrap();
 
         // Draw from deck
         game.apply_action(PlayerAction::DrawFromDeck).unwrap();
@@ -823,10 +899,14 @@ mod tests {
         .unwrap();
 
         // Setup flips (one at a time)
-        game.apply_action(PlayerAction::InitialFlip { position: 0 }).unwrap();
-        game.apply_action(PlayerAction::InitialFlip { position: 1 }).unwrap();
-        game.apply_action(PlayerAction::InitialFlip { position: 0 }).unwrap();
-        game.apply_action(PlayerAction::InitialFlip { position: 1 }).unwrap();
+        game.apply_action(PlayerAction::InitialFlip { position: 0 })
+            .unwrap();
+        game.apply_action(PlayerAction::InitialFlip { position: 1 })
+            .unwrap();
+        game.apply_action(PlayerAction::InitialFlip { position: 0 })
+            .unwrap();
+        game.apply_action(PlayerAction::InitialFlip { position: 1 })
+            .unwrap();
 
         // Draw from discard
         let result = game
@@ -999,7 +1079,10 @@ mod tests {
 
         // Get a draw action
         let action = game.get_bot_action(&strategy).unwrap();
-        assert!(matches!(action, PlayerAction::DrawFromDeck | PlayerAction::DrawFromDiscard { .. }));
+        assert!(matches!(
+            action,
+            PlayerAction::DrawFromDeck | PlayerAction::DrawFromDiscard { .. }
+        ));
         game.apply_action(action).unwrap();
     }
 
@@ -1024,15 +1107,18 @@ mod tests {
 
         // Play a full turn
         let action = game.get_bot_action(&strategy).unwrap();
-        assert!(matches!(action, PlayerAction::DrawFromDeck | PlayerAction::DrawFromDiscard { .. }));
+        assert!(matches!(
+            action,
+            PlayerAction::DrawFromDeck | PlayerAction::DrawFromDiscard { .. }
+        ));
         game.apply_action(action).unwrap();
 
         let action = game.get_bot_action(&strategy).unwrap();
         assert!(matches!(
             action,
             PlayerAction::KeepDeckDraw { .. }
-            | PlayerAction::DiscardAndFlip { .. }
-            | PlayerAction::PlaceDiscardDraw { .. }
+                | PlayerAction::DiscardAndFlip { .. }
+                | PlayerAction::PlaceDiscardDraw { .. }
         ));
         game.apply_action(action).unwrap();
     }
@@ -1064,7 +1150,12 @@ mod tests {
             assert!(max_actions > 0, "Bot game did not complete in time");
         }
 
-        if let ActionNeeded::GameOver { winners, final_scores, .. } = game.get_action_needed() {
+        if let ActionNeeded::GameOver {
+            winners,
+            final_scores,
+            ..
+        } = game.get_action_needed()
+        {
             assert!(!winners.is_empty());
             assert_eq!(final_scores.len(), 3);
             assert!(final_scores.iter().any(|&s| s >= 100));

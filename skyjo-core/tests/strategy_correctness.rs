@@ -1,7 +1,7 @@
 use skyjo_core::*;
 
-use rand::rngs::StdRng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 
 fn make_view(board: Vec<VisibleSlot>, discard_top: Option<CardValue>) -> StrategyView {
     let mut discard_piles = vec![Vec::new()];

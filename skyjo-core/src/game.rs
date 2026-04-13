@@ -2,8 +2,8 @@ use rand::seq::SliceRandom;
 // Use StdRng (ChaCha12) instead of StdRng to ensure identical RNG sequences
 // across all platforms. StdRng uses different algorithms on 32-bit (WASM)
 // vs 64-bit (native), causing different game outcomes for the same seed.
-use rand::rngs::StdRng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 
 /// Default safety limit: maximum turns per round to prevent infinite loops.
 /// In standard Skyjo (150 cards, 4 cols × 3 rows), a round typically takes
@@ -396,7 +396,11 @@ impl Game {
         self.deck.pop().ok_or(SkyjoError::EmptyDeck)
     }
 
-    fn check_and_clear_columns(&mut self, player: usize, displaced_card: Option<CardValue>) -> Vec<ColumnClearEvent> {
+    fn check_and_clear_columns(
+        &mut self,
+        player: usize,
+        displaced_card: Option<CardValue>,
+    ) -> Vec<ColumnClearEvent> {
         let num_cols = self.boards[player].num_cols;
         let mut clears = Vec::new();
         for col in 0..num_cols {

@@ -5,7 +5,7 @@
 [![Docker Build](https://github.com/dantebarbieri/skyjo/actions/workflows/docker.yml/badge.svg)](https://github.com/dantebarbieri/skyjo/actions/workflows/docker.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-A web-based[Skyjo](https://magilano.com/en/products/skyjo) card game — play it in your browser or simulate thousands of games in seconds. Powered by a Rust engine compiled to WebAssembly.
+A web-based [Skyjo](https://magilano.com/en/products/skyjo) card game — play it in your browser or simulate thousands of games in seconds. Powered by a Rust engine compiled to WebAssembly.
 
 **[Live Demo →](https://skyjo.danteb.com)**
 

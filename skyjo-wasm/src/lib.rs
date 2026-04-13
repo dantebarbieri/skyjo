@@ -1,11 +1,11 @@
-use wasm_bindgen::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::HashMap;
+use wasm_bindgen::prelude::*;
 
 use skyjo_core::{
-    AggregateStats, Game, GameHistory, GameStats, InteractiveGame, PlayerAction,
-    RandomStrategy, GreedyStrategy, Rules, Simulator, SimulatorConfig, StandardRules, Strategy,
+    AggregateStats, Game, GameHistory, GameStats, GreedyStrategy, InteractiveGame, PlayerAction,
+    RandomStrategy, Rules, Simulator, SimulatorConfig, StandardRules, Strategy,
 };
 
 #[derive(Deserialize)]
@@ -52,10 +52,7 @@ fn make_rules_factory(name: &str) -> Result<Box<dyn Fn() -> Box<dyn Rules>>, Str
 }
 
 fn make_strategies(names: &[String]) -> Result<Vec<Box<dyn Strategy>>, String> {
-    names
-        .iter()
-        .map(|name| make_strategy(name))
-        .collect()
+    names.iter().map(|name| make_strategy(name)).collect()
 }
 
 fn make_strategy(name: &str) -> Result<Box<dyn Strategy>, String> {
@@ -136,7 +133,9 @@ fn run_single_game(config_json: &str) -> Result<GameStats, String> {
         serde_json::from_str(config_json).map_err(|e| format!("Invalid config JSON: {e}"))?;
 
     let game = create_game(&config)?;
-    let history = game.play().map_err(|e| format!("Game play failed: {e:?}"))?;
+    let history = game
+        .play()
+        .map_err(|e| format!("Game play failed: {e:?}"))?;
 
     Ok(GameStats {
         winners: history.winners,
@@ -151,7 +150,9 @@ fn run_single_game_with_history(config_json: &str) -> Result<SingleGameResult, S
         serde_json::from_str(config_json).map_err(|e| format!("Invalid config JSON: {e}"))?;
 
     let game = create_game(&config)?;
-    let history = game.play().map_err(|e| format!("Game play failed: {e:?}"))?;
+    let history = game
+        .play()
+        .map_err(|e| format!("Game play failed: {e:?}"))?;
 
     let stats = GameStats {
         winners: history.winners.clone(),
@@ -232,7 +233,9 @@ pub fn get_rules_info(rules_name: &str) -> String {
         if doubled == 20 && solo_lowest == 10 && negative == -5 {
             "Score doubled if not solo lowest (non-positive exempt)".to_string()
         } else {
-            format!("Custom (10 not lowest={doubled}, 10 solo lowest={solo_lowest}, -5 not lowest={negative})")
+            format!(
+                "Custom (10 not lowest={doubled}, 10 solo lowest={solo_lowest}, -5 not lowest={negative})"
+            )
         }
     };
 
@@ -341,7 +344,8 @@ pub fn apply_action(game_id: u32, action_json: &str) -> String {
         INTERACTIVE_GAMES.with(|games| {
             let mut games = games.borrow_mut();
             let game = games.get_mut(&game_id).ok_or("Game not found")?;
-            game.apply_action(action).map_err(|e| format!("Action failed: {e}"))?;
+            game.apply_action(action)
+                .map_err(|e| format!("Action failed: {e}"))?;
             let state = game.get_full_state();
             Ok(ActionResponse { state })
         })
@@ -363,7 +367,8 @@ pub fn apply_bot_action(game_id: u32, strategy_name: &str) -> String {
         INTERACTIVE_GAMES.with(|games| {
             let mut games = games.borrow_mut();
             let game = games.get_mut(&game_id).ok_or("Game not found")?;
-            let action = game.get_bot_action(&*strategy)
+            let action = game
+                .get_bot_action(&*strategy)
                 .map_err(|e| format!("Bot action failed: {e}"))?;
             game.apply_action(action.clone())
                 .map_err(|e| format!("Applying bot action failed: {e}"))?;

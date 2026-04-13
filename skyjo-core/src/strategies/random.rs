@@ -1,5 +1,5 @@
-use rand::seq::SliceRandom;
 use rand::RngCore;
+use rand::seq::SliceRandom;
 
 use crate::card::{CardValue, VisibleSlot};
 use crate::strategy::{DeckDrawAction, DrawChoice, Strategy, StrategyView};

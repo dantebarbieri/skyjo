@@ -78,7 +78,10 @@ fn different_seeds_differ() {
     // both score distributions and win counts are identical.
     let differ = stats1.score_distributions != stats2.score_distributions
         || stats1.wins_per_player != stats2.wins_per_player;
-    assert!(differ, "Two runs with different seeds should almost certainly differ");
+    assert!(
+        differ,
+        "Two runs with different seeds should almost certainly differ"
+    );
 }
 
 #[test]

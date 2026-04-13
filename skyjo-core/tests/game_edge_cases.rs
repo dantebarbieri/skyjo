@@ -2,15 +2,17 @@ use skyjo_core::*;
 
 fn make_random_game(num_players: usize, seed: u64) -> Result<Game> {
     let rules: Box<dyn Rules> = Box::new(StandardRules);
-    let strategies: Vec<Box<dyn Strategy>> =
-        (0..num_players).map(|_| Box::new(RandomStrategy) as _).collect();
+    let strategies: Vec<Box<dyn Strategy>> = (0..num_players)
+        .map(|_| Box::new(RandomStrategy) as _)
+        .collect();
     Game::new(rules, strategies, seed)
 }
 
 fn make_greedy_game(num_players: usize, seed: u64) -> Result<Game> {
     let rules: Box<dyn Rules> = Box::new(StandardRules);
-    let strategies: Vec<Box<dyn Strategy>> =
-        (0..num_players).map(|_| Box::new(GreedyStrategy) as _).collect();
+    let strategies: Vec<Box<dyn Strategy>> = (0..num_players)
+        .map(|_| Box::new(GreedyStrategy) as _)
+        .collect();
     Game::new(rules, strategies, seed)
 }
 
@@ -82,10 +84,7 @@ fn dealt_hands_match_deck_order() {
         // Verify via the first turn's discard pile or setup — the initial discard
         // is the card at position deck.len() - (num_players * cards_per_player) - 1
         // We just verify the index math is consistent
-        assert!(
-            discard_start < deck.len(),
-            "Discard index out of bounds"
-        );
+        assert!(discard_start < deck.len(), "Discard index out of bounds");
         let _ = first_discard; // used for consistency check
     }
 }
@@ -259,7 +258,10 @@ fn end_of_round_clears() {
             if !round.end_of_round_clears.is_empty() {
                 found = true;
                 for clear in &round.end_of_round_clears {
-                    assert!(clear.column < 4, "Invalid column index in end-of-round clear");
+                    assert!(
+                        clear.column < 4,
+                        "Invalid column index in end-of-round clear"
+                    );
                     assert!(
                         clear.player_index < 2,
                         "Invalid player index in end-of-round clear"

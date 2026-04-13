@@ -129,7 +129,9 @@ fn draw_from_deck_then_discard_flip() {
         .unwrap();
 
     let result = game
-        .apply_action(PlayerAction::DiscardAndFlip { position: hidden_pos })
+        .apply_action(PlayerAction::DiscardAndFlip {
+            position: hidden_pos,
+        })
         .unwrap();
 
     match result {

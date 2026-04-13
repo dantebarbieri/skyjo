@@ -86,7 +86,9 @@ fn two_player_game_works() {
 #[test]
 fn eight_player_game_works() {
     let rules: Box<dyn Rules> = Box::new(StandardRules);
-    let strategies: Vec<Box<dyn Strategy>> = (0..8).map(|_| -> Box<dyn Strategy> { Box::new(RandomStrategy) }).collect();
+    let strategies: Vec<Box<dyn Strategy>> = (0..8)
+        .map(|_| -> Box<dyn Strategy> { Box::new(RandomStrategy) })
+        .collect();
     let game = Game::new(rules, strategies, 200).unwrap();
     let history = game.play().unwrap();
     assert_eq!(history.num_players, 8);

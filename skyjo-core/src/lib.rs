@@ -9,12 +9,12 @@ pub mod simulator;
 pub mod strategies;
 pub mod strategy;
 
-pub use board::{PlayerBoard};
+pub use board::PlayerBoard;
 pub use card::{CardValue, Slot, VisibleSlot, standard_deck};
 pub use error::{Result, SkyjoError};
-pub use game::{Game, DEFAULT_MAX_TURNS_PER_ROUND};
+pub use game::{DEFAULT_MAX_TURNS_PER_ROUND, Game};
 pub use history::GameHistory;
-pub use interactive::{InteractiveGame, ActionNeeded, PlayerAction, InteractiveGameState};
+pub use interactive::{ActionNeeded, InteractiveGame, InteractiveGameState, PlayerAction};
 pub use rules::{Rules, StandardRules};
 pub use simulator::{AggregateStats, GameStats, Simulator, SimulatorConfig};
 pub use strategies::{GreedyStrategy, RandomStrategy};

@@ -1,4 +1,4 @@
-use crate::card::{standard_deck, CardValue};
+use crate::card::{CardValue, standard_deck};
 
 /// Abstracts game rules, allowing hot-swappable rule variants.
 /// Implement this trait for variants like "Aunt Janet Rules" (per-player discard piles).

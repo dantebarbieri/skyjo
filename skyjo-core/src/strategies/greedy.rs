@@ -1,5 +1,5 @@
-use rand::seq::SliceRandom;
 use rand::RngCore;
+use rand::seq::SliceRandom;
 
 use crate::card::{CardValue, VisibleSlot};
 use crate::strategy::{DeckDrawAction, DrawChoice, Strategy, StrategyView};
@@ -138,10 +138,7 @@ fn best_replacement_position(view: &StrategyView, drawn_card: CardValue) -> usiz
     }
 
     // Otherwise replace a hidden card (reveals via replacement)
-    if let Some(pos) = board
-        .iter()
-        .position(|s| matches!(s, VisibleSlot::Hidden))
-    {
+    if let Some(pos) = board.iter().position(|s| matches!(s, VisibleSlot::Hidden)) {
         return pos;
     }
 
