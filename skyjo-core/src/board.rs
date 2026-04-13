@@ -281,4 +281,45 @@ mod tests {
         assert_eq!(board.column_indices(0), vec![0, 1]);
         assert_eq!(board.column_indices(3), vec![6, 7]);
     }
+
+    #[test]
+    fn score_all_negative() {
+        let cards: Vec<CardValue> = vec![-2; 12];
+        let board = PlayerBoard::new(&cards, 3, 4);
+        assert_eq!(board.score(), -24);
+    }
+
+    #[test]
+    fn score_all_cleared() {
+        let mut board = make_board();
+        for col in 0..4 {
+            board.clear_column(col);
+        }
+        assert_eq!(board.score(), 0);
+    }
+
+    #[test]
+    fn column_match_with_cleared_returns_none() {
+        let mut board = make_board();
+        // Set one slot in column 0 to Cleared
+        board.slots[0] = Slot::Cleared;
+        board.slots[1] = Slot::Revealed(5);
+        board.slots[2] = Slot::Revealed(5);
+        assert_eq!(board.check_column_match(0), None);
+    }
+
+    #[test]
+    fn flip_cleared_slot_errors() {
+        let mut board = make_board();
+        board.slots[0] = Slot::Cleared;
+        assert_eq!(board.flip(0), Err(SkyjoError::SlotAlreadyCleared(0)));
+    }
+
+    #[test]
+    fn invalid_position_errors() {
+        let mut board = make_board();
+        let out_of_bounds = board.total_slots(); // 12
+        assert_eq!(board.flip(out_of_bounds), Err(SkyjoError::InvalidPosition(out_of_bounds)));
+        assert_eq!(board.replace(out_of_bounds, 5), Err(SkyjoError::InvalidPosition(out_of_bounds)));
+    }
 }
