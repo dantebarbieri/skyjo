@@ -13,13 +13,17 @@ RUN cd skyjo-wasm && wasm-pack build --release --target web --out-dir ../fronten
 # Stage 2: Build frontend
 FROM node:22-alpine AS frontend-build
 
+ENV PNPM_HOME="/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
+RUN corepack enable
+
 WORKDIR /app
-COPY frontend/package.json frontend/package-lock.json* ./
-RUN npm install
+COPY frontend/package.json frontend/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
 
 COPY frontend/ .
 COPY --from=wasm-build /app/frontend/pkg/ pkg/
-RUN npm run build
+RUN pnpm build
 
 # Stage 3: Serve with nginx
 FROM nginx:alpine

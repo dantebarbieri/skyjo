@@ -84,17 +84,17 @@ cd skyjo-core && cargo test <test_name>    # single test
 cd skyjo-wasm && wasm-pack build --target web --out-dir ../frontend/pkg
 
 # Frontend dev
-cd frontend && npm install
-cd frontend && npm run dev                  # dev server (Vite)
-cd frontend && npm run build                # production build
+cd frontend && pnpm install
+cd frontend && pnpm dev                     # dev server (Vite)
+cd frontend && pnpm build                   # production build
 
 # Full rebuild (WASM + frontend)
-cd skyjo-wasm && wasm-pack build --target web --out-dir ../frontend/pkg && cd ../frontend && npm run build
+cd skyjo-wasm && wasm-pack build --target web --out-dir ../frontend/pkg && cd ../frontend && pnpm build
 
 # Lint
 cd skyjo-core && cargo clippy -- -D warnings
 cd skyjo-wasm && cargo clippy -- -D warnings
-cd frontend && npm run lint                 # tsc --noEmit
+cd frontend && pnpm lint                    # tsc --noEmit
 ```
 
 ## Key Design Principles
