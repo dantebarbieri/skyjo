@@ -1,4 +1,20 @@
 import type { CacheEntry, CacheExportFile, GameHistory, ProgressStats, SimConfig } from './types';
+import { CacheEntrySchema, CacheExportFileSchema, SimConfigSchema, ProgressStatsSchema } from './schemas';
+import { z } from 'zod';
+
+// Relaxed schema for import: validates metadata strictly but accepts any array for histories,
+// since histories may have been produced by older versions with different shapes.
+const CacheImportSchema = z.object({
+  format: z.literal('skyjo-sim-cache'),
+  version: z.literal(1),
+  config: SimConfigSchema,
+  stats: ProgressStatsSchema,
+  gamesCompleted: z.number().int().nonnegative(),
+  totalGames: z.number().int().nonnegative(),
+  elapsedMs: z.number().nonnegative(),
+  histories: z.array(z.any()).nullable(),
+  exportedAt: z.number().int().nonnegative(),
+});
 
 const INDEX_KEY = 'skyjo_cache_index';
 const SIM_PREFIX = 'skyjo_sim_';
@@ -47,10 +63,10 @@ export function getCacheEntry(config: SimConfig): CacheEntry | null {
   try {
     const raw = localStorage.getItem(SIM_PREFIX + key);
     if (!raw) return null;
-    const entry: CacheEntry = JSON.parse(raw);
-    if (entry.version !== 1) return null;
+    const result = CacheEntrySchema.safeParse(JSON.parse(raw));
+    if (!result.success) return null;
     touchIndex(key);
-    return entry;
+    return result.data;
   } catch {
     return null;
   }
@@ -146,8 +162,8 @@ export function listCacheEntries(): CacheEntry[] {
     try {
       const raw = localStorage.getItem(SIM_PREFIX + key);
       if (raw) {
-        const entry: CacheEntry = JSON.parse(raw);
-        if (entry.version === 1) entries.push(entry);
+        const result = CacheEntrySchema.safeParse(JSON.parse(raw));
+        if (result.success) entries.push(result.data);
       }
     } catch {
       // skip corrupt entries
@@ -176,7 +192,9 @@ export function exportCacheEntry(key: string): string | null {
   try {
     const raw = localStorage.getItem(SIM_PREFIX + key);
     if (!raw) return null;
-    const entry: CacheEntry = JSON.parse(raw);
+    const parseResult = CacheEntrySchema.safeParse(JSON.parse(raw));
+    if (!parseResult.success) return null;
+    const entry = parseResult.data;
 
     const histRaw = localStorage.getItem(HIST_PREFIX + key);
     const histories: GameHistory[] | null = histRaw ? JSON.parse(histRaw) : null;
@@ -200,9 +218,9 @@ export function exportCacheEntry(key: string): string | null {
 
 export function importCacheEntry(json: string): string | null {
   try {
-    const obj: CacheExportFile = JSON.parse(json);
-    if (obj.format !== 'skyjo-sim-cache' || obj.version !== 1) return null;
-    if (!obj.config || !obj.stats) return null;
+    const result = CacheImportSchema.safeParse(JSON.parse(json));
+    if (!result.success) return null;
+    const obj = result.data;
 
     saveCacheEntry(obj.config, obj.stats, {
       elapsedMs: obj.elapsedMs,
