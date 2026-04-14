@@ -19,6 +19,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { useAuth } from '@/contexts/auth-context';
+import { apiFetch } from '@/lib/api';
 import type { GeneticModelData, GeneticTrainingStatus, SavedGenerationInfo } from '@/types';
 
 const API_BASE = '/api';
@@ -28,6 +30,8 @@ interface NeuralNetworkVizProps {
 }
 
 export function NeuralNetworkViz({ className }: NeuralNetworkVizProps) {
+  const { user, isAuthenticated } = useAuth();
+  const canManage = isAuthenticated && user && (user.permission === 'admin' || user.permission === 'moderator');
   const [model, setModel] = useState<GeneticModelData | null>(null);
   const [status, setStatus] = useState<GeneticTrainingStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -178,7 +182,7 @@ export function NeuralNetworkViz({ className }: NeuralNetworkVizProps) {
   async function startTraining(request: Record<string, unknown>) {
     setTrainError(null);
     try {
-      const res = await fetch(`${API_BASE}/genetic/train`, {
+      const res = await apiFetch(`${API_BASE}/genetic/train`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(request),
@@ -218,7 +222,7 @@ export function NeuralNetworkViz({ className }: NeuralNetworkVizProps) {
 
   async function handleCancel() {
     try {
-      const res = await fetch(`${API_BASE}/genetic/stop`, { method: 'POST' });
+      const res = await apiFetch(`${API_BASE}/genetic/stop`, { method: 'POST' });
       if (res.ok) {
         const s: GeneticTrainingStatus = await res.json();
         setStatus(s);
@@ -231,7 +235,7 @@ export function NeuralNetworkViz({ className }: NeuralNetworkVizProps) {
   async function handleReset() {
     setShowResetDialog(false);
     try {
-      const res = await fetch(`${API_BASE}/genetic/reset`, { method: 'POST' });
+      const res = await apiFetch(`${API_BASE}/genetic/reset`, { method: 'POST' });
       if (res.ok) {
         const s: GeneticTrainingStatus = await res.json();
         setStatus(s);
@@ -249,7 +253,7 @@ export function NeuralNetworkViz({ className }: NeuralNetworkVizProps) {
     if (name === '__current__') return;
     setTrainError(null);
     try {
-      const res = await fetch(`${API_BASE}/genetic/load`, {
+      const res = await apiFetch(`${API_BASE}/genetic/load`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name }),
@@ -348,7 +352,8 @@ export function NeuralNetworkViz({ className }: NeuralNetworkVizProps) {
 
   return (
     <div className={`space-y-4 ${className ?? ''}`}>
-      {/* 1. Training controls */}
+      {/* 1. Training controls — only shown to moderator+ */}
+      {canManage && (
       <Card>
         <CardContent className="py-3 px-4 space-y-3">
           {/* Lineage selector */}
@@ -463,9 +468,10 @@ export function NeuralNetworkViz({ className }: NeuralNetworkVizProps) {
           </div>
         </CardContent>
       </Card>
+      )}
 
       {/* 2. Training progress */}
-      {isTraining && (
+      {canManage && isTraining && (
         <Card>
           <CardContent className="py-3 px-4 space-y-2">
             <div className="flex items-center justify-between text-sm">
