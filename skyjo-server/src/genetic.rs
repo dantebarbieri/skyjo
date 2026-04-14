@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use rand::rngs::StdRng;
 use rand::{Rng, RngCore, SeedableRng};
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
@@ -619,13 +620,15 @@ fn run_generation(
 ) -> (Vec<Vec<f32>>, Vec<f64>, usize, usize) {
     let mut rng = StdRng::seed_from_u64(generation_seed);
 
-    // Evaluate fitness for each individual
-    let mut fitnesses = Vec::with_capacity(population.len());
-    for (idx, genome) in population.iter().enumerate() {
-        let seed = generation_seed.wrapping_add((idx * 1000) as u64);
-        let fitness = evaluate_individual(genome, idx, population, seed, games_trained);
-        fitnesses.push(fitness);
-    }
+    // Evaluate fitness for each individual in parallel
+    let fitnesses: Vec<f64> = population
+        .par_iter()
+        .enumerate()
+        .map(|(idx, genome)| {
+            let seed = generation_seed.wrapping_add((idx * 1000) as u64);
+            evaluate_individual(genome, idx, population, seed, games_trained)
+        })
+        .collect();
 
     // Find best individual
     let best_idx = fitnesses
