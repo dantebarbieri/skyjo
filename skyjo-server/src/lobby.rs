@@ -350,9 +350,7 @@ mod tests {
     #[tokio::test]
     async fn join_room_fills_slots_in_order() {
         let lobby = make_lobby(5);
-        let (code, _, _) = lobby
-            .create_room("Alice".into(), 4, None, 0, 0)
-            .unwrap();
+        let (code, _, _) = lobby.create_room("Alice".into(), 4, None, 0, 0).unwrap();
 
         let (_, idx1) = lobby.join_room(&code, "Bob".into()).await.unwrap();
         let (_, idx2) = lobby.join_room(&code, "Carol".into()).await.unwrap();

@@ -138,10 +138,8 @@ mod tests {
 
     #[test]
     fn strategy_names_are_recorded() {
-        let strategies: Vec<Box<dyn crate::strategy::Strategy>> = vec![
-            Box::new(GreedyStrategy),
-            Box::new(RandomStrategy),
-        ];
+        let strategies: Vec<Box<dyn crate::strategy::Strategy>> =
+            vec![Box::new(GreedyStrategy), Box::new(RandomStrategy)];
         let history = Game::new(Box::new(StandardRules), strategies, 42)
             .unwrap()
             .play()

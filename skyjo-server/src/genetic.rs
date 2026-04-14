@@ -957,13 +957,9 @@ mod tests {
         advance_to_gen1(&mut state);
         assert!(state.list_saved_generations().is_empty());
 
-        state
-            .save_generation(Some("save_a".to_string()))
-            .unwrap();
+        state.save_generation(Some("save_a".to_string())).unwrap();
         state.generation = 2; // allow a second save
-        state
-            .save_generation(Some("save_b".to_string()))
-            .unwrap();
+        state.save_generation(Some("save_b".to_string())).unwrap();
 
         let list = state.list_saved_generations();
         assert_eq!(list.len(), 2);
@@ -1009,9 +1005,7 @@ mod tests {
     fn save_generation_fails_with_duplicate_name() {
         let mut state = test_state("dup_name");
         advance_to_gen1(&mut state);
-        state
-            .save_generation(Some("dup".to_string()))
-            .unwrap();
+        state.save_generation(Some("dup".to_string())).unwrap();
 
         let result = state.save_generation(Some("dup".to_string()));
         assert!(result.is_err());
@@ -1056,14 +1050,7 @@ mod tests {
     fn import_generation_rejects_wrong_genome_size() {
         let mut state = test_state("import_bad_size");
         let bad_genome = vec![0.0_f32; 10]; // Wrong size
-        let result = state.import_generation(
-            "bad".to_string(),
-            bad_genome,
-            0,
-            0,
-            0.0,
-            None,
-        );
+        let result = state.import_generation("bad".to_string(), bad_genome, 0, 0, 0.0, None);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Invalid genome size"));
         cleanup(&state);
@@ -1076,8 +1063,7 @@ mod tests {
         state
             .import_generation("dup".to_string(), genome.clone(), 1, 100, -20.0, None)
             .unwrap();
-        let result =
-            state.import_generation("dup".to_string(), genome, 2, 200, -10.0, None);
+        let result = state.import_generation("dup".to_string(), genome, 2, 200, -10.0, None);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("already exists"));
         cleanup(&state);
@@ -1137,9 +1123,7 @@ mod tests {
     #[test]
     fn tournament_select_returns_genome_from_population() {
         let mut rng = StdRng::seed_from_u64(123);
-        let population: Vec<Vec<f32>> = (0..10)
-            .map(|i| vec![i as f32; GENOME_SIZE])
-            .collect();
+        let population: Vec<Vec<f32>> = (0..10).map(|i| vec![i as f32; GENOME_SIZE]).collect();
         let fitnesses: Vec<f64> = (0..10).map(|i| i as f64).collect();
 
         let selected = tournament_select(&population, &fitnesses, &mut rng);
@@ -1187,8 +1171,7 @@ mod tests {
 
     #[test]
     fn load_or_new_with_nonexistent_path_creates_new_state() {
-        let dir =
-            std::env::temp_dir().join(format!("skyjo_test_load_new_{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("skyjo_test_load_new_{}", std::process::id()));
         let model_path = dir.join("nonexistent_subdir").join("model.json");
         let state = GeneticTrainingState::load_or_new(model_path);
         assert_eq!(state.population.len(), POPULATION_SIZE);

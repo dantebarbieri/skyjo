@@ -1,10 +1,10 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use axum::routing::{get, post};
-use axum::Router;
 use http_body_util::BodyExt;
 use tokio::sync::Mutex;
 use tower::ServiceExt;
@@ -13,9 +13,9 @@ use skyjo_server::{AppState, AppStateInner};
 
 fn test_app() -> Router {
     let genetic_state = Arc::new(Mutex::new(
-        skyjo_server::genetic::GeneticTrainingState::load_or_new(
-            PathBuf::from("nonexistent_test_model.json"),
-        ),
+        skyjo_server::genetic::GeneticTrainingState::load_or_new(PathBuf::from(
+            "nonexistent_test_model.json",
+        )),
     ));
     let state: AppState = Arc::new(AppStateInner {
         lobby: skyjo_server::lobby::Lobby::new(100),
@@ -49,9 +49,7 @@ async fn create_room_returns_200_with_code_and_token() {
                 .method("POST")
                 .uri("/api/rooms")
                 .header("content-type", "application/json")
-                .body(Body::from(
-                    r#"{"player_name":"Alice","num_players":2}"#,
-                ))
+                .body(Body::from(r#"{"player_name":"Alice","num_players":2}"#))
                 .unwrap(),
         )
         .await
@@ -77,9 +75,7 @@ async fn create_room_with_invalid_player_count_returns_400() {
                 .method("POST")
                 .uri("/api/rooms")
                 .header("content-type", "application/json")
-                .body(Body::from(
-                    r#"{"player_name":"Alice","num_players":1}"#,
-                ))
+                .body(Body::from(r#"{"player_name":"Alice","num_players":1}"#))
                 .unwrap(),
         )
         .await
@@ -98,9 +94,7 @@ async fn create_room_with_too_many_players_returns_400() {
                 .method("POST")
                 .uri("/api/rooms")
                 .header("content-type", "application/json")
-                .body(Body::from(
-                    r#"{"player_name":"Alice","num_players":9}"#,
-                ))
+                .body(Body::from(r#"{"player_name":"Alice","num_players":9}"#))
                 .unwrap(),
         )
         .await
@@ -123,9 +117,7 @@ async fn get_room_info_for_valid_room() {
                 .method("POST")
                 .uri("/api/rooms")
                 .header("content-type", "application/json")
-                .body(Body::from(
-                    r#"{"player_name":"Alice","num_players":3}"#,
-                ))
+                .body(Body::from(r#"{"player_name":"Alice","num_players":3}"#))
                 .unwrap(),
         )
         .await
@@ -187,9 +179,7 @@ async fn join_room_succeeds_with_valid_code() {
                 .method("POST")
                 .uri("/api/rooms")
                 .header("content-type", "application/json")
-                .body(Body::from(
-                    r#"{"player_name":"Alice","num_players":2}"#,
-                ))
+                .body(Body::from(r#"{"player_name":"Alice","num_players":2}"#))
                 .unwrap(),
         )
         .await

@@ -172,11 +172,10 @@ mod tests {
         let human: serde_json::Value = serde_json::to_value(PlayerSlotType::Human).unwrap();
         assert_eq!(human["kind"], "Human");
 
-        let bot: serde_json::Value =
-            serde_json::to_value(PlayerSlotType::Bot {
-                strategy: "X".to_string(),
-            })
-            .unwrap();
+        let bot: serde_json::Value = serde_json::to_value(PlayerSlotType::Bot {
+            strategy: "X".to_string(),
+        })
+        .unwrap();
         assert_eq!(bot["kind"], "Bot");
         assert_eq!(bot["strategy"], "X");
 

@@ -7,9 +7,8 @@ use skyjo_core::*;
 fn eight_player_game_survives_deck_exhaustion() {
     // Try multiple seeds to increase likelihood of hitting reshuffle
     for seed in 0..10u64 {
-        let strategies: Vec<Box<dyn Strategy>> = (0..8)
-            .map(|_| Box::new(RandomStrategy) as _)
-            .collect();
+        let strategies: Vec<Box<dyn Strategy>> =
+            (0..8).map(|_| Box::new(RandomStrategy) as _).collect();
         let game = Game::new(Box::new(StandardRules), strategies, seed).unwrap();
         let history = game.play().unwrap();
         assert!(!history.rounds.is_empty());
@@ -23,9 +22,8 @@ fn eight_player_game_survives_deck_exhaustion() {
 #[test]
 fn eight_player_greedy_survives_reshuffle() {
     for seed in 0..5u64 {
-        let strategies: Vec<Box<dyn Strategy>> = (0..8)
-            .map(|_| Box::new(GreedyStrategy) as _)
-            .collect();
+        let strategies: Vec<Box<dyn Strategy>> =
+            (0..8).map(|_| Box::new(GreedyStrategy) as _).collect();
         let game = Game::new(Box::new(StandardRules), strategies, seed).unwrap();
         let history = game.play().unwrap();
         assert!(!history.rounds.is_empty());
@@ -37,9 +35,8 @@ fn eight_player_greedy_survives_reshuffle() {
 /// can handle multiple reshuffles across rounds.
 #[test]
 fn multi_round_game_handles_reshuffles() {
-    let strategies: Vec<Box<dyn Strategy>> = (0..6)
-        .map(|_| Box::new(RandomStrategy) as _)
-        .collect();
+    let strategies: Vec<Box<dyn Strategy>> =
+        (0..6).map(|_| Box::new(RandomStrategy) as _).collect();
     let game = Game::new(Box::new(StandardRules), strategies, 12345).unwrap();
     let history = game.play().unwrap();
     // With 6 players, each round uses 6×12 = 72 cards just for dealing,
