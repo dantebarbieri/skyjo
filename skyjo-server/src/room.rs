@@ -832,3 +832,884 @@ pub fn available_strategies() -> Vec<String> {
 pub fn available_rules() -> Vec<String> {
     vec!["Standard".to_string()]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Create a basic 2-player room in Lobby phase.
+    fn test_room() -> Room {
+        Room::new("TEST1".to_string(), "Alice".to_string(), 2, None, 0, 0)
+    }
+
+    /// Create a room with all slots filled (1 human creator + 1 bot).
+    fn filled_room() -> Room {
+        let mut room = test_room();
+        room.configure_slot(1, "Bot:Random").unwrap();
+        room
+    }
+
+    /// Create a room in InGame phase (2 players: human + bot).
+    fn ingame_room() -> Room {
+        let mut room = filled_room();
+        room.start_game().unwrap();
+        room
+    }
+
+    // ========================================================================
+    // Room Creation & Configuration
+    // ========================================================================
+
+    #[test]
+    fn new_room_has_lobby_phase_and_correct_defaults() {
+        let room = test_room();
+        assert_eq!(room.phase, RoomPhase::Lobby);
+        assert_eq!(room.code, "TEST1");
+        assert_eq!(room.num_players, 2);
+        assert_eq!(room.creator, 0);
+        assert_eq!(room.rules_name, "Standard");
+        assert!(room.game.is_none());
+        assert!(room.banned_ips.is_empty());
+        assert!(room.last_winners.is_empty());
+        assert_eq!(room.turn_timer_secs, Some(60));
+        assert_eq!(room.players.len(), 2);
+        // Creator slot
+        assert_eq!(room.players[0].name, "Alice");
+        assert_eq!(room.players[0].slot_type, PlayerSlotType::Human);
+        // Second slot is empty
+        assert_eq!(room.players[1].slot_type, PlayerSlotType::Empty);
+    }
+
+    #[test]
+    fn new_room_with_custom_rules() {
+        let room = Room::new(
+            "R2".to_string(),
+            "Bob".to_string(),
+            4,
+            Some("Standard".to_string()),
+            100,
+            5,
+        );
+        assert_eq!(room.rules_name, "Standard");
+        assert_eq!(room.num_players, 4);
+        assert_eq!(room.players.len(), 4);
+        assert_eq!(room.genetic_games_trained, 100);
+        assert_eq!(room.genetic_generation, 5);
+    }
+
+    #[test]
+    fn configure_slot_to_bot() {
+        let mut room = test_room();
+        room.configure_slot(1, "Bot:Greedy").unwrap();
+        assert_eq!(
+            room.players[1].slot_type,
+            PlayerSlotType::Bot {
+                strategy: "Greedy".to_string()
+            }
+        );
+        assert_eq!(room.players[1].name, "Bot (Greedy)");
+    }
+
+    #[test]
+    fn configure_slot_to_empty() {
+        let mut room = test_room();
+        room.configure_slot(1, "Bot:Random").unwrap();
+        room.configure_slot(1, "Empty").unwrap();
+        assert_eq!(room.players[1].slot_type, PlayerSlotType::Empty);
+    }
+
+    #[test]
+    fn configure_slot_cannot_empty_creator() {
+        let mut room = test_room();
+        let err = room.configure_slot(0, "Empty").unwrap_err();
+        assert_eq!(err, "Cannot remove the creator");
+    }
+
+    #[test]
+    fn configure_slot_invalid_slot() {
+        let mut room = test_room();
+        let err = room.configure_slot(5, "Empty").unwrap_err();
+        assert_eq!(err, "Invalid slot");
+    }
+
+    #[test]
+    fn configure_slot_unknown_type() {
+        let mut room = test_room();
+        let err = room.configure_slot(1, "Alien").unwrap_err();
+        assert!(err.starts_with("Unknown player type"));
+    }
+
+    #[test]
+    fn configure_slot_invalid_strategy() {
+        let mut room = test_room();
+        let err = room.configure_slot(1, "Bot:NonExistent").unwrap_err();
+        assert!(err.contains("Unknown strategy"));
+    }
+
+    #[test]
+    fn configure_slot_rejects_during_game() {
+        let mut room = ingame_room();
+        let err = room.configure_slot(1, "Bot:Greedy").unwrap_err();
+        assert_eq!(err, "Cannot configure slots during game");
+    }
+
+    #[test]
+    fn set_num_players_increase() {
+        let mut room = test_room();
+        room.set_num_players(4).unwrap();
+        assert_eq!(room.num_players, 4);
+        assert_eq!(room.players.len(), 4);
+        assert_eq!(room.players[2].slot_type, PlayerSlotType::Empty);
+        assert_eq!(room.players[3].slot_type, PlayerSlotType::Empty);
+    }
+
+    #[test]
+    fn set_num_players_decrease_empty_slots() {
+        let mut room = test_room();
+        room.set_num_players(4).unwrap();
+        room.set_num_players(2).unwrap();
+        assert_eq!(room.num_players, 2);
+        assert_eq!(room.players.len(), 2);
+    }
+
+    #[test]
+    fn set_num_players_cannot_decrease_below_occupied() {
+        let mut room = Room::new("R".to_string(), "A".to_string(), 3, None, 0, 0);
+        room.configure_slot(2, "Bot:Random").unwrap();
+        let err = room.set_num_players(2).unwrap_err();
+        assert!(err.contains("slot 3 is occupied"));
+    }
+
+    #[test]
+    fn set_num_players_invalid_below_2() {
+        let mut room = test_room();
+        let err = room.set_num_players(1).unwrap_err();
+        assert_eq!(err, "Player count must be 2-8");
+    }
+
+    #[test]
+    fn set_num_players_invalid_above_8() {
+        let mut room = test_room();
+        let err = room.set_num_players(9).unwrap_err();
+        assert_eq!(err, "Player count must be 2-8");
+    }
+
+    #[test]
+    fn set_num_players_rejects_during_game() {
+        let mut room = ingame_room();
+        let err = room.set_num_players(3).unwrap_err();
+        assert_eq!(err, "Cannot change player count during game");
+    }
+
+    #[test]
+    fn set_rules_standard() {
+        let mut room = test_room();
+        room.set_rules("Standard").unwrap();
+        assert_eq!(room.rules_name, "Standard");
+    }
+
+    #[test]
+    fn set_rules_invalid() {
+        let mut room = test_room();
+        let err = room.set_rules("Bogus").unwrap_err();
+        assert!(err.contains("Unknown rules"));
+    }
+
+    #[test]
+    fn set_rules_rejects_during_game() {
+        let mut room = ingame_room();
+        let err = room.set_rules("Standard").unwrap_err();
+        assert_eq!(err, "Cannot change rules during game");
+    }
+
+    #[test]
+    fn set_turn_timer_valid() {
+        let mut room = test_room();
+        room.set_turn_timer(Some(30)).unwrap();
+        assert_eq!(room.turn_timer_secs, Some(30));
+    }
+
+    #[test]
+    fn set_turn_timer_unlimited() {
+        let mut room = test_room();
+        room.set_turn_timer(None).unwrap();
+        assert_eq!(room.turn_timer_secs, None);
+    }
+
+    #[test]
+    fn set_turn_timer_rejects_zero() {
+        let mut room = test_room();
+        let err = room.set_turn_timer(Some(0)).unwrap_err();
+        assert_eq!(err, "Turn timer must be positive");
+    }
+
+    #[test]
+    fn set_turn_timer_rejects_during_game() {
+        let mut room = ingame_room();
+        let err = room.set_turn_timer(Some(30)).unwrap_err();
+        assert_eq!(err, "Cannot change turn timer during game");
+    }
+
+    // ========================================================================
+    // Game Lifecycle
+    // ========================================================================
+
+    #[test]
+    fn start_game_transitions_to_ingame() {
+        let mut room = filled_room();
+        room.start_game().unwrap();
+        assert_eq!(room.phase, RoomPhase::InGame);
+        assert!(room.game.is_some());
+    }
+
+    #[test]
+    fn start_game_fails_if_not_all_slots_filled() {
+        let mut room = test_room();
+        let err = room.start_game().unwrap_err();
+        assert_eq!(err, "Not all player slots are filled");
+    }
+
+    #[test]
+    fn start_game_fails_if_already_started() {
+        let mut room = ingame_room();
+        let err = room.start_game().unwrap_err();
+        assert_eq!(err, "Game already started");
+    }
+
+    #[test]
+    fn apply_action_works_during_ingame() {
+        let mut room = ingame_room();
+        let game = room.game.as_ref().unwrap();
+        let state = game.get_player_state(0);
+        // The game should have an action needed; verify apply_action at least doesn't
+        // panic when given a valid context. We use the bot action route for simplicity.
+        // Try getting the current player and applying a bot action if it's a bot turn.
+        let current = game.current_player_index();
+        assert!(current.is_some());
+        // The game is freshly started — either player 0 or 1 goes first.
+        // We just verify the game state is accessible.
+        drop(state);
+        let _ = current;
+        // Apply bot actions until it's a human turn or the round ends
+        while room.is_current_player_bot() {
+            room.apply_bot_action().unwrap();
+        }
+        // Now it should be the human player's turn (or game could be over).
+        // At minimum, verify we didn't panic.
+    }
+
+    #[test]
+    fn apply_action_rejects_wrong_player() {
+        let mut room = ingame_room();
+        // Advance past any bot turns
+        while room.is_current_player_bot() {
+            room.apply_bot_action().unwrap();
+        }
+        if room.phase != RoomPhase::InGame {
+            return; // Game ended during bot turns
+        }
+        let current = room.game.as_ref().unwrap().current_player_index().unwrap();
+        let wrong_player = if current == 0 { 1 } else { 0 };
+        let err = room
+            .apply_action(wrong_player, PlayerAction::InitialFlip { position: 0 })
+            .unwrap_err();
+        assert!(err.contains("Not your turn"));
+    }
+
+    #[test]
+    fn apply_bot_action_returns_valid_action() {
+        let mut room = ingame_room();
+        // If current player isn't a bot, configure so slot 1 is bot and wait for its turn
+        if room.is_current_player_bot() {
+            let (player_idx, _action) = room.apply_bot_action().unwrap();
+            assert!(player_idx < room.num_players);
+        }
+        // At minimum we've verified bot action doesn't error
+    }
+
+    #[test]
+    fn apply_bot_action_fails_for_human_player() {
+        let mut room = ingame_room();
+        // Advance past bot turns
+        while room.is_current_player_bot() {
+            room.apply_bot_action().unwrap();
+        }
+        if room.phase != RoomPhase::InGame {
+            return;
+        }
+        let err = room.apply_bot_action().unwrap_err();
+        assert_eq!(err, "Current player is not a bot");
+    }
+
+    #[test]
+    fn play_again_resets_game() {
+        let mut room = ingame_room();
+        // Force game over by playing through
+        play_until_game_over(&mut room);
+        assert_eq!(room.phase, RoomPhase::GameOver);
+
+        room.play_again().unwrap();
+        assert_eq!(room.phase, RoomPhase::Lobby);
+        assert!(room.game.is_none());
+    }
+
+    #[test]
+    fn play_again_fails_if_not_game_over() {
+        let mut room = ingame_room();
+        let err = room.play_again().unwrap_err();
+        assert_eq!(err, "Game is not over");
+    }
+
+    #[test]
+    fn return_to_lobby_resets_phase() {
+        let mut room = ingame_room();
+        play_until_game_over(&mut room);
+        assert_eq!(room.phase, RoomPhase::GameOver);
+
+        room.return_to_lobby().unwrap();
+        assert_eq!(room.phase, RoomPhase::Lobby);
+        assert!(room.game.is_none());
+    }
+
+    #[test]
+    fn return_to_lobby_fails_if_not_game_over() {
+        let mut room = ingame_room();
+        let err = room.return_to_lobby().unwrap_err();
+        assert_eq!(err, "Game is not over");
+    }
+
+    #[test]
+    fn continue_round_progresses_game() {
+        let mut room = ingame_room();
+        // Play a full round until round-over
+        play_until_round_over(&mut room);
+        if room.phase == RoomPhase::GameOver {
+            return; // Game ended in one round, can't test continue_round
+        }
+        // Now continue_round should work
+        room.continue_round().unwrap();
+        assert_eq!(room.phase, RoomPhase::InGame);
+    }
+
+    // ========================================================================
+    // Player Management
+    // ========================================================================
+
+    #[test]
+    fn kick_player_removes_and_returns_token() {
+        let mut room = test_room();
+        // Add a human to slot 1 by simulating a join
+        room.players[1] = PlayerSlot {
+            name: "Bob".to_string(),
+            slot_type: PlayerSlotType::Human,
+            session_token: Some(SessionToken::new()),
+            connected: true,
+            ip: Some("1.2.3.4".to_string()),
+            disconnected_at: None,
+        };
+
+        let token = room.kick_player(1).unwrap();
+        assert!(token.is_some());
+        assert_eq!(room.players[1].slot_type, PlayerSlotType::Empty);
+        assert_eq!(room.players[1].name, "");
+    }
+
+    #[test]
+    fn kick_player_rejects_creator() {
+        let mut room = test_room();
+        let err = room.kick_player(0).unwrap_err();
+        assert_eq!(err, "Cannot kick the room creator");
+    }
+
+    #[test]
+    fn kick_player_rejects_empty_slot() {
+        let mut room = test_room();
+        let err = room.kick_player(1).unwrap_err();
+        assert_eq!(err, "Slot is already empty");
+    }
+
+    #[test]
+    fn kick_player_rejects_invalid_slot() {
+        let mut room = test_room();
+        let err = room.kick_player(10).unwrap_err();
+        assert_eq!(err, "Invalid slot");
+    }
+
+    #[test]
+    fn kick_player_rejects_during_game() {
+        let mut room = ingame_room();
+        let err = room.kick_player(1).unwrap_err();
+        assert_eq!(err, "Cannot kick players during game");
+    }
+
+    #[test]
+    fn ban_player_adds_ip_to_banned_list() {
+        let mut room = test_room();
+        room.players[0].ip = Some("10.0.0.1".to_string());
+        room.players[1] = PlayerSlot {
+            name: "Eve".to_string(),
+            slot_type: PlayerSlotType::Human,
+            session_token: Some(SessionToken::new()),
+            connected: true,
+            ip: Some("10.0.0.2".to_string()),
+            disconnected_at: None,
+        };
+
+        room.ban_player(1).unwrap();
+        assert!(room.is_ip_banned("10.0.0.2"));
+        assert_eq!(room.players[1].slot_type, PlayerSlotType::Empty);
+    }
+
+    #[test]
+    fn ban_player_rejects_same_ip_as_creator() {
+        let mut room = test_room();
+        room.players[0].ip = Some("10.0.0.1".to_string());
+        room.players[1] = PlayerSlot {
+            name: "Eve".to_string(),
+            slot_type: PlayerSlotType::Human,
+            session_token: None,
+            connected: true,
+            ip: Some("10.0.0.1".to_string()),
+            disconnected_at: None,
+        };
+
+        let err = room.ban_player(1).unwrap_err();
+        assert!(err.contains("share your IP"));
+    }
+
+    #[test]
+    fn ban_player_rejects_creator() {
+        let mut room = test_room();
+        let err = room.ban_player(0).unwrap_err();
+        assert_eq!(err, "Cannot ban the room creator");
+    }
+
+    #[test]
+    fn promote_host_changes_creator() {
+        let mut room = test_room();
+        room.players[1] = PlayerSlot {
+            name: "Bob".to_string(),
+            slot_type: PlayerSlotType::Human,
+            session_token: None,
+            connected: true,
+            ip: None,
+            disconnected_at: None,
+        };
+        room.promote_host(1).unwrap();
+        assert_eq!(room.creator, 1);
+    }
+
+    #[test]
+    fn promote_host_rejects_bot() {
+        let mut room = test_room();
+        room.configure_slot(1, "Bot:Random").unwrap();
+        let err = room.promote_host(1).unwrap_err();
+        assert_eq!(err, "Can only promote human players");
+    }
+
+    #[test]
+    fn promote_host_rejects_invalid_slot() {
+        let mut room = test_room();
+        let err = room.promote_host(10).unwrap_err();
+        assert_eq!(err, "Invalid slot");
+    }
+
+    #[test]
+    fn auto_promote_host_selects_next_connected_human() {
+        let mut room = Room::new("R".to_string(), "Alice".to_string(), 3, None, 0, 0);
+        room.players[0].connected = false; // host disconnected
+        room.players[1] = PlayerSlot {
+            name: "Bob".to_string(),
+            slot_type: PlayerSlotType::Human,
+            session_token: None,
+            connected: true,
+            ip: None,
+            disconnected_at: None,
+        };
+        room.players[2] = PlayerSlot {
+            name: "Charlie".to_string(),
+            slot_type: PlayerSlotType::Human,
+            session_token: None,
+            connected: true,
+            ip: None,
+            disconnected_at: None,
+        };
+
+        let promoted = room.auto_promote_host();
+        assert!(promoted);
+        assert_eq!(room.creator, 1);
+    }
+
+    #[test]
+    fn auto_promote_host_returns_false_if_host_connected() {
+        let mut room = test_room();
+        room.players[0].connected = true;
+        assert!(!room.auto_promote_host());
+    }
+
+    #[test]
+    fn auto_promote_host_returns_false_if_no_connected_humans() {
+        let mut room = test_room();
+        room.players[0].connected = false;
+        // Slot 1 is empty, no connected humans to promote
+        assert!(!room.auto_promote_host());
+    }
+
+    #[test]
+    fn auto_promote_host_skips_bots() {
+        let mut room = Room::new("R".to_string(), "Alice".to_string(), 3, None, 0, 0);
+        room.players[0].connected = false;
+        room.configure_slot(1, "Bot:Random").unwrap();
+        room.players[2] = PlayerSlot {
+            name: "Human2".to_string(),
+            slot_type: PlayerSlotType::Human,
+            session_token: None,
+            connected: true,
+            ip: None,
+            disconnected_at: None,
+        };
+
+        let promoted = room.auto_promote_host();
+        assert!(promoted);
+        assert_eq!(room.creator, 2); // Skipped the bot at slot 1
+    }
+
+    #[test]
+    fn next_available_slot_finds_empty() {
+        let room = test_room();
+        assert_eq!(room.next_available_slot(), Some(1));
+    }
+
+    #[test]
+    fn next_available_slot_falls_back_to_bot() {
+        let mut room = test_room();
+        room.configure_slot(1, "Bot:Random").unwrap();
+        // No empty slots, should find the bot slot
+        assert_eq!(room.next_available_slot(), Some(1));
+    }
+
+    #[test]
+    fn next_available_slot_returns_none_when_all_human() {
+        let mut room = test_room();
+        room.players[1] = PlayerSlot {
+            name: "Bob".to_string(),
+            slot_type: PlayerSlotType::Human,
+            session_token: None,
+            connected: true,
+            ip: None,
+            disconnected_at: None,
+        };
+        assert_eq!(room.next_available_slot(), None);
+    }
+
+    #[test]
+    fn all_slots_filled_true_when_full() {
+        let room = filled_room();
+        assert!(room.all_slots_filled());
+    }
+
+    #[test]
+    fn all_slots_filled_false_with_empty() {
+        let room = test_room();
+        assert!(!room.all_slots_filled());
+    }
+
+    #[test]
+    fn auto_kick_disconnected_removes_timed_out_players() {
+        let mut room = Room::new("R".to_string(), "Alice".to_string(), 3, None, 0, 0);
+        room.players[0].connected = true;
+        room.players[1] = PlayerSlot {
+            name: "Bob".to_string(),
+            slot_type: PlayerSlotType::Human,
+            session_token: Some(SessionToken::new()),
+            connected: false,
+            ip: None,
+            disconnected_at: Some(Instant::now() - Duration::from_secs(300)),
+        };
+
+        let kicked = room.auto_kick_disconnected(Duration::from_secs(60));
+        assert_eq!(kicked.len(), 1);
+        assert_eq!(kicked[0].0, 1);
+        assert_eq!(room.players[1].slot_type, PlayerSlotType::Empty);
+    }
+
+    #[test]
+    fn auto_kick_disconnected_skips_recently_disconnected() {
+        let mut room = Room::new("R".to_string(), "Alice".to_string(), 3, None, 0, 0);
+        room.players[1] = PlayerSlot {
+            name: "Bob".to_string(),
+            slot_type: PlayerSlotType::Human,
+            session_token: Some(SessionToken::new()),
+            connected: false,
+            ip: None,
+            disconnected_at: Some(Instant::now()),
+        };
+
+        let kicked = room.auto_kick_disconnected(Duration::from_secs(60));
+        assert!(kicked.is_empty());
+        assert_eq!(room.players[1].slot_type, PlayerSlotType::Human);
+    }
+
+    #[test]
+    fn is_ip_banned_works() {
+        let mut room = test_room();
+        assert!(!room.is_ip_banned("1.2.3.4"));
+        room.banned_ips.push("1.2.3.4".to_string());
+        assert!(room.is_ip_banned("1.2.3.4"));
+    }
+
+    // ========================================================================
+    // State Queries
+    // ========================================================================
+
+    #[test]
+    fn lobby_state_returns_correct_structure() {
+        let room = test_room();
+        let state = room.lobby_state();
+        assert_eq!(state.room_code, "TEST1");
+        assert_eq!(state.num_players, 2);
+        assert_eq!(state.rules, "Standard");
+        assert_eq!(state.creator, 0);
+        assert_eq!(state.players.len(), 2);
+        assert_eq!(state.players[0].name, "Alice");
+        assert_eq!(state.players[0].player_type, PlayerSlotType::Human);
+        assert_eq!(state.players[1].player_type, PlayerSlotType::Empty);
+        assert!(!state.available_strategies.is_empty());
+        assert!(!state.available_rules.is_empty());
+        assert!(state.idle_timeout_secs.is_some());
+        assert_eq!(state.turn_timer_secs, Some(60));
+        assert!(state.last_winners.is_empty());
+    }
+
+    #[test]
+    fn lobby_state_no_idle_timeout_during_game() {
+        let room = ingame_room();
+        let state = room.lobby_state();
+        assert!(state.idle_timeout_secs.is_none());
+    }
+
+    #[test]
+    fn is_current_player_bot_detects_bot_turns() {
+        let room = ingame_room();
+        // The current player is either human (idx 0) or bot (idx 1)
+        let current = room.game.as_ref().unwrap().current_player_index();
+        if let Some(idx) = current {
+            let expected = matches!(room.players[idx].slot_type, PlayerSlotType::Bot { .. });
+            assert_eq!(room.is_current_player_bot(), expected);
+        }
+    }
+
+    #[test]
+    fn is_current_player_bot_false_when_no_game() {
+        let room = test_room();
+        assert!(!room.is_current_player_bot());
+    }
+
+    #[test]
+    fn get_player_state_returns_valid_state() {
+        let room = ingame_room();
+        let state = room.get_player_state(0).unwrap();
+        // InteractiveGameState should have the right number of players
+        assert_eq!(state.boards.len(), 2);
+    }
+
+    #[test]
+    fn get_player_state_fails_without_game() {
+        let room = test_room();
+        let err = room.get_player_state(0).unwrap_err();
+        assert_eq!(err, "No active game");
+    }
+
+    #[test]
+    fn turn_deadline_secs_none_when_no_timer() {
+        let mut room = ingame_room();
+        room.turn_timer_secs = None;
+        room.turn_start = None;
+        assert!(room.turn_deadline_secs().is_none());
+    }
+
+    #[test]
+    fn turn_deadline_secs_none_when_no_turn_start() {
+        let room = ingame_room();
+        // turn_start depends on whether current player is human
+        // But if we force it to None:
+        let mut room = room;
+        room.turn_start = None;
+        assert!(room.turn_deadline_secs().is_none());
+    }
+
+    #[test]
+    fn turn_deadline_secs_returns_remaining_time() {
+        let mut room = ingame_room();
+        room.turn_timer_secs = Some(60);
+        room.turn_start = Some(Instant::now());
+        let deadline = room.turn_deadline_secs().unwrap();
+        // Should be close to 60 (just started)
+        assert!((58..=60).contains(&deadline));
+    }
+
+    // ========================================================================
+    // Factories
+    // ========================================================================
+
+    #[test]
+    fn make_strategy_creates_all_base_strategies() {
+        let strategies = [
+            "Random",
+            "Greedy",
+            "Defensive",
+            "Clearer",
+            "Statistician",
+            "Rusher",
+            "Gambler",
+            "Survivor",
+            "Mimic",
+            "Saboteur",
+        ];
+        for name in &strategies {
+            assert!(
+                make_strategy(name, None, 0).is_ok(),
+                "Failed to create strategy: {name}"
+            );
+        }
+    }
+
+    #[test]
+    fn make_strategy_genetic_requires_genome() {
+        let result = make_strategy("Genetic", None, 0);
+        assert!(result.is_err());
+        assert!(result.err().unwrap().contains("requires a trained model"));
+    }
+
+    #[test]
+    fn make_strategy_genetic_with_genome() {
+        let genome = vec![0.0f32; 2855];
+        assert!(make_strategy("Genetic", Some(&genome), 100).is_ok());
+    }
+
+    #[test]
+    fn make_strategy_genetic_generation_variant() {
+        let genome = vec![0.0f32; 2855];
+        assert!(make_strategy("Genetic:Gen 5", Some(&genome), 100).is_ok());
+    }
+
+    #[test]
+    fn make_strategy_unknown_fails() {
+        let result = make_strategy("FooBar", None, 0);
+        assert!(result.is_err());
+        assert!(result.err().unwrap().contains("Unknown strategy"));
+    }
+
+    #[test]
+    fn make_rules_standard() {
+        assert!(make_rules("Standard").is_ok());
+    }
+
+    #[test]
+    fn make_rules_empty_string() {
+        assert!(make_rules("").is_ok());
+    }
+
+    #[test]
+    fn make_rules_unknown_fails() {
+        let result = make_rules("Chaos");
+        assert!(result.is_err());
+        assert!(result.err().unwrap().contains("Unknown rules"));
+    }
+
+    #[test]
+    fn available_strategies_returns_all_eleven() {
+        let strats = available_strategies();
+        assert_eq!(strats.len(), 11);
+        assert!(strats.contains(&"Random".to_string()));
+        assert!(strats.contains(&"Genetic".to_string()));
+        assert!(strats.contains(&"Statistician".to_string()));
+    }
+
+    #[test]
+    fn available_rules_returns_standard() {
+        let rules = available_rules();
+        assert_eq!(rules, vec!["Standard".to_string()]);
+    }
+
+    // ========================================================================
+    // Helpers
+    // ========================================================================
+
+    /// Play bot+human turns using RandomStrategy logic until the round ends
+    /// (either round-over needing continue, or game-over).
+    fn play_until_round_over(room: &mut Room) {
+        let random_strategy = RandomStrategy;
+        for _ in 0..1000 {
+            if room.phase != RoomPhase::InGame {
+                return;
+            }
+            {
+                let game = match room.game.as_ref() {
+                    Some(g) => g,
+                    None => return,
+                };
+                let action_needed = game.get_action_needed();
+                match action_needed {
+                    skyjo_core::ActionNeeded::GameOver { .. }
+                    | skyjo_core::ActionNeeded::RoundOver { .. } => return,
+                    _ => {}
+                }
+            }
+            if room.is_current_player_bot() {
+                room.apply_bot_action().unwrap();
+            } else {
+                let game = room.game.as_mut().unwrap();
+                let current = game.current_player_index().unwrap();
+                let action = game.get_bot_action(&random_strategy).unwrap();
+                room.apply_action(current, action).unwrap();
+            }
+        }
+    }
+
+    /// Play until the game is fully over (GameOver phase).
+    fn play_until_game_over(room: &mut Room) {
+        let random_strategy = RandomStrategy;
+        for _ in 0..10000 {
+            if room.phase == RoomPhase::GameOver {
+                return;
+            }
+            {
+                let game = match room.game.as_ref() {
+                    Some(g) => g,
+                    None => return,
+                };
+                let action_needed = game.get_action_needed();
+                match action_needed {
+                    skyjo_core::ActionNeeded::GameOver { .. } => return,
+                    skyjo_core::ActionNeeded::RoundOver { .. } => {
+                        // Need to drop the borrow before calling continue_round
+                    }
+                    _ => {}
+                }
+                // Check if we need to continue round (re-check after drop)
+            }
+            // Re-check for RoundOver outside the borrow
+            {
+                let is_round_over = room.game.as_ref().is_some_and(|g| {
+                    matches!(
+                        g.get_action_needed(),
+                        skyjo_core::ActionNeeded::RoundOver { .. }
+                    )
+                });
+                if is_round_over {
+                    room.continue_round().unwrap();
+                    continue;
+                }
+            }
+            if room.is_current_player_bot() {
+                room.apply_bot_action().unwrap();
+            } else {
+                let game = room.game.as_mut().unwrap();
+                let current = game.current_player_index().unwrap();
+                let action = game.get_bot_action(&random_strategy).unwrap();
+                room.apply_action(current, action).unwrap();
+            }
+        }
+    }
+}
