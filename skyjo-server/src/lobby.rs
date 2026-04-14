@@ -6,6 +6,7 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
+use crate::error::ServerError;
 use crate::room::{Room, SharedRoom};
 use crate::session::SessionToken;
 
@@ -50,12 +51,12 @@ impl Lobby {
         rules: Option<String>,
         genetic_games_trained: usize,
         genetic_generation: usize,
-    ) -> Result<(String, SessionToken, usize), String> {
+    ) -> Result<(String, SessionToken, usize), ServerError> {
         if !(2..=8).contains(&num_players) {
-            return Err("Player count must be 2-8".to_string());
+            return Err(ServerError::InvalidNumPlayers);
         }
         if self.rooms.len() >= self.max_rooms {
-            return Err("Server is at maximum room capacity".to_string());
+            return Err(ServerError::MaxRoomsReached);
         }
 
         let code = self.generate_code();
@@ -85,18 +86,22 @@ impl Lobby {
         &self,
         code: &str,
         player_name: String,
-    ) -> Result<(SessionToken, usize), String> {
-        let room_ref = self.rooms.get(code).ok_or("Room not found")?.clone();
+    ) -> Result<(SessionToken, usize), ServerError> {
+        let room_ref = self
+            .rooms
+            .get(code)
+            .ok_or(ServerError::RoomNotFound)?
+            .clone();
 
         let mut room = room_ref.lock().await;
 
         if room.phase != crate::room::RoomPhase::Lobby {
-            return Err("Game already started".to_string());
+            return Err(ServerError::GameAlreadyStarted);
         }
 
         let slot = room
             .next_available_slot()
-            .ok_or("Room is full (all slots are taken by human players)")?;
+            .ok_or(ServerError::RoomFull)?;
 
         let token = SessionToken::new();
         room.players[slot].name = player_name.clone();
@@ -217,6 +222,7 @@ pub struct RoomInfoResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::ServerError;
     use std::collections::HashSet;
 
     fn make_lobby(max_rooms: usize) -> Lobby {
@@ -275,7 +281,7 @@ mod tests {
 
         let result = lobby.create_room("Charlie".into(), 2, None, 0, 0);
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "Server is at maximum room capacity");
+        assert_eq!(result.unwrap_err(), ServerError::MaxRoomsReached);
     }
 
     #[test]
@@ -344,7 +350,7 @@ mod tests {
         let lobby = make_lobby(5);
         let result = lobby.join_room("BADCODE", "Bob".into()).await;
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "Room not found");
+        assert_eq!(result.unwrap_err(), ServerError::RoomNotFound);
     }
 
     #[tokio::test]

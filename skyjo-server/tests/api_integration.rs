@@ -223,7 +223,7 @@ async fn join_room_fails_with_invalid_code() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
 // --- Genetic status test ---

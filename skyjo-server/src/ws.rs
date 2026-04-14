@@ -8,8 +8,17 @@ use tokio::sync::broadcast;
 use std::sync::Arc;
 
 use crate::AppStateInner;
+use crate::error::ServerError;
 use crate::messages::{ClientMessage, ServerMessage};
 use crate::room::SharedRoom;
+
+/// Convert a ServerError into a ServerMessage::Error.
+fn error_msg(err: ServerError) -> ServerMessage {
+    ServerMessage::Error {
+        code: format!("{:?}", err),
+        message: err.message(),
+    }
+}
 
 /// Handle a WebSocket connection for a player in a room.
 pub async fn handle_ws(
@@ -191,10 +200,7 @@ async fn handle_client_message(
             let mut room_guard = room.lock().await;
 
             if player_index != room_guard.creator {
-                return Some(ServerMessage::Error {
-                    code: "not_creator".to_string(),
-                    message: "Only the room creator can configure slots".to_string(),
-                });
+                return Some(error_msg(ServerError::NotHost));
             }
 
             match room_guard.configure_slot(slot, &player_type) {
@@ -202,10 +208,7 @@ async fn handle_client_message(
                     room_guard.broadcast_lobby_state();
                     None
                 }
-                Err(e) => Some(ServerMessage::Error {
-                    code: "configure_error".to_string(),
-                    message: e,
-                }),
+                Err(e) => Some(error_msg(e)),
             }
         }
 
@@ -213,10 +216,7 @@ async fn handle_client_message(
             let mut room_guard = room.lock().await;
 
             if player_index != room_guard.creator {
-                return Some(ServerMessage::Error {
-                    code: "not_creator".to_string(),
-                    message: "Only the room creator can change rules".to_string(),
-                });
+                return Some(error_msg(ServerError::NotHost));
             }
 
             match room_guard.set_rules(&rules) {
@@ -224,10 +224,7 @@ async fn handle_client_message(
                     room_guard.broadcast_lobby_state();
                     None
                 }
-                Err(e) => Some(ServerMessage::Error {
-                    code: "set_rules_error".to_string(),
-                    message: e,
-                }),
+                Err(e) => Some(error_msg(e)),
             }
         }
 
@@ -235,10 +232,7 @@ async fn handle_client_message(
             let mut room_guard = room.lock().await;
 
             if player_index != room_guard.creator {
-                return Some(ServerMessage::Error {
-                    code: "not_creator".to_string(),
-                    message: "Only the room creator can change player count".to_string(),
-                });
+                return Some(error_msg(ServerError::NotHost));
             }
 
             match room_guard.set_num_players(num_players) {
@@ -246,10 +240,7 @@ async fn handle_client_message(
                     room_guard.broadcast_lobby_state();
                     None
                 }
-                Err(e) => Some(ServerMessage::Error {
-                    code: "set_players_error".to_string(),
-                    message: e,
-                }),
+                Err(e) => Some(error_msg(e)),
             }
         }
 
@@ -257,10 +248,7 @@ async fn handle_client_message(
             let mut room_guard = room.lock().await;
 
             if player_index != room_guard.creator {
-                return Some(ServerMessage::Error {
-                    code: "not_creator".to_string(),
-                    message: "Only the room creator can kick players".to_string(),
-                });
+                return Some(error_msg(ServerError::NotHost));
             }
 
             match room_guard.kick_player(slot) {
@@ -272,10 +260,7 @@ async fn handle_client_message(
                     room_guard.broadcast_lobby_state();
                     None
                 }
-                Err(e) => Some(ServerMessage::Error {
-                    code: "kick_error".to_string(),
-                    message: e,
-                }),
+                Err(e) => Some(error_msg(e)),
             }
         }
 
@@ -283,10 +268,7 @@ async fn handle_client_message(
             let mut room_guard = room.lock().await;
 
             if player_index != room_guard.creator {
-                return Some(ServerMessage::Error {
-                    code: "not_creator".to_string(),
-                    message: "Only the room creator can ban players".to_string(),
-                });
+                return Some(error_msg(ServerError::NotHost));
             }
 
             match room_guard.ban_player(slot) {
@@ -297,10 +279,7 @@ async fn handle_client_message(
                     room_guard.broadcast_lobby_state();
                     None
                 }
-                Err(e) => Some(ServerMessage::Error {
-                    code: "ban_error".to_string(),
-                    message: e,
-                }),
+                Err(e) => Some(error_msg(e)),
             }
         }
 
@@ -308,10 +287,7 @@ async fn handle_client_message(
             let mut room_guard = room.lock().await;
 
             if player_index != room_guard.creator {
-                return Some(ServerMessage::Error {
-                    code: "not_creator".to_string(),
-                    message: "Only the room creator can start the game".to_string(),
-                });
+                return Some(error_msg(ServerError::NotHost));
             }
 
             // Snapshot the genetic genome if any player uses a Genetic strategy
@@ -362,10 +338,7 @@ async fn handle_client_message(
 
                     None
                 }
-                Err(e) => Some(ServerMessage::Error {
-                    code: "start_error".to_string(),
-                    message: e,
-                }),
+                Err(e) => Some(error_msg(e)),
             }
         }
 
@@ -390,10 +363,7 @@ async fn handle_client_message(
 
                     None
                 }
-                Err(e) => Some(ServerMessage::Error {
-                    code: "action_error".to_string(),
-                    message: e,
-                }),
+                Err(e) => Some(error_msg(e)),
             }
         }
 
@@ -418,10 +388,7 @@ async fn handle_client_message(
 
                     None
                 }
-                Err(e) => Some(ServerMessage::Error {
-                    code: "continue_error".to_string(),
-                    message: e,
-                }),
+                Err(e) => Some(error_msg(e)),
             }
         }
 
@@ -429,10 +396,7 @@ async fn handle_client_message(
             let mut room_guard = room.lock().await;
 
             if player_index != room_guard.creator {
-                return Some(ServerMessage::Error {
-                    code: "not_creator".to_string(),
-                    message: "Only the room creator can restart the game".to_string(),
-                });
+                return Some(error_msg(ServerError::NotHost));
             }
 
             match room_guard.play_again() {
@@ -440,10 +404,7 @@ async fn handle_client_message(
                     room_guard.broadcast_lobby_state();
                     None
                 }
-                Err(e) => Some(ServerMessage::Error {
-                    code: "play_again_error".to_string(),
-                    message: e,
-                }),
+                Err(e) => Some(error_msg(e)),
             }
         }
 
@@ -455,10 +416,7 @@ async fn handle_client_message(
                     room_guard.broadcast_lobby_state();
                     None
                 }
-                Err(e) => Some(ServerMessage::Error {
-                    code: "return_error".to_string(),
-                    message: e,
-                }),
+                Err(e) => Some(error_msg(e)),
             }
         }
 
@@ -466,10 +424,7 @@ async fn handle_client_message(
             let mut room_guard = room.lock().await;
 
             if player_index != room_guard.creator {
-                return Some(ServerMessage::Error {
-                    code: "not_creator".to_string(),
-                    message: "Only the room creator can change the turn timer".to_string(),
-                });
+                return Some(error_msg(ServerError::NotHost));
             }
 
             match room_guard.set_turn_timer(secs) {
@@ -477,10 +432,7 @@ async fn handle_client_message(
                     room_guard.broadcast_lobby_state();
                     None
                 }
-                Err(e) => Some(ServerMessage::Error {
-                    code: "set_timer_error".to_string(),
-                    message: e,
-                }),
+                Err(e) => Some(error_msg(e)),
             }
         }
 
@@ -488,10 +440,7 @@ async fn handle_client_message(
             let mut room_guard = room.lock().await;
 
             if player_index != room_guard.creator {
-                return Some(ServerMessage::Error {
-                    code: "not_creator".to_string(),
-                    message: "Only the room creator can promote players".to_string(),
-                });
+                return Some(error_msg(ServerError::NotHost));
             }
 
             match room_guard.promote_host(slot) {
@@ -499,10 +448,7 @@ async fn handle_client_message(
                     room_guard.broadcast_lobby_state();
                     None
                 }
-                Err(e) => Some(ServerMessage::Error {
-                    code: "promote_error".to_string(),
-                    message: e,
-                }),
+                Err(e) => Some(error_msg(e)),
             }
         }
     }

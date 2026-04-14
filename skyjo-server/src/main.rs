@@ -14,6 +14,7 @@ use tokio::sync::Mutex;
 use tower_http::compression::CompressionLayer;
 use tower_http::services::{ServeDir, ServeFile};
 
+use skyjo_server::error::ServerError;
 use skyjo_server::genetic::{self, GeneticTrainingState};
 use skyjo_server::lobby::Lobby;
 use skyjo_server::ws;
@@ -31,8 +32,12 @@ struct Args {
     static_dir: PathBuf,
 
     /// Path to the genetic model file.
-    #[arg(long, default_value = "./genetic_model.json")]
-    genetic_model_path: PathBuf,
+    #[arg(long)]
+    genetic_model_path: Option<PathBuf>,
+
+    /// Directory for persistent data (SQLite DB, genetic model)
+    #[arg(long, default_value = "./data")]
+    data_dir: String,
 }
 
 #[tokio::main]
@@ -47,8 +52,15 @@ async fn main() {
 
     let args = Args::parse();
 
+    // Ensure data directory exists
+    std::fs::create_dir_all(&args.data_dir).expect("Failed to create data directory");
+
+    let genetic_model_path = args
+        .genetic_model_path
+        .unwrap_or_else(|| PathBuf::from(&args.data_dir).join("genetic_model.json"));
+
     let genetic_state = Arc::new(Mutex::new(GeneticTrainingState::load_or_new(
-        args.genetic_model_path,
+        genetic_model_path,
     )));
 
     let app_state = Arc::new(AppStateInner {
@@ -129,34 +141,28 @@ async fn ws_upgrade(
     Query(query): Query<WsQuery>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     ws: WebSocketUpgrade,
-) -> Result<Response, (StatusCode, String)> {
+) -> Result<Response, ServerError> {
     // Authenticate session token
-    let (room_code, player_index) = state.lobby.get_session(&query.token).ok_or((
-        StatusCode::UNAUTHORIZED,
-        "Invalid session token".to_string(),
-    ))?;
+    let (room_code, player_index) = state
+        .lobby
+        .get_session(&query.token)
+        .ok_or(ServerError::Unauthorized)?;
 
     if room_code != code {
-        return Err((
-            StatusCode::FORBIDDEN,
-            "Token does not match this room".to_string(),
-        ));
+        return Err(ServerError::Unauthorized);
     }
 
     let room = state
         .lobby
         .get_room(&code)
-        .ok_or((StatusCode::NOT_FOUND, "Room not found".to_string()))?;
+        .ok_or(ServerError::RoomNotFound)?;
 
     // Check IP ban
     {
         let room_guard = room.lock().await;
         let ip = addr.ip().to_string();
         if room_guard.is_ip_banned(&ip) {
-            return Err((
-                StatusCode::FORBIDDEN,
-                "You are banned from this room".to_string(),
-            ));
+            return Err(ServerError::Banned);
         }
     }
 
