@@ -1,6 +1,6 @@
-use rand::seq::IndexedRandom;
-use rand::prelude::SliceRandom;
 use rand::RngCore;
+use rand::prelude::SliceRandom;
+use rand::seq::IndexedRandom;
 
 use crate::card::{CardValue, VisibleSlot};
 use crate::strategy::{
@@ -20,18 +20,18 @@ fn find_leader(view: &StrategyView) -> Option<&Vec<VisibleSlot>> {
         return None;
     }
     let avg = average_unknown_value(view);
-    view.opponent_boards
-        .iter()
-        .min_by(|a, b| {
-            let sa = expected_score(a, avg);
-            let sb = expected_score(b, avg);
-            sa.partial_cmp(&sb).unwrap_or(std::cmp::Ordering::Equal)
-        })
+    view.opponent_boards.iter().min_by(|a, b| {
+        let sa = expected_score(a, avg);
+        let sb = expected_score(b, avg);
+        sa.partial_cmp(&sb).unwrap_or(std::cmp::Ordering::Equal)
+    })
 }
 
 /// Check if any revealed slot on a board matches the given value.
 fn leader_has_value(board: &[VisibleSlot], value: CardValue) -> bool {
-    board.iter().any(|s| matches!(s, VisibleSlot::Revealed(v) if *v == value))
+    board
+        .iter()
+        .any(|s| matches!(s, VisibleSlot::Revealed(v) if *v == value))
 }
 
 fn highest_revealed_value(board: &[VisibleSlot]) -> Option<CardValue> {
@@ -251,8 +251,7 @@ impl Strategy for MimicStrategy {
             }
 
             // Priority 2: Leader has a partial column match and drawn card matches that value
-            let leader_cols =
-                opponent_column_analysis(leader, view.num_rows, view.num_cols);
+            let leader_cols = opponent_column_analysis(leader, view.num_rows, view.num_cols);
             for leader_col in &leader_cols {
                 if let Some((match_val, _)) = leader_col.partial_match
                     && match_val == drawn_card
@@ -500,7 +499,10 @@ mod tests {
         let action = strategy.choose_deck_draw_action(&view, 2, &mut rng);
         match action {
             DeckDrawAction::Keep(pos) => {
-                assert_eq!(pos, 0, "Should replace highest revealed (8) with leader's value (2)");
+                assert_eq!(
+                    pos, 0,
+                    "Should replace highest revealed (8) with leader's value (2)"
+                );
             }
             _ => panic!("Should keep card matching leader's value"),
         }

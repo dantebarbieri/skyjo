@@ -1,6 +1,6 @@
-use rand::seq::IndexedRandom;
-use rand::prelude::SliceRandom;
 use rand::RngCore;
+use rand::prelude::SliceRandom;
+use rand::seq::IndexedRandom;
 
 use crate::card::{CardValue, VisibleSlot};
 use crate::strategy::{

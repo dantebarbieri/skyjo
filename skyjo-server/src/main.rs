@@ -10,11 +10,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use axum::Router;
 use axum::extract::{ConnectInfo, Path, Query, State, WebSocketUpgrade};
 use axum::http::StatusCode;
 use axum::response::{Json, Response};
 use axum::routing::{get, post};
-use axum::Router;
 use clap::Parser;
 use serde::Deserialize;
 use tokio::sync::Mutex;
@@ -78,8 +78,8 @@ async fn main() {
         loop {
             interval.tick().await;
             cleanup_state.lobby.cleanup_stale_rooms(
-                Duration::from_secs(300),  // 5 min after game over
-                Duration::from_secs(600),  // 10 min after all disconnect
+                Duration::from_secs(300), // 5 min after game over
+                Duration::from_secs(600), // 10 min after all disconnect
             );
         }
     });
@@ -98,13 +98,16 @@ async fn main() {
         .route("/genetic/status", get(genetic_status))
         .route("/genetic/saved", get(genetic_saved_list).post(genetic_save))
         .route("/genetic/saved/import", post(genetic_import))
-        .route("/genetic/saved/{name}", axum::routing::delete(genetic_saved_delete))
+        .route(
+            "/genetic/saved/{name}",
+            axum::routing::delete(genetic_saved_delete),
+        )
         .route("/genetic/saved/{name}/model", get(genetic_saved_model));
 
     // SPA fallback: serve index.html for any non-file route
     let index_path = args.static_dir.join("index.html");
-    let static_service = ServeDir::new(&args.static_dir)
-        .not_found_service(ServeFile::new(&index_path));
+    let static_service =
+        ServeDir::new(&args.static_dir).not_found_service(ServeFile::new(&index_path));
 
     let app = Router::new()
         .nest("/api", api_routes)
@@ -120,9 +123,12 @@ async fn main() {
         .await
         .expect("Failed to bind");
 
-    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
-        .await
-        .expect("Server error");
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    .expect("Server error");
 }
 
 // --- REST Handlers ---
@@ -137,7 +143,13 @@ async fn create_room(
     };
     let (code, token, player_index) = state
         .lobby
-        .create_room(req.player_name, req.num_players, req.rules, genetic_games, genetic_gen)
+        .create_room(
+            req.player_name,
+            req.num_players,
+            req.rules,
+            genetic_games,
+            genetic_gen,
+        )
         .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
 
     Ok(Json(CreateRoomResponse {
@@ -208,10 +220,10 @@ async fn ws_upgrade(
     ws: WebSocketUpgrade,
 ) -> Result<Response, (StatusCode, String)> {
     // Authenticate session token
-    let (room_code, player_index) = state
-        .lobby
-        .get_session(&query.token)
-        .ok_or((StatusCode::UNAUTHORIZED, "Invalid session token".to_string()))?;
+    let (room_code, player_index) = state.lobby.get_session(&query.token).ok_or((
+        StatusCode::UNAUTHORIZED,
+        "Invalid session token".to_string(),
+    ))?;
 
     if room_code != code {
         return Err((
@@ -245,9 +257,7 @@ async fn ws_upgrade(
 
 // --- Genetic API handlers ---
 
-async fn genetic_model(
-    State(state): State<AppState>,
-) -> Json<genetic::GeneticModelData> {
+async fn genetic_model(State(state): State<AppState>) -> Json<genetic::GeneticModelData> {
     let s = state.genetic.lock().await;
     Json(s.model_data())
 }
@@ -324,9 +334,7 @@ async fn genetic_train(
     Ok(Json(status))
 }
 
-async fn genetic_stop(
-    State(state): State<AppState>,
-) -> Json<genetic::TrainingStatus> {
+async fn genetic_stop(State(state): State<AppState>) -> Json<genetic::TrainingStatus> {
     let mut s = state.genetic.lock().await;
     if s.is_training {
         s.is_training = false;
@@ -360,15 +368,15 @@ async fn genetic_load(
             "Cannot load while training is in progress. Stop training first.".to_string(),
         ));
     }
-    let name = req.name.ok_or_else(|| (StatusCode::BAD_REQUEST, "name is required".to_string()))?;
+    let name = req
+        .name
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, "name is required".to_string()))?;
     s.load_saved(&name)
         .map_err(|e| (StatusCode::NOT_FOUND, e))?;
     Ok(Json(s.status()))
 }
 
-async fn genetic_status(
-    State(state): State<AppState>,
-) -> Json<genetic::TrainingStatus> {
+async fn genetic_status(State(state): State<AppState>) -> Json<genetic::TrainingStatus> {
     let s = state.genetic.lock().await;
     Json(s.status())
 }

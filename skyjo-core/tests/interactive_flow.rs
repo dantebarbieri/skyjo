@@ -87,7 +87,10 @@ fn draw_from_deck_then_keep() {
     // Draw from deck
     let result = game.apply_action(PlayerAction::DrawFromDeck).unwrap();
     match result {
-        ActionNeeded::ChooseDeckDrawAction { player, drawn_card: Some(card) } => {
+        ActionNeeded::ChooseDeckDrawAction {
+            player,
+            drawn_card: Some(card),
+        } => {
             assert_eq!(player, first_player);
             assert!((-2i8..=12).contains(&card));
         }

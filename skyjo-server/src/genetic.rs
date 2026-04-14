@@ -11,9 +11,9 @@ use skyjo_core::game::Game;
 use skyjo_core::rules::StandardRules;
 use skyjo_core::strategy::Strategy;
 use skyjo_core::{
-    ClearerStrategy, DefensiveStrategy, GeneticStrategy, GreedyStrategy, RandomStrategy,
-    StatisticianStrategy, GENOME_SIZE, HIDDEN_SIZE, INPUT_GROUPS, INPUT_LABELS, INPUT_SIZE,
-    OUTPUT_GROUPS, OUTPUT_LABELS, OUTPUT_SIZE,
+    ClearerStrategy, DefensiveStrategy, GENOME_SIZE, GeneticStrategy, GreedyStrategy, HIDDEN_SIZE,
+    INPUT_GROUPS, INPUT_LABELS, INPUT_SIZE, OUTPUT_GROUPS, OUTPUT_LABELS, OUTPUT_SIZE,
+    RandomStrategy, StatisticianStrategy,
 };
 
 // --- Configuration constants ---
@@ -259,7 +259,11 @@ impl GeneticTrainingState {
             is_training: self.is_training,
             generation: self.generation,
             total_games_trained: self.total_games_trained,
-            best_fitness: if self.best_fitness.is_finite() { self.best_fitness } else { 0.0 },
+            best_fitness: if self.best_fitness.is_finite() {
+                self.best_fitness
+            } else {
+                0.0
+            },
             training_start_generation: self.training_start_generation,
             training_target_generation: self.training_target_generation,
             training_elapsed_ms: elapsed_ms,
@@ -287,7 +291,11 @@ impl GeneticTrainingState {
             name: name.clone(),
             generation: self.generation,
             total_games_trained: self.total_games_trained,
-            best_fitness: if self.best_fitness.is_finite() { self.best_fitness } else { 0.0 },
+            best_fitness: if self.best_fitness.is_finite() {
+                self.best_fitness
+            } else {
+                0.0
+            },
             genome: self.best_genome.clone(),
             saved_at: chrono_now(),
             lineage_hash: self.lineage_hash.clone(),
@@ -312,7 +320,10 @@ impl GeneticTrainingState {
 
     /// List all saved generations (without genomes).
     pub fn list_saved_generations(&self) -> Vec<SavedGenerationInfo> {
-        self.saved_generations.iter().map(SavedGenerationInfo::from).collect()
+        self.saved_generations
+            .iter()
+            .map(SavedGenerationInfo::from)
+            .collect()
     }
 
     /// Get a specific saved generation's full model data (with genome).
@@ -469,11 +480,7 @@ fn random_genome(rng: &mut dyn RngCore) -> Vec<f32> {
 }
 
 /// Tournament selection: pick the best of `TOURNAMENT_SIZE` random individuals.
-fn tournament_select(
-    population: &[Vec<f32>],
-    fitnesses: &[f64],
-    rng: &mut impl Rng,
-) -> Vec<f32> {
+fn tournament_select(population: &[Vec<f32>], fitnesses: &[f64], rng: &mut impl Rng) -> Vec<f32> {
     let mut best_idx = rng.random_range(0..population.len());
     let mut best_fit = fitnesses[best_idx];
     for _ in 1..TOURNAMENT_SIZE {
@@ -534,10 +541,7 @@ fn select_opponent(
         if idx == current_idx && population.len() > 1 {
             idx = (idx + 1) % population.len();
         }
-        Box::new(GeneticStrategy::new(
-            population[idx].clone(),
-            games_trained,
-        ))
+        Box::new(GeneticStrategy::new(population[idx].clone(), games_trained))
     } else if rng.random_bool(0.5) {
         Box::new(GreedyStrategy)
     } else {
@@ -719,10 +723,7 @@ fn save_model(state: &GeneticTrainingState) {
 
 /// Run training for a given number of generations.
 /// This is designed to be called from `tokio::task::spawn_blocking`.
-pub async fn train_generations(
-    state: Arc<Mutex<GeneticTrainingState>>,
-    num_generations: usize,
-) {
+pub async fn train_generations(state: Arc<Mutex<GeneticTrainingState>>, num_generations: usize) {
     for generation_i in 0..num_generations {
         // Clone population from state (brief lock)
         let (population, generation_num, games_trained, target_fitness, mode) = {

@@ -252,10 +252,7 @@ pub fn extract_features(view: &StrategyView, drawn_card: Option<CardValue>) -> V
     }
 
     // Discard pile top
-    let discard_top = view
-        .discard_top(0)
-        .map(|v| v as f32 / 14.0)
-        .unwrap_or(0.0);
+    let discard_top = view.discard_top(0).map(|v| v as f32 / 14.0).unwrap_or(0.0);
     features.push(discard_top);
 
     // Deck remaining (normalized)
@@ -284,7 +281,11 @@ pub fn extract_features(view: &StrategyView, drawn_card: Option<CardValue>) -> V
     features.push((best_opp / 100.0) as f32);
 
     // Cumulative score gap
-    let my_cum = view.cumulative_scores.get(view.my_index).copied().unwrap_or(0);
+    let my_cum = view
+        .cumulative_scores
+        .get(view.my_index)
+        .copied()
+        .unwrap_or(0);
     let best_opp_cum = view
         .cumulative_scores
         .iter()
@@ -342,12 +343,7 @@ impl GeneticStrategy {
     }
 
     /// Helper: pick the index with the highest output score among valid positions.
-    fn best_valid_position(
-        &self,
-        outputs: &[f32],
-        start: usize,
-        valid: &[usize],
-    ) -> usize {
+    fn best_valid_position(&self, outputs: &[f32], start: usize, valid: &[usize]) -> usize {
         valid
             .iter()
             .copied()

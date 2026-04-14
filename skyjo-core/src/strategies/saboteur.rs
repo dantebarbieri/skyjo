@@ -1,6 +1,6 @@
-use rand::seq::IndexedRandom;
-use rand::prelude::SliceRandom;
 use rand::RngCore;
+use rand::prelude::SliceRandom;
+use rand::seq::IndexedRandom;
 
 use crate::card::{CardValue, VisibleSlot};
 use crate::strategy::{
@@ -200,9 +200,7 @@ impl Strategy for SaboteurStrategy {
                 && drawn_card < *v
             {
                 let displaced_usefulness = next_board
-                    .map(|b| {
-                        card_usefulness_to_player(b, view.num_rows, view.num_cols, *v)
-                    })
+                    .map(|b| card_usefulness_to_player(b, view.num_rows, view.num_cols, *v))
                     .unwrap_or(0.0);
                 keep_candidates.push(KeepCandidate {
                     pos: i,
@@ -225,12 +223,11 @@ impl Strategy for SaboteurStrategy {
                 // A displaced card is even more useful to opponent than the drawn card.
                 // Keep at position that displaces the most-useful-to-opponent card
                 // (we're already burying the drawn card; might as well maximize damage)
-                keep_candidates
-                    .sort_by(|a, b| {
-                        b.displaced_usefulness
-                            .partial_cmp(&a.displaced_usefulness)
-                            .unwrap_or(std::cmp::Ordering::Equal)
-                    });
+                keep_candidates.sort_by(|a, b| {
+                    b.displaced_usefulness
+                        .partial_cmp(&a.displaced_usefulness)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
                 return DeckDrawAction::Keep(keep_candidates[0].pos);
             }
 
@@ -244,13 +241,11 @@ impl Strategy for SaboteurStrategy {
             if !keep_candidates.is_empty() {
                 // Tiebreak: least useful displaced card to opponent
                 keep_candidates.sort_by(|a, b| {
-                    b.improvement
-                        .cmp(&a.improvement)
-                        .then(
-                            a.displaced_usefulness
-                                .partial_cmp(&b.displaced_usefulness)
-                                .unwrap_or(std::cmp::Ordering::Equal),
-                        )
+                    b.improvement.cmp(&a.improvement).then(
+                        a.displaced_usefulness
+                            .partial_cmp(&b.displaced_usefulness)
+                            .unwrap_or(std::cmp::Ordering::Equal),
+                    )
                 });
                 return DeckDrawAction::Keep(keep_candidates[0].pos);
             }
@@ -276,13 +271,11 @@ impl Strategy for SaboteurStrategy {
         if !keep_candidates.is_empty() {
             // It improves our board — keep it, displacing card least useful to opponent
             keep_candidates.sort_by(|a, b| {
-                b.improvement
-                    .cmp(&a.improvement)
-                    .then(
-                        a.displaced_usefulness
-                            .partial_cmp(&b.displaced_usefulness)
-                            .unwrap_or(std::cmp::Ordering::Equal),
-                    )
+                b.improvement.cmp(&a.improvement).then(
+                    a.displaced_usefulness
+                        .partial_cmp(&b.displaced_usefulness)
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                )
             });
             return DeckDrawAction::Keep(keep_candidates[0].pos);
         }
@@ -314,9 +307,7 @@ impl Strategy for SaboteurStrategy {
                 VisibleSlot::Revealed(v) => {
                     let improvement = (*v as i32) - (drawn_card as i32);
                     let displaced_usefulness = next_board
-                        .map(|b| {
-                            card_usefulness_to_player(b, view.num_rows, view.num_cols, *v)
-                        })
+                        .map(|b| card_usefulness_to_player(b, view.num_rows, view.num_cols, *v))
                         .unwrap_or(0.0);
                     candidates.push((i, improvement, displaced_usefulness));
                 }
@@ -331,10 +322,7 @@ impl Strategy for SaboteurStrategy {
         // Sort: best improvement first, then least useful displaced card to next player
         candidates.sort_by(|a, b| {
             b.1.cmp(&a.1)
-                .then(
-                    a.2.partial_cmp(&b.2)
-                        .unwrap_or(std::cmp::Ordering::Equal),
-                )
+                .then(a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal))
         });
 
         candidates.first().map(|c| c.0).unwrap_or(0)
@@ -395,10 +383,7 @@ fn pick_hidden_for_column_progress(
 mod tests {
     use super::*;
 
-    fn make_view(
-        my_board: Vec<VisibleSlot>,
-        opponent_board: Vec<VisibleSlot>,
-    ) -> StrategyView {
+    fn make_view(my_board: Vec<VisibleSlot>, opponent_board: Vec<VisibleSlot>) -> StrategyView {
         StrategyView {
             my_index: 0,
             my_board,
@@ -565,7 +550,10 @@ mod tests {
         let action = strategy.choose_deck_draw_action(&view, 3, &mut rng);
         match action {
             DeckDrawAction::Keep(pos) => {
-                assert_eq!(pos, 0, "Should replace the 10, not the 7 (7 helps opponent)");
+                assert_eq!(
+                    pos, 0,
+                    "Should replace the 10, not the 7 (7 helps opponent)"
+                );
             }
             _ => panic!("Should keep the 3"),
         }

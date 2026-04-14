@@ -1,6 +1,6 @@
 use rand::SeedableRng;
-use rand::rngs::StdRng;
 use rand::prelude::SliceRandom;
+use rand::rngs::StdRng;
 use serde::{Deserialize, Serialize};
 
 use crate::board::PlayerBoard;
@@ -869,7 +869,10 @@ mod tests {
         // Draw from deck
         let result = game.apply_action(PlayerAction::DrawFromDeck).unwrap();
         match &result {
-            ActionNeeded::ChooseDeckDrawAction { drawn_card: Some(card), .. } => {
+            ActionNeeded::ChooseDeckDrawAction {
+                drawn_card: Some(card),
+                ..
+            } => {
                 assert!((-2i8..=12).contains(&card));
             }
             other => panic!("Expected ChooseDeckDrawAction, got {:?}", other),
