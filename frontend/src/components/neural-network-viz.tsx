@@ -36,6 +36,10 @@ export function NeuralNetworkViz({ className }: NeuralNetworkVizProps) {
   const lastGenRef = useRef(0);
   const pollIntervalRef = useRef(500);
   const pollHistoryRef = useRef<boolean[]>([]);
+  // Client-side elapsed time interpolation
+  const elapsedAnchorRef = useRef<{ serverMs: number; localTs: number } | null>(null);
+  const [clientElapsedMs, setClientElapsedMs] = useState(0);
+  const elapsedRafRef = useRef<number | null>(null);
   const [trainGenCount, setTrainGenCount] = useState('100');
   const [trainTargetGen, setTrainTargetGen] = useState('');
   const [trainTargetFitness, setTrainTargetFitness] = useState('-30');
@@ -59,6 +63,10 @@ export function NeuralNetworkViz({ className }: NeuralNetworkVizProps) {
       if (!res.ok) return null;
       const s: GeneticTrainingStatus = await res.json();
       setStatus(s);
+      // Seed elapsed time anchor on every status fetch
+      if (s.is_training) {
+        elapsedAnchorRef.current = { serverMs: s.training_elapsed_ms, localTs: performance.now() };
+      }
       return s;
     } catch {
       return null;
@@ -89,11 +97,16 @@ export function NeuralNetworkViz({ className }: NeuralNetworkVizProps) {
     stopPolling();
     pollRef.current = setTimeout(async () => {
       const s = await fetchStatus();
+      // Freshness: only check generation and last-gen ETA snapshot (not elapsed time)
       const hadNewData = s != null && (
         s.generation !== lastGenRef.current ||
-        s.training_elapsed_ms !== (statusRef.current?.training_elapsed_ms ?? 0)
+        s.training_last_gen_elapsed_ms !== (statusRef.current?.training_last_gen_elapsed_ms ?? 0)
       );
-      if (s) statusRef.current = s;
+      if (s) {
+        statusRef.current = s;
+        // Anchor client-side elapsed time to server value
+        elapsedAnchorRef.current = { serverMs: s.training_elapsed_ms, localTs: performance.now() };
+      }
 
       if (s && s.generation !== lastGenRef.current) {
         lastGenRef.current = s.generation;
@@ -101,6 +114,7 @@ export function NeuralNetworkViz({ className }: NeuralNetworkVizProps) {
       }
       if (s && !s.is_training) {
         stopPolling();
+        stopElapsedTimer();
         await fetchModel();
         await fetchSaved();
         return;
@@ -114,13 +128,10 @@ export function NeuralNetworkViz({ className }: NeuralNetworkVizProps) {
       const freshCount = history.filter(Boolean).length;
       let interval = pollIntervalRef.current;
       if (freshCount >= POLL_WINDOW) {
-        // All recent polls had new data — speed up
         interval = Math.max(POLL_MIN_MS, interval * 0.7);
       } else if (freshCount === 0) {
-        // All stale — slow down
         interval = Math.min(POLL_MAX_MS, interval * 1.5);
       }
-      // Otherwise hold steady
       pollIntervalRef.current = interval;
 
       schedulePoll();
@@ -130,17 +141,39 @@ export function NeuralNetworkViz({ className }: NeuralNetworkVizProps) {
   // Keep a ref to the latest status for comparison without triggering re-renders
   const statusRef = useRef<GeneticTrainingStatus | null>(null);
 
+  // Client-side elapsed time: interpolate from last server anchor using requestAnimationFrame
+  function startElapsedTimer() {
+    stopElapsedTimer();
+    const tick = () => {
+      const anchor = elapsedAnchorRef.current;
+      if (anchor) {
+        const delta = performance.now() - anchor.localTs;
+        setClientElapsedMs(anchor.serverMs + delta);
+      }
+      elapsedRafRef.current = requestAnimationFrame(tick);
+    };
+    elapsedRafRef.current = requestAnimationFrame(tick);
+  }
+
+  function stopElapsedTimer() {
+    if (elapsedRafRef.current != null) {
+      cancelAnimationFrame(elapsedRafRef.current);
+      elapsedRafRef.current = null;
+    }
+  }
+
   const startPolling = useCallback(() => {
     pollIntervalRef.current = POLL_MIN_MS;
     pollHistoryRef.current = [];
     schedulePoll();
+    startElapsedTimer();
   }, [schedulePoll]);
 
   function stopPolling() {
     if (pollRef.current) { clearTimeout(pollRef.current); pollRef.current = null; }
   }
 
-  useEffect(() => () => stopPolling(), []);
+  useEffect(() => () => { stopPolling(); stopElapsedTimer(); }, []);
 
   async function startTraining(request: Record<string, unknown>) {
     setTrainError(null);
@@ -248,7 +281,7 @@ export function NeuralNetworkViz({ className }: NeuralNetworkVizProps) {
   const gensDone = isTraining ? (status!.generation - status!.training_start_generation) : 0;
   const gensTotal = isTraining ? (status!.training_target_generation - status!.training_start_generation) : 0;
   const gensRemaining = gensTotal - gensDone;
-  const elapsedSec = isTraining ? (status!.training_elapsed_ms / 1000) : 0;
+  const elapsedSec = isTraining ? (clientElapsedMs / 1000) : 0;
   // Use the snapshot at last gen completion for stable rate/ETA (avoids drift between polls)
   const stableElapsedSec = isTraining ? (status!.training_last_gen_elapsed_ms / 1000) : 0;
   const gensPerSec = stableElapsedSec > 0 && gensDone > 0 ? gensDone / stableElapsedSec : 0;
