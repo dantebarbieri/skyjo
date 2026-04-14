@@ -76,7 +76,7 @@ async function runSimulation(config: SimConfig) {
       if (needHistory) {
         const resultJson = simulate_one_with_history(gameConfig);
         const parsed = JSON.parse(resultJson);
-        if (parsed.error) {
+        if (parsed && typeof parsed === 'object' && 'error' in parsed) {
           post({ type: 'error', message: `Game ${i + 1} (seed ${seed}): ${parsed.error}` });
           return;
         }
@@ -92,7 +92,7 @@ async function runSimulation(config: SimConfig) {
       } else {
         const resultJson = simulate_one(gameConfig);
         const parsed = JSON.parse(resultJson);
-        if (parsed.error) {
+        if (parsed && typeof parsed === 'object' && 'error' in parsed) {
           post({ type: 'error', message: `Game ${i + 1} (seed ${seed}): ${parsed.error}` });
           return;
         }

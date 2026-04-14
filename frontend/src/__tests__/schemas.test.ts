@@ -283,7 +283,7 @@ describe('Discriminated unions', () => {
           DrewFromDeck: { drawn_card: 5, action: { Keep: 3 }, displaced_card: 7 },
           DrewFromDiscard: { pile_index: 0, drawn_card: 3, placement: 4, displaced_card: 8 },
         }),
-      ).not.toThrow(); // Union accepts first match — this is valid union behavior
+      ).toThrow(); // Strict objects reject unrecognized keys
     });
   });
 

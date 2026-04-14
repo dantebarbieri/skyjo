@@ -5,8 +5,8 @@ import { z } from 'zod';
 export const CardValueSchema = z.number().int().min(-2).max(12);
 
 export const SlotSchema = z.union([
-  z.object({ Hidden: CardValueSchema }),
-  z.object({ Revealed: CardValueSchema }),
+  z.object({ Hidden: CardValueSchema }).strict(),
+  z.object({ Revealed: CardValueSchema }).strict(),
   z.literal('Cleared'),
 ]);
 
@@ -19,8 +19,8 @@ export const VisibleSlotSchema = z.union([
 // ─── Turn Action Schemas ────────────────────────────────────────────
 
 export const DeckDrawActionSchema = z.union([
-  z.object({ Keep: z.number().int().nonnegative() }),
-  z.object({ DiscardAndFlip: z.number().int().nonnegative() }),
+  z.object({ Keep: z.number().int().nonnegative() }).strict(),
+  z.object({ DiscardAndFlip: z.number().int().nonnegative() }).strict(),
 ]);
 
 export const ColumnClearEventSchema = z.object({
@@ -37,7 +37,7 @@ export const TurnActionSchema = z.union([
       action: DeckDrawActionSchema,
       displaced_card: CardValueSchema.nullable(),
     }),
-  }),
+  }).strict(),
   z.object({
     DrewFromDiscard: z.object({
       pile_index: z.number().int().nonnegative(),
@@ -45,7 +45,7 @@ export const TurnActionSchema = z.union([
       placement: z.number().int().nonnegative(),
       displaced_card: CardValueSchema,
     }),
-  }),
+  }).strict(),
 ]);
 
 export const TurnRecordSchema = z.object({
@@ -265,6 +265,24 @@ export const InteractiveGameStateSchema = z.object({
 export const BotActionResponseSchema = z.object({
   action: PlayerActionSchema,
   state: InteractiveGameStateSchema,
+});
+
+export const WasmErrorResponseSchema = z.object({
+  error: z.string(),
+});
+
+export const CreateGameResponseSchema = z.object({
+  game_id: z.number(),
+  state: InteractiveGameStateSchema,
+});
+
+export const ApplyActionResponseSchema = z.object({
+  state: InteractiveGameStateSchema,
+});
+
+export const SetGenomeResponseSchema = z.object({
+  ok: z.boolean(),
+  error: z.string().optional(),
 });
 
 // ─── Online Game Schemas ────────────────────────────────────────────

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
+import { z } from 'zod';
 import { GeneticModelDataSchema } from '@/schemas';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -118,7 +119,7 @@ export default function GeneticManageRoute() {
       const text = await file.text();
       const data = JSON.parse(text);
       const parseResult = GeneticModelDataSchema.extend({
-        best_fitness: GeneticModelDataSchema.shape.generation.optional(),
+        best_fitness: z.number().optional(),
       }).safeParse(data);
       if (!parseResult.success) {
         setError('Invalid generation file: ' + parseResult.error.issues[0]?.message);

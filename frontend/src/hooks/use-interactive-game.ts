@@ -5,10 +5,18 @@ import type {
   PlayerAction,
   PlayConfig,
   PlayerType,
-  BotActionResponse,
 } from '@/types';
 import { z } from 'zod';
-import { InteractiveGameStateSchema, PlayerActionSchema, PlayConfigSchema } from '@/schemas';
+import {
+  InteractiveGameStateSchema,
+  PlayerActionSchema,
+  PlayConfigSchema,
+  WasmErrorResponseSchema,
+  CreateGameResponseSchema,
+  ApplyActionResponseSchema,
+  BotActionResponseSchema,
+  SetGenomeResponseSchema,
+} from '@/schemas';
 
 export type PlayPhase =
   | 'setup'
@@ -99,20 +107,24 @@ function extractRoundHistory(
     })
   );
   const createResult = JSON.parse(resultJson);
-  if (createResult.error) return { error: createResult.error };
+  const errorCheck = WasmErrorResponseSchema.safeParse(createResult);
+  if (errorCheck.success) return { error: errorCheck.data.error };
+  const createData = CreateGameResponseSchema.parse(createResult);
 
-  const gameId: number = createResult.game_id;
-  let state: InteractiveGameState = createResult.state;
+  const gameId: number = createData.game_id;
+  let state: InteractiveGameState = createData.state;
   const roundHistory: RoundRecord[] = [];
 
   for (const action of actions) {
     const actionResultJson = mod.apply_action(gameId, JSON.stringify(action));
     const actionResult = JSON.parse(actionResultJson);
-    if (actionResult.error) {
+    const actionErrorCheck = WasmErrorResponseSchema.safeParse(actionResult);
+    if (actionErrorCheck.success) {
       mod.destroy_interactive_game(gameId);
-      return { error: actionResult.error };
+      return { error: actionErrorCheck.data.error };
     }
-    state = actionResult.state;
+    const actionData = ApplyActionResponseSchema.parse(actionResult);
+    state = actionData.state;
 
     // Capture round data
     if (state.action_needed.type === 'RoundOver') {
@@ -214,12 +226,12 @@ export function useInteractiveGame(): UseInteractiveGame {
           const res = await fetch(url);
           if (!res.ok) throw new Error('Server unavailable');
           const modelData = await res.json();
-          const setResult = JSON.parse(
+          const setResult = SetGenomeResponseSchema.parse(JSON.parse(
             mod.set_genetic_genome(JSON.stringify({
               genome: modelData.best_genome,
               games_trained: modelData.total_games_trained,
             }))
-          );
+          ));
           if (!setResult.ok) {
             setError('Failed to load genetic model: ' + (setResult.error || 'unknown error'));
             return;
@@ -246,19 +258,21 @@ export function useInteractiveGame(): UseInteractiveGame {
       );
 
       const result = JSON.parse(resultJson);
-      if (result.error) {
-        setError(result.error);
+      const errorResult = WasmErrorResponseSchema.safeParse(result);
+      if (errorResult.success) {
+        setError(errorResult.data.error);
         return;
       }
+      const createData = CreateGameResponseSchema.parse(result);
 
-      gameIdRef.current = result.game_id;
+      gameIdRef.current = createData.game_id;
       configRef.current = config;
       actionsRef.current = [];
       setPlayerTypes(config.player_types);
-      setGameState(result.state);
+      setGameState(createData.state);
       setRoundHistory([]);
       setShowStartingPlayer(false);
-      setPhase(derivePhase(result.state));
+      setPhase(derivePhase(createData.state));
 
       saveToStorage(config, []);
       setHasSavedGame(true);
@@ -277,15 +291,17 @@ export function useInteractiveGame(): UseInteractiveGame {
         JSON.stringify(action)
       );
       const result = JSON.parse(resultJson);
-      if (result.error) {
-        setError(result.error);
+      const errorResult = WasmErrorResponseSchema.safeParse(result);
+      if (errorResult.success) {
+        setError(errorResult.data.error);
         return;
       }
+      const actionData = ApplyActionResponseSchema.parse(result);
 
       // Track action for persistence
       actionsRef.current = [...actionsRef.current, action];
 
-      const newState: InteractiveGameState = result.state;
+      const newState: InteractiveGameState = actionData.state;
       const newPhase = derivePhase(newState);
 
       // Detect transition from initial_flips → playing (starting player popup)
@@ -339,13 +355,15 @@ export function useInteractiveGame(): UseInteractiveGame {
       setError(null);
       const resultJson = wasmMod.apply_bot_action(gameIdRef.current, strategyName);
       const result = JSON.parse(resultJson);
-      if (result.error) {
-        setError(result.error);
+      const errorResult = WasmErrorResponseSchema.safeParse(result);
+      if (errorResult.success) {
+        setError(errorResult.data.error);
         return;
       }
+      const botData = BotActionResponseSchema.parse(result);
 
-      const botAction: PlayerAction = result.action;
-      const newState: InteractiveGameState = result.state;
+      const botAction: PlayerAction = botData.action;
+      const newState: InteractiveGameState = botData.state;
       const newPhase = derivePhase(newState);
 
       // Track the bot's action for persistence (same as human actions)
@@ -404,14 +422,16 @@ export function useInteractiveGame(): UseInteractiveGame {
         JSON.stringify(action)
       );
       const result = JSON.parse(resultJson);
-      if (result.error) {
-        setError(result.error);
+      const errorResult = WasmErrorResponseSchema.safeParse(result);
+      if (errorResult.success) {
+        setError(errorResult.data.error);
         return;
       }
+      const actionData = ApplyActionResponseSchema.parse(result);
 
       actionsRef.current = [...actionsRef.current, action];
 
-      const newState: InteractiveGameState = result.state;
+      const newState: InteractiveGameState = actionData.state;
       setGameState(newState);
       setPhase(derivePhase(newState));
 

@@ -9,11 +9,11 @@ const CacheImportSchema = z.object({
   version: z.literal(1),
   config: SimConfigSchema,
   stats: ProgressStatsSchema,
-  gamesCompleted: z.number(),
-  totalGames: z.number(),
-  elapsedMs: z.number(),
+  gamesCompleted: z.number().int().nonnegative(),
+  totalGames: z.number().int().nonnegative(),
+  elapsedMs: z.number().nonnegative(),
   histories: z.array(z.any()).nullable(),
-  exportedAt: z.number(),
+  exportedAt: z.number().int().nonnegative(),
 });
 
 const INDEX_KEY = 'skyjo_cache_index';
