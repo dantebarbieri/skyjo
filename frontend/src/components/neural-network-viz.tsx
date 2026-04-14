@@ -619,6 +619,7 @@ function NetworkDiagram({ model }: { model: GeneticModelData }) {
   );
   const [hoveredEdge, setHoveredEdge] = useState<string | null>(null);
   const [tooltip, setTooltip] = useState<{ x: number; y: number; weight: number; color: string } | null>(null);
+  const [highlightCategory, setHighlightCategory] = useState<'positive' | 'negative' | 'near-zero' | null>(null);
 
   const maxAbsWeight = useMemo(() => {
     const allWeights = [
@@ -656,6 +657,14 @@ function NetworkDiagram({ model }: { model: GeneticModelData }) {
   const inputNodeCx = inputX + 155;
   const outputNodeCx = outputX - 155;
 
+  // Threshold for "near zero" classification
+  const nearZeroThreshold = 0.25;
+
+  function edgeCategory(nw: number): 'positive' | 'negative' | 'near-zero' {
+    if (Math.abs(nw) < nearZeroThreshold) return 'near-zero';
+    return nw > 0 ? 'positive' : 'negative';
+  }
+
   function renderEdgeGroup(
     edgeList: Edge[],
     prefix: string,
@@ -671,6 +680,9 @@ function NetworkDiagram({ model }: { model: GeneticModelData }) {
       const color = weightToColor(nw);
       const width = Math.max(1.5, Math.min(Math.abs(nw) * 5, 5));
       const isHovered = hoveredEdge === key;
+      const cat = edgeCategory(nw);
+      const dimmed = highlightCategory !== null && cat !== highlightCategory;
+      const highlighted = highlightCategory !== null && cat === highlightCategory;
       return (
         <g key={key}>
           <line
@@ -683,8 +695,10 @@ function NetworkDiagram({ model }: { model: GeneticModelData }) {
           <line
             x1={x1} y1={y1} x2={x2} y2={y2}
             stroke={color}
-            strokeWidth={isHovered ? width + 2 : width}
+            strokeWidth={isHovered ? width + 2 : highlighted ? width + 1 : width}
+            strokeOpacity={dimmed ? 0.1 : 1}
             pointerEvents="none"
+            style={{ transition: 'stroke-opacity 0.15s ease-out, stroke-width 0.15s ease-out' }}
           />
         </g>
       );
@@ -856,14 +870,35 @@ function NetworkDiagram({ model }: { model: GeneticModelData }) {
           </g>
         ))}
 
-        {/* Legend */}
+        {/* Legend — interactive: hover to highlight matching edges */}
         <g transform={`translate(${svgWidth / 2 - 80}, ${contentBottom + 12})`}>
-          <line x1={0} y1={0} x2={20} y2={0} stroke="#3b82f6" strokeWidth={3} />
-          <text x={24} y={4} fontSize={9} className="fill-current text-muted-foreground">Positive</text>
-          <line x1={70} y1={0} x2={90} y2={0} stroke="rgb(85,85,85)" strokeWidth={3} />
-          <text x={94} y={4} fontSize={9} className="fill-current text-muted-foreground">Near zero</text>
-          <line x1={148} y1={0} x2={168} y2={0} stroke="#ef4444" strokeWidth={3} />
-          <text x={172} y={4} fontSize={9} className="fill-current text-muted-foreground">Negative</text>
+          <g
+            style={{ cursor: 'pointer' }}
+            onMouseEnter={() => setHighlightCategory('positive')}
+            onMouseLeave={() => setHighlightCategory(null)}
+          >
+            <rect x={-4} y={-8} width={68} height={16} fill="transparent" />
+            <line x1={0} y1={0} x2={20} y2={0} stroke="#3b82f6" strokeWidth={3} />
+            <text x={24} y={4} fontSize={9} className="fill-current text-muted-foreground" fontWeight={highlightCategory === 'positive' ? 700 : 400}>Positive</text>
+          </g>
+          <g
+            style={{ cursor: 'pointer' }}
+            onMouseEnter={() => setHighlightCategory('near-zero')}
+            onMouseLeave={() => setHighlightCategory(null)}
+          >
+            <rect x={66} y={-8} width={78} height={16} fill="transparent" />
+            <line x1={70} y1={0} x2={90} y2={0} stroke="rgb(85,85,85)" strokeWidth={3} />
+            <text x={94} y={4} fontSize={9} className="fill-current text-muted-foreground" fontWeight={highlightCategory === 'near-zero' ? 700 : 400}>Near zero</text>
+          </g>
+          <g
+            style={{ cursor: 'pointer' }}
+            onMouseEnter={() => setHighlightCategory('negative')}
+            onMouseLeave={() => setHighlightCategory(null)}
+          >
+            <rect x={144} y={-8} width={72} height={16} fill="transparent" />
+            <line x1={148} y1={0} x2={168} y2={0} stroke="#ef4444" strokeWidth={3} />
+            <text x={172} y={4} fontSize={9} className="fill-current text-muted-foreground" fontWeight={highlightCategory === 'negative' ? 700 : 400}>Negative</text>
+          </g>
         </g>
 
         {/* Hover tooltip */}
