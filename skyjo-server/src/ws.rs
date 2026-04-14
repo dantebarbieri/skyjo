@@ -757,7 +757,7 @@ async fn send_msg(tx: &mut SplitSink<WebSocket, Message>, msg: &ServerMessage, f
             Ok(json) => Message::Text(json.into()),
             Err(_) => return,
         },
-        WireFormat::MessagePack => match rmp_serde::to_vec(msg) {
+        WireFormat::MessagePack => match rmp_serde::to_vec_named(msg) {
             Ok(bytes) => Message::Binary(bytes.into()),
             Err(_) => return,
         },

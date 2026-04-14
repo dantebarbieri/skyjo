@@ -348,7 +348,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn join_room_fails_with_invalid_code() {
+    async fn join_room_fails_with_nonexistent_room() {
         let lobby = make_lobby(5);
         let result = lobby.join_room("BADCDE", "Bob".into()).await;
         assert!(result.is_err());

@@ -252,7 +252,7 @@ async fn session_token_invalid_after_kick() {
             .lobby
             .create_room("Host".into(), 2, None, 0, 0)
             .unwrap();
-        let (_bob_token, bob_idx) = state.lobby.join_room(&code, "Bob".into()).await.unwrap();
+        let (bob_token, bob_idx) = state.lobby.join_room(&code, "Bob".into()).await.unwrap();
 
         // Kick Bob: removes session token from room slot
         let room_ref = state.lobby.get_room(&code).unwrap();
@@ -261,19 +261,16 @@ async fn session_token_invalid_after_kick() {
             room.kick_player(bob_idx).unwrap()
         };
 
-        // The kicked token should have been returned
+        // The kicked token should match Bob's token
         assert!(kicked_token.is_some());
+        assert_eq!(kicked_token.as_deref(), Some(bob_token.as_str()));
         // Remove from lobby sessions (mirrors what ws.rs does)
-        state.lobby.sessions.remove(&kicked_token.unwrap());
+        state.lobby.sessions.remove(bob_token.as_str());
 
-        // Now the token should not resolve to a session
+        // Verify the kicked token is truly gone from this lobby
         assert!(
-            state.lobby.get_session(&bob_token).is_none() || {
-                // bob_token was from the HTTP-level test above, not this lobby.
-                // Verify the kicked token is truly gone from this lobby.
-                let kicked_str = _bob_token.to_string();
-                state.lobby.get_session(&kicked_str).is_none()
-            }
+            state.lobby.get_session(bob_token.as_str()).is_none(),
+            "kicked player's session token should be invalidated"
         );
     }
 }

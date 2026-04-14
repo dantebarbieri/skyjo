@@ -211,7 +211,7 @@ async fn join_room_succeeds_with_valid_code() {
 }
 
 #[tokio::test]
-async fn join_room_fails_with_invalid_code() {
+async fn join_room_fails_with_nonexistent_room() {
     let app = test_app();
 
     let response = app

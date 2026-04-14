@@ -118,7 +118,7 @@ impl ServerMessage {
                 serde_json::to_vec(self).expect("ServerMessage serialization failed")
             }
             WireFormat::MessagePack => {
-                rmp_serde::to_vec(self).expect("ServerMessage msgpack serialization failed")
+                rmp_serde::to_vec_named(self).expect("ServerMessage msgpack serialization failed")
             }
         }
     }
@@ -644,7 +644,7 @@ mod tests {
             code: "test".to_string(),
             message: "Test error".to_string(),
         };
-        let bytes = rmp_serde::to_vec(&msg).unwrap();
+        let bytes = rmp_serde::to_vec_named(&msg).unwrap();
         let decoded: ServerMessage = rmp_serde::from_slice(&bytes).unwrap();
         match decoded {
             ServerMessage::Error { code, message } => {
@@ -658,7 +658,7 @@ mod tests {
     #[test]
     fn msgpack_round_trip_client_message() {
         let msg = ClientMessage::Ping;
-        let bytes = rmp_serde::to_vec(&msg).unwrap();
+        let bytes = rmp_serde::to_vec_named(&msg).unwrap();
         let decoded: ClientMessage = rmp_serde::from_slice(&bytes).unwrap();
         assert!(matches!(decoded, ClientMessage::Ping));
     }
@@ -666,7 +666,7 @@ mod tests {
     #[test]
     fn msgpack_round_trip_game_state() {
         let msg = ServerMessage::Pong;
-        let bytes = rmp_serde::to_vec(&msg).unwrap();
+        let bytes = rmp_serde::to_vec_named(&msg).unwrap();
         let decoded: ServerMessage = rmp_serde::from_slice(&bytes).unwrap();
         assert!(matches!(decoded, ServerMessage::Pong));
     }
@@ -681,7 +681,7 @@ mod tests {
     #[test]
     fn msgpack_client_message_from_bytes() {
         let msg = ClientMessage::Ping;
-        let bytes = rmp_serde::to_vec(&msg).unwrap();
+        let bytes = rmp_serde::to_vec_named(&msg).unwrap();
         let decoded = ClientMessage::from_bytes(&bytes, true).unwrap();
         assert!(matches!(decoded, ClientMessage::Ping));
     }
@@ -693,7 +693,7 @@ mod tests {
             message: "Room not found".to_string(),
         };
         let json_bytes = serde_json::to_vec(&msg).unwrap();
-        let msgpack_bytes = rmp_serde::to_vec(&msg).unwrap();
+        let msgpack_bytes = rmp_serde::to_vec_named(&msg).unwrap();
         assert!(
             msgpack_bytes.len() < json_bytes.len(),
             "MessagePack ({}) should be smaller than JSON ({})",
@@ -880,7 +880,7 @@ mod tests {
     #[test]
     fn server_shutdown_message_round_trip_msgpack() {
         let msg = ServerMessage::ServerShutdown;
-        let bytes = rmp_serde::to_vec(&msg).unwrap();
+        let bytes = rmp_serde::to_vec_named(&msg).unwrap();
         let decoded: ServerMessage = rmp_serde::from_slice(&bytes).unwrap();
         assert!(matches!(decoded, ServerMessage::ServerShutdown));
     }

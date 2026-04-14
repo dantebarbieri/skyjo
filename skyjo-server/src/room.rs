@@ -111,7 +111,7 @@ pub fn validate_player_name(name: &str) -> Result<String, ServerError> {
     if trimmed.is_empty() {
         return Err(ServerError::PlayerNameEmpty);
     }
-    if trimmed.len() > 32 {
+    if trimmed.chars().count() > 32 {
         return Err(ServerError::PlayerNameTooLong);
     }
     Ok(trimmed)
@@ -915,9 +915,9 @@ impl Room {
             .collect();
 
         // Serialize the full game state if a game is active
-        let game_state_json = self.game.as_ref().map(|g| {
+        let game_state_json = self.game.as_ref().and_then(|g| {
             let state = g.get_full_state();
-            serde_json::to_string(&state).expect("InteractiveGameState serialization failed")
+            serde_json::to_string(&state).ok()
         });
 
         RoomSnapshot {
