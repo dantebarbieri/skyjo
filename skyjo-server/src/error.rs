@@ -34,6 +34,7 @@ pub enum ServerError {
     // Permission errors
     NotHost,
     Unauthorized,
+    Forbidden,
     Banned,
 
     // Rate limiting
@@ -57,6 +58,7 @@ impl ServerError {
         match self {
             Self::RoomNotFound => StatusCode::NOT_FOUND,
             Self::Unauthorized | Self::Banned => StatusCode::FORBIDDEN,
+            Self::Forbidden => StatusCode::FORBIDDEN,
             Self::RateLimited => StatusCode::TOO_MANY_REQUESTS,
             Self::InternalError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Self::RoomFull | Self::MaxRoomsReached => StatusCode::CONFLICT,
@@ -85,6 +87,7 @@ impl ServerError {
             Self::InvalidPosition(p) => format!("Invalid position: {p}"),
             Self::NotHost => "Only the host can perform this action".into(),
             Self::Unauthorized => "Unauthorized".into(),
+            Self::Forbidden => "Forbidden — insufficient permissions".into(),
             Self::Banned => "You are banned from this room".into(),
             Self::RateLimited => "Too many requests, please slow down".into(),
             Self::PlayerNameTooLong => "Player name must be 32 characters or fewer".into(),

@@ -1,3 +1,4 @@
+pub mod auth;
 pub mod error;
 pub mod genetic;
 pub mod lobby;
@@ -27,35 +28,103 @@ use persistence::Persistence;
 pub struct AppStateInner {
     pub lobby: Lobby,
     pub genetic: Arc<Mutex<GeneticTrainingState>>,
-    pub genetic_api_key: Option<String>,
-    pub persistence: Option<Arc<Persistence>>,
+    pub persistence: Persistence,
     pub rate_limiter: Arc<crate::rate_limit::RateLimiter>,
+    pub jwt_secret: String,
 }
 
 pub type AppState = Arc<AppStateInner>;
 
-// --- Genetic Auth Middleware ---
+// --- Auth Middleware ---
 
-/// Middleware that checks `Authorization: Bearer <token>` against the configured genetic API key.
-/// If no key is configured, all requests are rejected (403).
-/// If the key doesn't match, the request is rejected (403).
-pub async fn genetic_auth_middleware(
+/// Middleware that requires a valid JWT with moderator or admin permission.
+/// Used to protect genetic mutation endpoints and other privileged routes.
+pub async fn require_moderator_middleware(
     State(state): State<AppState>,
-    req: axum::extract::Request,
+    mut req: axum::extract::Request,
     next: Next,
 ) -> Response {
-    match &state.genetic_api_key {
-        None => ServerError::Unauthorized.into_response(),
-        Some(key) => {
-            let auth_header = req
-                .headers()
-                .get("authorization")
-                .and_then(|v| v.to_str().ok());
-            match auth_header {
-                Some(h) if h.strip_prefix("Bearer ") == Some(key.as_str()) => next.run(req).await,
-                _ => ServerError::Unauthorized.into_response(),
+    let auth_header = req
+        .headers()
+        .get("authorization")
+        .and_then(|v| v.to_str().ok());
+
+    let token = match auth_header {
+        Some(h) => match h.strip_prefix("Bearer ") {
+            Some(t) => t,
+            None => return ServerError::Unauthorized.into_response(),
+        },
+        None => return ServerError::Unauthorized.into_response(),
+    };
+
+    match auth::validate_access_token(token, &state.jwt_secret) {
+        Ok(user) => {
+            if user.permission == auth::PermissionLevel::User {
+                return ServerError::Forbidden.into_response();
             }
+            req.extensions_mut().insert(user);
+            next.run(req).await
         }
+        Err(_) => ServerError::Unauthorized.into_response(),
+    }
+}
+
+/// Middleware that requires a valid JWT (any permission level).
+pub async fn require_auth_middleware(
+    State(state): State<AppState>,
+    mut req: axum::extract::Request,
+    next: Next,
+) -> Response {
+    let auth_header = req
+        .headers()
+        .get("authorization")
+        .and_then(|v| v.to_str().ok());
+
+    let token = match auth_header {
+        Some(h) => match h.strip_prefix("Bearer ") {
+            Some(t) => t,
+            None => return ServerError::Unauthorized.into_response(),
+        },
+        None => return ServerError::Unauthorized.into_response(),
+    };
+
+    match auth::validate_access_token(token, &state.jwt_secret) {
+        Ok(user) => {
+            req.extensions_mut().insert(user);
+            next.run(req).await
+        }
+        Err(_) => ServerError::Unauthorized.into_response(),
+    }
+}
+
+/// Middleware that requires admin permission.
+pub async fn require_admin_middleware(
+    State(state): State<AppState>,
+    mut req: axum::extract::Request,
+    next: Next,
+) -> Response {
+    let auth_header = req
+        .headers()
+        .get("authorization")
+        .and_then(|v| v.to_str().ok());
+
+    let token = match auth_header {
+        Some(h) => match h.strip_prefix("Bearer ") {
+            Some(t) => t,
+            None => return ServerError::Unauthorized.into_response(),
+        },
+        None => return ServerError::Unauthorized.into_response(),
+    };
+
+    match auth::validate_access_token(token, &state.jwt_secret) {
+        Ok(user) => {
+            if user.permission != auth::PermissionLevel::Admin {
+                return ServerError::Forbidden.into_response();
+            }
+            req.extensions_mut().insert(user);
+            next.run(req).await
+        }
+        Err(_) => ServerError::Unauthorized.into_response(),
     }
 }
 
