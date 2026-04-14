@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use crate::AppStateInner;
 use crate::error::ServerError;
-use crate::messages::{ClientMessage, ServerMessage};
+use crate::messages::{ClientMessage, ServerMessage, WireFormat};
 use crate::room::SharedRoom;
 
 /// Convert a ServerError into a ServerMessage::Error.
@@ -30,6 +30,9 @@ pub async fn handle_ws(
     client_ip: String,
 ) {
     let (mut ws_tx, mut ws_rx) = ws.split();
+
+    // Track the client's preferred wire format (auto-detected from incoming messages).
+    let mut wire_format = WireFormat::Json;
 
     // Mark player as connected and record IP (never exposed to clients)
     let broadcast_rx = {
@@ -63,7 +66,7 @@ pub async fn handle_ws(
                 },
             },
         };
-        send_msg(&mut ws_tx, &msg).await;
+        send_msg(&mut ws_tx, &msg, wire_format).await;
 
         // Notify others of reconnection
         for (i, slot) in room_guard.players.iter().enumerate() {
@@ -99,6 +102,7 @@ pub async fn handle_ws(
             msg = ws_rx.next() => {
                 match msg {
                     Some(Ok(Message::Text(text))) => {
+                        wire_format = WireFormat::Json;
                         let response = handle_client_message(
                             &text,
                             &state,
@@ -108,7 +112,32 @@ pub async fn handle_ws(
                         ).await;
 
                         if let Some(msg) = response {
-                            send_msg(&mut ws_tx, &msg).await;
+                            send_msg(&mut ws_tx, &msg, wire_format).await;
+                        }
+                    }
+                    Some(Ok(Message::Binary(data))) => {
+                        wire_format = WireFormat::MessagePack;
+                        let client_msg: ClientMessage = match rmp_serde::from_slice(&data) {
+                            Ok(m) => m,
+                            Err(e) => {
+                                let err = ServerMessage::Error {
+                                    code: "invalid_message".to_string(),
+                                    message: format!("Failed to parse MessagePack message: {e}"),
+                                };
+                                send_msg(&mut ws_tx, &err, wire_format).await;
+                                continue;
+                            }
+                        };
+                        let response = handle_parsed_message(
+                            client_msg,
+                            &state,
+                            &room,
+                            &room_code,
+                            player_index,
+                        ).await;
+
+                        if let Some(msg) = response {
+                            send_msg(&mut ws_tx, &msg, wire_format).await;
                         }
                     }
                     Some(Ok(Message::Close(_))) | None => {
@@ -122,17 +151,22 @@ pub async fn handle_ws(
                 match msg {
                     Ok((target_player, server_msg)) => {
                         if target_player == player_index {
-                            send_msg(&mut ws_tx, &server_msg).await;
+                            send_msg(&mut ws_tx, &server_msg, wire_format).await;
                         }
                     }
                     Err(broadcast::error::RecvError::Lagged(n)) => {
                         tracing::warn!("Player {player_index} lagged {n} messages");
+                        // Update lag count in room
+                        {
+                            let mut room_guard = room.lock().await;
+                            room_guard.increment_broadcast_lag(player_index);
+                        }
                         // Send fresh state to catch up
                         let room_guard = room.lock().await;
                         if let Ok(state) = room_guard.get_player_state(player_index) {
                             let turn_deadline_secs = room_guard.turn_deadline_secs();
                             drop(room_guard);
-                            send_msg(&mut ws_tx, &ServerMessage::GameState { state, turn_deadline_secs }).await;
+                            send_msg(&mut ws_tx, &ServerMessage::GameState { state, turn_deadline_secs }, wire_format).await;
                         }
                     }
                     Err(broadcast::error::RecvError::Closed) => {
@@ -247,6 +281,16 @@ async fn handle_client_message(
         }
     };
 
+    handle_parsed_message(msg, state, room, room_code, player_index).await
+}
+
+async fn handle_parsed_message(
+    msg: ClientMessage,
+    state: &Arc<AppStateInner>,
+    room: &SharedRoom,
+    room_code: &str,
+    player_index: usize,
+) -> Option<ServerMessage> {
     match msg {
         ClientMessage::Ping => Some(ServerMessage::Pong),
 
@@ -619,8 +663,16 @@ async fn run_bot_turns(room: SharedRoom) {
     }
 }
 
-async fn send_msg(tx: &mut SplitSink<WebSocket, Message>, msg: &ServerMessage) {
-    if let Ok(json) = serde_json::to_string(msg) {
-        let _ = tx.send(Message::Text(json.into())).await;
-    }
+async fn send_msg(tx: &mut SplitSink<WebSocket, Message>, msg: &ServerMessage, format: WireFormat) {
+    let ws_msg = match format {
+        WireFormat::Json => match serde_json::to_string(msg) {
+            Ok(json) => Message::Text(json.into()),
+            Err(_) => return,
+        },
+        WireFormat::MessagePack => match rmp_serde::to_vec(msg) {
+            Ok(bytes) => Message::Binary(bytes.into()),
+            Err(_) => return,
+        },
+    };
+    let _ = tx.send(ws_msg).await;
 }

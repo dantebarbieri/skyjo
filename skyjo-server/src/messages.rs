@@ -1,8 +1,15 @@
 use serde::{Deserialize, Serialize};
 use skyjo_core::interactive::{InteractiveGameState, PlayerAction};
 
+/// Wire format for WebSocket messages.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WireFormat {
+    Json,
+    MessagePack,
+}
+
 /// Messages sent from the client to the server over WebSocket.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", deny_unknown_fields)]
 pub enum ClientMessage {
     /// Configure a player slot in the lobby (creator only).
@@ -42,7 +49,7 @@ pub enum ClientMessage {
 }
 
 /// Messages sent from the server to the client over WebSocket.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ServerMessage {
     /// Current lobby state (sent on join and on changes).
@@ -92,8 +99,34 @@ pub enum ServerMessage {
     Pong,
 }
 
+impl ServerMessage {
+    /// Serialize to the specified wire format.
+    pub fn to_bytes(&self, format: WireFormat) -> Vec<u8> {
+        match format {
+            WireFormat::Json => {
+                serde_json::to_vec(self).expect("ServerMessage serialization failed")
+            }
+            WireFormat::MessagePack => {
+                rmp_serde::to_vec(self).expect("ServerMessage msgpack serialization failed")
+            }
+        }
+    }
+}
+
+impl ClientMessage {
+    /// Deserialize from bytes, auto-detecting format.
+    /// Binary data → MessagePack, text data → JSON.
+    pub fn from_bytes(data: &[u8], is_binary: bool) -> Result<Self, String> {
+        if is_binary {
+            rmp_serde::from_slice(data).map_err(|e| format!("MessagePack decode error: {e}"))
+        } else {
+            serde_json::from_slice(data).map_err(|e| format!("JSON decode error: {e}"))
+        }
+    }
+}
+
 /// Lobby state broadcast to all connected players.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RoomLobbyState {
     pub room_code: String,
     pub players: Vec<LobbyPlayer>,
@@ -116,7 +149,11 @@ pub struct RoomLobbyState {
     pub genetic_generation: usize,
 }
 
-#[derive(Debug, Clone, Serialize)]
+fn is_zero(v: &u32) -> bool {
+    *v == 0
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LobbyPlayer {
     pub slot: usize,
     pub name: String,
@@ -129,6 +166,12 @@ pub struct LobbyPlayer {
     /// Seconds since this player disconnected (None if connected or non-human).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub disconnect_secs: Option<u64>,
+    /// Last measured ping round-trip time in milliseconds.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latency_ms: Option<u32>,
+    /// Number of broadcast lag events (channel overflow).
+    #[serde(skip_serializing_if = "is_zero")]
+    pub broadcast_lag_count: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -434,10 +477,14 @@ mod tests {
             connected: true,
             shares_ip_with_host: None,
             disconnect_secs: None,
+            latency_ms: None,
+            broadcast_lag_count: 0,
         };
         let val: serde_json::Value = serde_json::to_value(&player).unwrap();
         assert!(val.get("shares_ip_with_host").is_none());
         assert!(val.get("disconnect_secs").is_none());
+        assert!(val.get("latency_ms").is_none());
+        assert!(val.get("broadcast_lag_count").is_none());
     }
 
     #[test]
@@ -451,9 +498,93 @@ mod tests {
             connected: false,
             shares_ip_with_host: Some(true),
             disconnect_secs: Some(45),
+            latency_ms: Some(42),
+            broadcast_lag_count: 3,
         };
         let val: serde_json::Value = serde_json::to_value(&player).unwrap();
         assert_eq!(val["shares_ip_with_host"], true);
         assert_eq!(val["disconnect_secs"], 45);
+    }
+
+    // --- MessagePack round-trip tests ---
+
+    #[test]
+    fn msgpack_round_trip_server_message() {
+        let msg = ServerMessage::Error {
+            code: "test".to_string(),
+            message: "Test error".to_string(),
+        };
+        let bytes = rmp_serde::to_vec(&msg).unwrap();
+        let decoded: ServerMessage = rmp_serde::from_slice(&bytes).unwrap();
+        match decoded {
+            ServerMessage::Error { code, message } => {
+                assert_eq!(code, "test");
+                assert_eq!(message, "Test error");
+            }
+            _ => panic!("Wrong variant"),
+        }
+    }
+
+    #[test]
+    fn msgpack_round_trip_client_message() {
+        let msg = ClientMessage::Ping;
+        let bytes = rmp_serde::to_vec(&msg).unwrap();
+        let decoded: ClientMessage = rmp_serde::from_slice(&bytes).unwrap();
+        assert!(matches!(decoded, ClientMessage::Ping));
+    }
+
+    #[test]
+    fn msgpack_round_trip_game_state() {
+        let msg = ServerMessage::Pong;
+        let bytes = rmp_serde::to_vec(&msg).unwrap();
+        let decoded: ServerMessage = rmp_serde::from_slice(&bytes).unwrap();
+        assert!(matches!(decoded, ServerMessage::Pong));
+    }
+
+    #[test]
+    fn json_client_message_from_bytes() {
+        let json = br#"{"type":"Ping"}"#;
+        let msg = ClientMessage::from_bytes(json, false).unwrap();
+        assert!(matches!(msg, ClientMessage::Ping));
+    }
+
+    #[test]
+    fn msgpack_client_message_from_bytes() {
+        let msg = ClientMessage::Ping;
+        let bytes = rmp_serde::to_vec(&msg).unwrap();
+        let decoded = ClientMessage::from_bytes(&bytes, true).unwrap();
+        assert!(matches!(decoded, ClientMessage::Ping));
+    }
+
+    #[test]
+    fn msgpack_smaller_than_json() {
+        let msg = ServerMessage::Error {
+            code: "RoomNotFound".to_string(),
+            message: "Room not found".to_string(),
+        };
+        let json_bytes = serde_json::to_vec(&msg).unwrap();
+        let msgpack_bytes = rmp_serde::to_vec(&msg).unwrap();
+        assert!(
+            msgpack_bytes.len() < json_bytes.len(),
+            "MessagePack ({}) should be smaller than JSON ({})",
+            msgpack_bytes.len(),
+            json_bytes.len()
+        );
+    }
+
+    #[test]
+    fn server_message_to_bytes_json() {
+        let msg = ServerMessage::Pong;
+        let bytes = msg.to_bytes(WireFormat::Json);
+        let decoded: ServerMessage = serde_json::from_slice(&bytes).unwrap();
+        assert!(matches!(decoded, ServerMessage::Pong));
+    }
+
+    #[test]
+    fn server_message_to_bytes_msgpack() {
+        let msg = ServerMessage::Pong;
+        let bytes = msg.to_bytes(WireFormat::MessagePack);
+        let decoded: ServerMessage = rmp_serde::from_slice(&bytes).unwrap();
+        assert!(matches!(decoded, ServerMessage::Pong));
     }
 }

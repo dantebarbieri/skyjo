@@ -36,6 +36,10 @@ pub struct PlayerSlot {
     pub disconnected_at: Option<Instant>,
     /// True if this bot was converted from a disconnected human player.
     pub was_human: bool,
+    /// Last measured ping round-trip time in milliseconds.
+    pub latency_ms: Option<u32>,
+    /// Number of broadcast lag events (channel overflow).
+    pub broadcast_lag_count: u32,
 }
 
 /// A game room holding all state for one multiplayer session.
@@ -115,6 +119,8 @@ impl Room {
             ip: None,
             disconnected_at: None,
             was_human: false,
+            latency_ms: None,
+            broadcast_lag_count: 0,
         });
         // Remaining slots are empty
         for _ in 1..num_players {
@@ -126,6 +132,8 @@ impl Room {
                 ip: None,
                 disconnected_at: None,
                 was_human: false,
+                latency_ms: None,
+                broadcast_lag_count: 0,
             });
         }
 
@@ -157,6 +165,44 @@ impl Room {
 
     pub fn touch(&mut self) {
         self.last_activity = Instant::now();
+    }
+
+    /// Valid state transitions:
+    ///   Lobby → InGame (start_game)
+    ///   InGame → GameOver (game ends)
+    ///   GameOver → Lobby (return_to_lobby / play_again)
+    ///
+    /// Returns error if the transition is invalid.
+    fn transition(&mut self, new_phase: RoomPhase) -> Result<(), ServerError> {
+        let valid = matches!(
+            (&self.phase, &new_phase),
+            (RoomPhase::Lobby, RoomPhase::InGame)
+                | (RoomPhase::InGame, RoomPhase::GameOver)
+                | (RoomPhase::GameOver, RoomPhase::Lobby)
+        );
+
+        if !valid {
+            tracing::warn!(
+                from = ?self.phase,
+                to = ?new_phase,
+                room = %self.code,
+                "invalid_room_transition"
+            );
+            return Err(ServerError::InvalidAction(format!(
+                "Cannot transition from {:?} to {:?}",
+                self.phase, new_phase
+            )));
+        }
+
+        tracing::info!(
+            from = ?self.phase,
+            to = ?new_phase,
+            room = %self.code,
+            "room_transition"
+        );
+        self.phase = new_phase;
+        self.touch();
+        Ok(())
     }
 
     /// Find the next available slot for a new player.
@@ -197,9 +243,11 @@ impl Room {
                     ip: None,
                     disconnected_at: None,
                     was_human: false,
+                    latency_ms: None,
+                    broadcast_lag_count: 0,
                 };
             }
-            s if s.starts_with("Bot:") => {
+            s if s.starts_with("Bot:")=> {
                 let strategy = &s[4..];
                 // Validate strategy name (Genetic variants are valid even without genome at config time)
                 if !strategy.starts_with("Genetic") {
@@ -216,6 +264,8 @@ impl Room {
                     ip: None,
                     disconnected_at: None,
                     was_human: false,
+                    latency_ms: None,
+                    broadcast_lag_count: 0,
                 };
             }
             _ => return Err(ServerError::InvalidAction(format!("Unknown player type: {player_type}"))),
@@ -344,6 +394,8 @@ impl Room {
                     ip: None,
                     disconnected_at: None,
                     was_human: false,
+                    latency_ms: None,
+                    broadcast_lag_count: 0,
                 });
             }
         } else if num_players < self.num_players {
@@ -398,6 +450,8 @@ impl Room {
             ip: None,
             disconnected_at: None,
             was_human: false,
+            latency_ms: None,
+            broadcast_lag_count: 0,
         };
 
         self.touch();
@@ -459,8 +513,7 @@ impl Room {
             .map_err(|e| ServerError::InvalidAction(e.to_string()))?;
 
         self.game = Some(game);
-        self.phase = RoomPhase::InGame;
-        self.touch();
+        self.transition(RoomPhase::InGame)?;
         self.reset_turn_start();
 
         Ok(())
@@ -533,18 +586,18 @@ impl Room {
         if let Some(game) = &self.game {
             let action_needed = game.get_action_needed();
             if let skyjo_core::ActionNeeded::GameOver { ref winners, .. } = action_needed {
-                self.phase = RoomPhase::GameOver;
+                self.transition(RoomPhase::GameOver)
+                    .expect("InGame → GameOver is a valid transition");
                 self.last_winners = winners.clone();
             }
         }
     }
 
-    /// Continue to next round.
+    /// Continue to next round. Phase remains InGame (no transition needed).
     pub fn continue_round(&mut self) -> Result<(), ServerError> {
         let game = self.game.as_mut().ok_or(ServerError::NotInGame)?;
         game.apply_action(PlayerAction::ContinueToNextRound)
             .map_err(|e| ServerError::InvalidAction(e.to_string()))?;
-        self.phase = RoomPhase::InGame;
         self.touch();
         self.reset_turn_start();
         Ok(())
@@ -552,24 +605,16 @@ impl Room {
 
     /// Reset for a new game (play again).
     pub fn play_again(&mut self) -> Result<(), ServerError> {
-        if self.phase != RoomPhase::GameOver {
-            return Err(ServerError::InvalidAction("Game is not over".to_string()));
-        }
         self.game = None;
-        self.phase = RoomPhase::Lobby;
-        self.touch();
+        self.transition(RoomPhase::Lobby)?;
         Ok(())
     }
 
     /// Return to lobby after game ends (preserves last_winners for crown display).
     pub fn return_to_lobby(&mut self) -> Result<(), ServerError> {
-        if self.phase != RoomPhase::GameOver {
-            return Err(ServerError::InvalidAction("Game is not over".to_string()));
-        }
         // last_winners is already set by check_game_over
         self.game = None;
-        self.phase = RoomPhase::Lobby;
-        self.touch();
+        self.transition(RoomPhase::Lobby)?;
         Ok(())
     }
 
@@ -635,6 +680,8 @@ impl Room {
                     ip: None,
                     disconnected_at: None,
                     was_human: false,
+                    latency_ms: None,
+                    broadcast_lag_count: 0,
                 };
                 kicked.push((i, token));
             }
@@ -723,6 +770,20 @@ impl Room {
         }
     }
 
+    /// Update the measured latency for a player.
+    pub fn update_player_latency(&mut self, slot: usize, latency_ms: u32) {
+        if slot < self.num_players {
+            self.players[slot].latency_ms = Some(latency_ms);
+        }
+    }
+
+    /// Increment the broadcast lag counter for a player.
+    pub fn increment_broadcast_lag(&mut self, slot: usize) {
+        if slot < self.num_players {
+            self.players[slot].broadcast_lag_count += 1;
+        }
+    }
+
     /// Build the lobby state for broadcasting.
     pub fn lobby_state(&self) -> RoomLobbyState {
         let creator_ip = self.players[self.creator].ip.as_deref();
@@ -749,6 +810,8 @@ impl Room {
                     connected: p.connected,
                     shares_ip_with_host: shares_ip,
                     disconnect_secs,
+                    latency_ms: p.latency_ms,
+                    broadcast_lag_count: p.broadcast_lag_count,
                 }
             })
             .collect();
@@ -1444,6 +1507,8 @@ mod tests {
             ip: Some("1.2.3.4".to_string()),
             disconnected_at: None,
             was_human: false,
+            latency_ms: None,
+            broadcast_lag_count: 0,
         };
 
         let token = room.kick_player(1).unwrap();
@@ -1492,6 +1557,8 @@ mod tests {
             ip: Some("10.0.0.2".to_string()),
             disconnected_at: None,
             was_human: false,
+            latency_ms: None,
+            broadcast_lag_count: 0,
         };
 
         room.ban_player(1).unwrap();
@@ -1511,6 +1578,8 @@ mod tests {
             ip: Some("10.0.0.1".to_string()),
             disconnected_at: None,
             was_human: false,
+            latency_ms: None,
+            broadcast_lag_count: 0,
         };
 
         let err = room.ban_player(1).unwrap_err();
@@ -1535,6 +1604,8 @@ mod tests {
             ip: None,
             disconnected_at: None,
             was_human: false,
+            latency_ms: None,
+            broadcast_lag_count: 0,
         };
         room.promote_host(1).unwrap();
         assert_eq!(room.creator, 1);
@@ -1567,6 +1638,8 @@ mod tests {
             ip: None,
             disconnected_at: None,
             was_human: false,
+            latency_ms: None,
+            broadcast_lag_count: 0,
         };
         room.players[2] = PlayerSlot {
             name: "Charlie".to_string(),
@@ -1576,6 +1649,8 @@ mod tests {
             ip: None,
             disconnected_at: None,
             was_human: false,
+            latency_ms: None,
+            broadcast_lag_count: 0,
         };
 
         let promoted = room.auto_promote_host();
@@ -1611,6 +1686,8 @@ mod tests {
             ip: None,
             disconnected_at: None,
             was_human: false,
+            latency_ms: None,
+            broadcast_lag_count: 0,
         };
 
         let promoted = room.auto_promote_host();
@@ -1643,6 +1720,8 @@ mod tests {
             ip: None,
             disconnected_at: None,
             was_human: false,
+            latency_ms: None,
+            broadcast_lag_count: 0,
         };
         assert_eq!(room.next_available_slot(), None);
     }
@@ -1671,6 +1750,8 @@ mod tests {
             ip: None,
             disconnected_at: Some(Instant::now() - Duration::from_secs(300)),
             was_human: false,
+            latency_ms: None,
+            broadcast_lag_count: 0,
         };
 
         let kicked = room.auto_kick_disconnected(Duration::from_secs(60));
@@ -1690,6 +1771,8 @@ mod tests {
             ip: None,
             disconnected_at: Some(Instant::now()),
             was_human: false,
+            latency_ms: None,
+            broadcast_lag_count: 0,
         };
 
         let kicked = room.auto_kick_disconnected(Duration::from_secs(60));
@@ -1930,6 +2013,8 @@ mod tests {
             ip: None,
             disconnected_at: Some(Instant::now() - Duration::from_secs(300)),
             was_human: false,
+            latency_ms: None,
+            broadcast_lag_count: 0,
         };
         // In lobby phase, auto_kick_disconnected should kick, not convert to bot
         assert_eq!(room.phase, RoomPhase::Lobby);
@@ -2086,5 +2171,83 @@ mod tests {
                 panic!("play_until_game_over: game did not reach GameOver within 10000 iterations");
             }
         }
+    }
+
+    #[test]
+    fn valid_state_transitions() {
+        let mut room = test_room();
+        assert_eq!(room.phase, RoomPhase::Lobby);
+
+        // Lobby → InGame
+        room.transition(RoomPhase::InGame).unwrap();
+        assert_eq!(room.phase, RoomPhase::InGame);
+
+        // InGame → GameOver
+        room.transition(RoomPhase::GameOver).unwrap();
+        assert_eq!(room.phase, RoomPhase::GameOver);
+
+        // GameOver → Lobby
+        room.transition(RoomPhase::Lobby).unwrap();
+        assert_eq!(room.phase, RoomPhase::Lobby);
+    }
+
+    #[test]
+    fn invalid_state_transitions_rejected() {
+        // Lobby → GameOver
+        let mut room = test_room();
+        assert!(room.transition(RoomPhase::GameOver).is_err());
+
+        // Lobby → Lobby
+        let mut room = test_room();
+        assert!(room.transition(RoomPhase::Lobby).is_err());
+
+        // InGame → Lobby
+        let mut room = test_room();
+        room.transition(RoomPhase::InGame).unwrap();
+        assert!(room.transition(RoomPhase::Lobby).is_err());
+
+        // InGame → InGame
+        let mut room = test_room();
+        room.transition(RoomPhase::InGame).unwrap();
+        assert!(room.transition(RoomPhase::InGame).is_err());
+
+        // GameOver → InGame
+        let mut room = test_room();
+        room.transition(RoomPhase::InGame).unwrap();
+        room.transition(RoomPhase::GameOver).unwrap();
+        assert!(room.transition(RoomPhase::InGame).is_err());
+
+        // GameOver → GameOver
+        let mut room = test_room();
+        room.transition(RoomPhase::InGame).unwrap();
+        room.transition(RoomPhase::GameOver).unwrap();
+        assert!(room.transition(RoomPhase::GameOver).is_err());
+    }
+
+    // ========================================================================
+    // Connection Quality Indicators
+    // ========================================================================
+
+    #[test]
+    fn update_player_latency() {
+        let mut room = test_room();
+        room.update_player_latency(0, 42);
+        assert_eq!(room.players[0].latency_ms, Some(42));
+        assert_eq!(room.players[1].latency_ms, None);
+    }
+
+    #[test]
+    fn increment_broadcast_lag() {
+        let mut room = test_room();
+        room.increment_broadcast_lag(0);
+        room.increment_broadcast_lag(0);
+        assert_eq!(room.players[0].broadcast_lag_count, 2);
+        assert_eq!(room.players[1].broadcast_lag_count, 0);
+    }
+
+    #[test]
+    fn out_of_bounds_latency_update_no_panic() {
+        let mut room = test_room();
+        room.update_player_latency(99, 100); // Should not panic
     }
 }
