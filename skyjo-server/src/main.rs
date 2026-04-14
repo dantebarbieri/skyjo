@@ -267,29 +267,49 @@ async fn main() {
         let mut snapshot_count = 0u32;
         for entry in shutdown_lobby.lobby.rooms.iter() {
             let code = entry.key().clone();
-            if let Ok(room) = entry.value().try_lock() {
-                // Notify all connected players
-                for (i, slot) in room.players.iter().enumerate() {
-                    if slot.connected {
-                        let _ = room.broadcast_tx.send((i, ServerMessage::ServerShutdown));
-                    }
-                }
+            let room = entry.value().lock().await;
 
-                // Snapshot rooms that have active players or are in-game
-                let has_connected = room.players.iter().any(|p| p.connected);
-                if (room.phase != RoomPhase::Lobby || has_connected)
-                    && let Some(ref db) = shutdown_persistence
-                    && let Ok(json) = serde_json::to_string(&room.to_snapshot())
-                {
-                    let db = db.clone();
-                    let code_clone = code.clone();
-                    if tokio::task::spawn_blocking(move || {
-                        db.save_room_snapshot(&code_clone, &json)
-                    })
+            // Notify all connected players
+            for (i, slot) in room.players.iter().enumerate() {
+                if slot.connected {
+                    let _ = room.broadcast_tx.send((i, ServerMessage::ServerShutdown));
+                }
+            }
+
+            // Snapshot rooms that have active players or are in-game
+            let has_connected = room.players.iter().any(|p| p.connected);
+            let snapshot_json = if (room.phase != RoomPhase::Lobby || has_connected)
+                && shutdown_persistence.is_some()
+            {
+                serde_json::to_string(&room.to_snapshot()).ok()
+            } else {
+                None
+            };
+
+            drop(room);
+
+            if let (Some(db), Some(json)) = (shutdown_persistence.as_ref(), snapshot_json) {
+                let db = db.clone();
+                let code_clone = code.clone();
+                match tokio::task::spawn_blocking(move || db.save_room_snapshot(&code_clone, &json))
                     .await
-                    .is_ok()
-                    {
+                {
+                    Ok(Ok(())) => {
                         snapshot_count += 1;
+                    }
+                    Ok(Err(err)) => {
+                        tracing::warn!(
+                            "Failed to persist snapshot for room {} during shutdown: {}",
+                            code,
+                            err
+                        );
+                    }
+                    Err(err) => {
+                        tracing::warn!(
+                            "Snapshot task failed for room {} during shutdown: {}",
+                            code,
+                            err
+                        );
                     }
                 }
             }

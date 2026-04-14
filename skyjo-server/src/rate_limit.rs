@@ -93,7 +93,7 @@ impl RateLimiter {
         entry.try_consume()
     }
 
-    /// Clean up stale entries (call periodically). Removes buckets that have been full for a while.
+    /// Clean up stale entries (call periodically). Removes buckets that haven't been checked within `max_idle`.
     pub fn cleanup(&self, max_idle: Duration) {
         let now = Instant::now();
         self.buckets

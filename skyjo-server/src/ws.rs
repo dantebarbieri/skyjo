@@ -12,10 +12,19 @@ use crate::error::ServerError;
 use crate::messages::{ClientMessage, ServerMessage, WireFormat};
 use crate::room::SharedRoom;
 
+/// Stable machine-readable error code from variant name (strips data payloads).
+fn error_code(err: &ServerError) -> String {
+    let debug = format!("{:?}", err);
+    debug
+        .chars()
+        .take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '_')
+        .collect()
+}
+
 /// Convert a ServerError into a ServerMessage::Error.
 fn error_msg(err: ServerError) -> ServerMessage {
     ServerMessage::Error {
-        code: format!("{:?}", err),
+        code: error_code(&err),
         message: err.message(),
     }
 }
