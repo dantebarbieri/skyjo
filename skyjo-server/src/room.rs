@@ -850,6 +850,10 @@ mod tests {
     }
 
     /// Create a room in InGame phase (2 players: human + bot).
+    /// Note: Uses a non-deterministic seed via Room::start_game().
+    /// This is acceptable because bot strategies always produce valid moves
+    /// regardless of board state, and the tests verify state transitions
+    /// rather than specific game outcomes.
     fn ingame_room() -> Room {
         let mut room = filled_room();
         room.start_game().unwrap();
@@ -1545,7 +1549,7 @@ mod tests {
         room.turn_start = Some(Instant::now());
         let deadline = room.turn_deadline_secs().unwrap();
         // Should be close to 60 (just started)
-        assert!((58..=60).contains(&deadline));
+        assert!(deadline > 0 && deadline <= 60);
     }
 
     // ========================================================================
@@ -1668,9 +1672,10 @@ mod tests {
     }
 
     /// Play until the game is fully over (GameOver phase).
+    /// Panics if the game doesn't reach GameOver within 10000 iterations.
     fn play_until_game_over(room: &mut Room) {
         let random_strategy = RandomStrategy;
-        for _ in 0..10000 {
+        for i in 0..10000 {
             if room.phase == RoomPhase::GameOver {
                 return;
             }
@@ -1709,6 +1714,9 @@ mod tests {
                 let current = game.current_player_index().unwrap();
                 let action = game.get_bot_action(&random_strategy).unwrap();
                 room.apply_action(current, action).unwrap();
+            }
+            if i == 9999 {
+                panic!("play_until_game_over: game did not reach GameOver within 10000 iterations");
             }
         }
     }

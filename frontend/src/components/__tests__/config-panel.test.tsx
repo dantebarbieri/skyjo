@@ -44,7 +44,11 @@ describe('ConfigPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     // Mock fetch for genetic saved generations
-    global.fetch = vi.fn(() => Promise.resolve({ ok: false, json: () => Promise.resolve([]) })) as unknown as typeof fetch;
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({ ok: false, json: () => Promise.resolve([]) })));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it('renders without crashing', () => {

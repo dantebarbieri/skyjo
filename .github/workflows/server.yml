@@ -10,6 +10,11 @@ on:
       - "Cargo.lock"
   pull_request:
     branches: [main]
+    paths:
+      - "skyjo-server/**"
+      - "skyjo-core/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
 
 concurrency:
   group: server-${{ github.ref }}

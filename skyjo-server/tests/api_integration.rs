@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::Router;
@@ -12,10 +11,10 @@ use tower::ServiceExt;
 use skyjo_server::{AppState, AppStateInner};
 
 fn test_app() -> Router {
+    let model_path =
+        std::env::temp_dir().join(format!("skyjo_test_model_{}.json", std::process::id()));
     let genetic_state = Arc::new(Mutex::new(
-        skyjo_server::genetic::GeneticTrainingState::load_or_new(PathBuf::from(
-            "nonexistent_test_model.json",
-        )),
+        skyjo_server::genetic::GeneticTrainingState::load_or_new(model_path),
     ));
     let state: AppState = Arc::new(AppStateInner {
         lobby: skyjo_server::lobby::Lobby::new(100),
