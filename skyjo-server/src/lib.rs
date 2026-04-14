@@ -12,7 +12,8 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use axum::extract::{Path, State};
-use axum::response::Json;
+use axum::middleware::Next;
+use axum::response::{IntoResponse, Json, Response};
 
 use error::ServerError;
 use genetic::GeneticTrainingState;
@@ -24,9 +25,37 @@ use lobby::{
 pub struct AppStateInner {
     pub lobby: Lobby,
     pub genetic: Arc<Mutex<GeneticTrainingState>>,
+    pub genetic_api_key: Option<String>,
 }
 
 pub type AppState = Arc<AppStateInner>;
+
+// --- Genetic Auth Middleware ---
+
+/// Middleware that checks `Authorization: Bearer <token>` against the configured genetic API key.
+/// If no key is configured, all requests are rejected (403).
+/// If the key doesn't match, the request is rejected (403).
+pub async fn genetic_auth_middleware(
+    State(state): State<AppState>,
+    req: axum::extract::Request,
+    next: Next,
+) -> Response {
+    match &state.genetic_api_key {
+        None => ServerError::Unauthorized.into_response(),
+        Some(key) => {
+            let auth_header = req
+                .headers()
+                .get("authorization")
+                .and_then(|v| v.to_str().ok());
+            match auth_header {
+                Some(h) if h.strip_prefix("Bearer ").map_or(false, |t| t == key.as_str()) => {
+                    next.run(req).await
+                }
+                _ => ServerError::Unauthorized.into_response(),
+            }
+        }
+    }
+}
 
 // --- REST Handlers (public for integration tests) ---
 

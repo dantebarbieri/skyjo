@@ -38,6 +38,10 @@ struct Args {
     /// Directory for persistent data (SQLite DB, genetic model)
     #[arg(long, default_value = "./data")]
     data_dir: String,
+
+    /// API key for genetic endpoints (env: SKYJO_GENETIC_API_KEY). If not set, mutation endpoints return 403.
+    #[arg(long, env = "SKYJO_GENETIC_API_KEY")]
+    genetic_api_key: Option<String>,
 }
 
 #[tokio::main]
@@ -66,6 +70,7 @@ async fn main() {
     let app_state = Arc::new(AppStateInner {
         lobby: Lobby::new(100),
         genetic: genetic_state,
+        genetic_api_key: args.genetic_api_key.clone(),
     });
 
     // Spawn room cleanup task
@@ -81,6 +86,23 @@ async fn main() {
         }
     });
 
+    // Genetic mutation routes (require auth)
+    let genetic_mutation_routes = Router::new()
+        .route("/genetic/train", post(genetic_train))
+        .route("/genetic/stop", post(genetic_stop))
+        .route("/genetic/reset", post(genetic_reset))
+        .route("/genetic/load", post(genetic_load))
+        .route("/genetic/saved", post(genetic_save))
+        .route("/genetic/saved/import", post(genetic_import))
+        .route(
+            "/genetic/saved/{name}",
+            axum::routing::delete(genetic_saved_delete),
+        )
+        .layer(axum::middleware::from_fn_with_state(
+            app_state.clone(),
+            skyjo_server::genetic_auth_middleware,
+        ));
+
     // API routes
     let api_routes = Router::new()
         .route("/rooms", post(skyjo_server::create_room))
@@ -88,18 +110,10 @@ async fn main() {
         .route("/rooms/{code}/join", post(skyjo_server::join_room))
         .route("/rooms/{code}/ws", get(ws_upgrade))
         .route("/genetic/model", get(genetic_model))
-        .route("/genetic/train", post(genetic_train))
-        .route("/genetic/stop", post(genetic_stop))
-        .route("/genetic/reset", post(genetic_reset))
-        .route("/genetic/load", post(genetic_load))
         .route("/genetic/status", get(skyjo_server::genetic_status))
-        .route("/genetic/saved", get(genetic_saved_list).post(genetic_save))
-        .route("/genetic/saved/import", post(genetic_import))
-        .route(
-            "/genetic/saved/{name}",
-            axum::routing::delete(genetic_saved_delete),
-        )
-        .route("/genetic/saved/{name}/model", get(genetic_saved_model));
+        .route("/genetic/saved", get(genetic_saved_list))
+        .route("/genetic/saved/{name}/model", get(genetic_saved_model))
+        .merge(genetic_mutation_routes);
 
     // SPA fallback: serve index.html for any non-file route
     let index_path = args.static_dir.join("index.html");

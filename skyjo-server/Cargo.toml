@@ -16,8 +16,12 @@ rand = "0.9"
 rayon = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 futures = "0.3"
+rusqlite = { version = "0.34", features = ["bundled"] }
+zstd = "0.13"
+rmp-serde = "1"
+chrono = { version = "0.4", features = ["serde"] }
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
