@@ -1,212 +1,75 @@
-export type CardValue = number;
+import { z } from 'zod';
+import {
+  CardValueSchema,
+  SlotSchema,
+  DeckDrawActionSchema,
+  ColumnClearEventSchema,
+  TurnActionSchema,
+  TurnRecordSchema,
+  RoundHistorySchema,
+  GameHistorySchema,
+  GameStatsSchema,
+  AggregateStatsSchema,
+  ProgressStatsSchema,
+  SimWithHistoriesSchema,
+  SimConfigSchema,
+  PlayerTypeSchema,
+  PlayConfigSchema,
+  CacheEntrySchema,
+  CacheExportFileSchema,
+  WorkerRequestSchema,
+  WorkerResponseSchema,
+  VisibleSlotSchema,
+  ActionNeededSchema,
+  PlayerActionSchema,
+  InteractiveGameStateSchema,
+  BotActionResponseSchema,
+  StrategyDescriptionSchema,
+  PhaseDescriptionSchema,
+  DecisionLogicSchema,
+  PriorityRuleSchema,
+  DecisionNodeSchema,
+  ConceptReferenceSchema,
+  CommonConceptSchema,
+  StrategyDescriptionsDataSchema,
+  GeneticModelDataSchema,
+  SavedGenerationInfoSchema,
+  GeneticTrainingStatusSchema,
+} from './schemas';
 
-export type Slot =
-  | { Hidden: CardValue }
-  | { Revealed: CardValue }
-  | "Cleared";
+// All types are inferred from Zod schemas — single source of truth
 
-export type DeckDrawAction =
-  | { Keep: number }
-  | { DiscardAndFlip: number };
-
-export interface ColumnClearEvent {
-  player_index: number;
-  column: number;
-  card_value: CardValue;
-  displaced_card: CardValue | null;
-}
-
-export type TurnAction =
-  | {
-      DrewFromDeck: {
-        drawn_card: CardValue;
-        action: DeckDrawAction;
-        displaced_card: CardValue | null;
-      };
-    }
-  | {
-      DrewFromDiscard: {
-        pile_index: number;
-        drawn_card: CardValue;
-        placement: number;
-        displaced_card: CardValue;
-      };
-    };
-
-export interface TurnRecord {
-  player_index: number;
-  action: TurnAction;
-  column_clears: ColumnClearEvent[];
-  went_out: boolean;
-}
-
-export interface RoundHistory {
-  round_number: number;
-  initial_deck_order: CardValue[];
-  dealt_hands: CardValue[][];
-  setup_flips: number[][];
-  starting_player: number;
-  turns: TurnRecord[];
-  going_out_player: number | null;
-  end_of_round_clears: ColumnClearEvent[];
-  round_scores: number[];
-  cumulative_scores: number[];
-  truncated: boolean;
-}
-
-export interface GameHistory {
-  seed: number;
-  num_players: number;
-  strategy_names: string[];
-  rules_name: string;
-  rounds: RoundHistory[];
-  final_scores: number[];
-  winners: number[];
-}
-
-export interface GameStats {
-  winners: number[];
-  final_scores: number[];
-  num_rounds: number;
-  total_turns: number;
-}
-
-export interface AggregateStats {
-  num_games: number;
-  num_players: number;
-  wins_per_player: number[];
-  win_rate_per_player: number[];
-  avg_score_per_player: number[];
-  min_score_per_player: number[];
-  max_score_per_player: number[];
-  avg_rounds_per_game: number;
-  avg_turns_per_game: number;
-  score_distributions: number[][];
-}
-
-export interface SimWithHistories {
-  stats: AggregateStats;
-  histories: GameHistory[];
-}
+export type CardValue = z.infer<typeof CardValueSchema>;
+export type Slot = z.infer<typeof SlotSchema>;
+export type DeckDrawAction = z.infer<typeof DeckDrawActionSchema>;
+export type ColumnClearEvent = z.infer<typeof ColumnClearEventSchema>;
+export type TurnAction = z.infer<typeof TurnActionSchema>;
+export type TurnRecord = z.infer<typeof TurnRecordSchema>;
+export type RoundHistory = z.infer<typeof RoundHistorySchema>;
+export type GameHistory = z.infer<typeof GameHistorySchema>;
+export type GameStats = z.infer<typeof GameStatsSchema>;
+export type AggregateStats = z.infer<typeof AggregateStatsSchema>;
+export type ProgressStats = z.infer<typeof ProgressStatsSchema>;
+export type SimWithHistories = z.infer<typeof SimWithHistoriesSchema>;
 
 // Cache types
-
-export interface CacheEntry {
-  version: 1;
-  key: string;
-  config: SimConfig;
-  stats: ProgressStats;
-  gamesCompleted: number;
-  totalGames: number;
-  elapsedMs: number;
-  hasHistories: boolean;
-  savedAt: number;
-}
-
-export interface CacheExportFile {
-  format: 'skyjo-sim-cache';
-  version: 1;
-  config: SimConfig;
-  stats: ProgressStats;
-  gamesCompleted: number;
-  totalGames: number;
-  elapsedMs: number;
-  histories: GameHistory[] | null;
-  exportedAt: number;
-}
+export type CacheEntry = z.infer<typeof CacheEntrySchema>;
+export type CacheExportFile = z.infer<typeof CacheExportFileSchema>;
 
 // Worker message types
-
-export interface SimConfig {
-  num_games: number;
-  seed: number;
-  strategies: string[];
-  rules: string;
-  withHistories: boolean;
-  realtimeVisualization: boolean;
-  maxTurnsPerRound: number;
-}
-
-export type WorkerRequest =
-  | { type: 'start'; config: SimConfig }
-  | { type: 'pause' }
-  | { type: 'resume' }
-  | { type: 'stop' }
-  | { type: 'requestRealtimeGame' }
-  | { type: 'setGeneticGenome'; genome: number[]; gamesTrained: number };
-
-export interface ProgressStats {
-  num_games: number;
-  num_players: number;
-  wins_per_player: number[];
-  win_rate_per_player: number[];
-  avg_score_per_player: number[];
-  min_score_per_player: number[];
-  max_score_per_player: number[];
-  avg_rounds_per_game: number;
-  avg_turns_per_game: number;
-}
-
-export type WorkerResponse =
-  | { type: 'ready' }
-  | { type: 'progress'; stats: ProgressStats; gamesCompleted: number; totalGames: number; elapsedMs: number }
-  | { type: 'complete'; stats: ProgressStats; gamesCompleted: number; totalGames: number; elapsedMs: number; histories: GameHistory[] | null }
-  | { type: 'realtimeGame'; history: GameHistory }
-  | { type: 'error'; message: string };
+export type SimConfig = z.infer<typeof SimConfigSchema>;
+export type WorkerRequest = z.infer<typeof WorkerRequestSchema>;
+export type WorkerResponse = z.infer<typeof WorkerResponseSchema>;
 
 // Interactive game types (for Play mode)
-
-export type VisibleSlot =
-  | "Hidden"
-  | { Revealed: CardValue }
-  | "Cleared";
-
-export type ActionNeeded =
-  | { type: 'ChooseInitialFlips'; player: number; count: number }
-  | { type: 'ChooseDraw'; player: number; drawable_piles: number[] }
-  | { type: 'ChooseDeckDrawAction'; player: number; drawn_card: CardValue | null }
-  | { type: 'ChooseDiscardDrawPlacement'; player: number; drawn_card: CardValue }
-  | { type: 'RoundOver'; round_number: number; round_scores: number[]; raw_round_scores: number[]; cumulative_scores: number[]; going_out_player: number | null; end_of_round_clears: ColumnClearEvent[] }
-  | { type: 'GameOver'; final_scores: number[]; winners: number[]; round_number: number; round_scores: number[]; raw_round_scores: number[]; going_out_player: number | null; end_of_round_clears: ColumnClearEvent[] };
-
-export type PlayerAction =
-  | { type: 'InitialFlip'; position: number }
-  | { type: 'DrawFromDeck' }
-  | { type: 'DrawFromDiscard'; pile_index: number }
-  | { type: 'UndoDrawFromDiscard' }
-  | { type: 'KeepDeckDraw'; position: number }
-  | { type: 'DiscardAndFlip'; position: number }
-  | { type: 'PlaceDiscardDraw'; position: number }
-  | { type: 'ContinueToNextRound' };
-
-export interface InteractiveGameState {
-  num_players: number;
-  player_names: string[];
-  num_rows: number;
-  num_cols: number;
-  round_number: number;
-  current_player: number;
-  action_needed: ActionNeeded;
-  boards: VisibleSlot[][];
-  discard_tops: (CardValue | null)[];
-  discard_sizes: number[];
-  deck_remaining: number;
-  cumulative_scores: number[];
-  going_out_player: number | null;
-  is_final_turn: boolean;
-  last_column_clears: ColumnClearEvent[];
-}
-
-export interface PlayConfig {
-  num_players: number;
-  player_names: string[];
-  player_types: PlayerType[];
-  rules: string;
-  seed: number;
-}
+export type VisibleSlot = z.infer<typeof VisibleSlotSchema>;
+export type ActionNeeded = z.infer<typeof ActionNeededSchema>;
+export type PlayerAction = z.infer<typeof PlayerActionSchema>;
+export type InteractiveGameState = z.infer<typeof InteractiveGameStateSchema>;
+export type PlayConfig = z.infer<typeof PlayConfigSchema>;
 
 /** Player type: "Human" or "Bot:<StrategyName>" (e.g. "Bot:Random", "Bot:Greedy") */
-export type PlayerType = 'Human' | `Bot:${string}`;
+export type PlayerType = z.infer<typeof PlayerTypeSchema>;
 
 export type BotSpeed = 'slow' | 'normal' | 'fast' | 'instant';
 
@@ -224,105 +87,19 @@ export const BOT_SPEED_LABELS: Record<BotSpeed, string> = {
   instant: 'Instant',
 };
 
-export interface BotActionResponse {
-  action: PlayerAction;
-  state: InteractiveGameState;
-}
+export type BotActionResponse = z.infer<typeof BotActionResponseSchema>;
 
 // Strategy description types (from Rust describe() trait method)
-
-export interface StrategyDescription {
-  name: string;
-  summary: string;
-  complexity: 'Trivial' | 'Low' | 'Medium' | 'High';
-  strengths: string[];
-  weaknesses: string[];
-  phases: PhaseDescription[];
-  concepts: ConceptReference[];
-}
-
-export interface PhaseDescription {
-  phase: 'InitialFlips' | 'ChooseDraw' | 'DeckDrawAction' | 'DiscardDrawPlacement';
-  label: string;
-  logic: DecisionLogic;
-}
-
-export type DecisionLogic =
-  | { type: 'Simple'; text: string }
-  | { type: 'PriorityList'; rules: PriorityRule[] }
-  | { type: 'DecisionTree'; root: DecisionNode };
-
-export interface PriorityRule {
-  condition: string;
-  action: string;
-  detail?: string;
-}
-
-export type DecisionNode =
-  | { type: 'Condition'; test: string; if_true: DecisionNode; if_false: DecisionNode }
-  | { type: 'Action'; action: string; detail?: string }
-  | { type: 'PriorityList'; rules: PriorityRule[] };
-
-export interface ConceptReference {
-  id: string;
-  label: string;
-  used_for: string;
-}
-
-export interface CommonConcept {
-  id: string;
-  label: string;
-  description: string;
-  formula?: string;
-}
-
-export interface StrategyDescriptionsData {
-  strategies: StrategyDescription[];
-  common_concepts: CommonConcept[];
-}
+export type StrategyDescription = z.infer<typeof StrategyDescriptionSchema>;
+export type PhaseDescription = z.infer<typeof PhaseDescriptionSchema>;
+export type DecisionLogic = z.infer<typeof DecisionLogicSchema>;
+export type PriorityRule = z.infer<typeof PriorityRuleSchema>;
+export type DecisionNode = z.infer<typeof DecisionNodeSchema>;
+export type ConceptReference = z.infer<typeof ConceptReferenceSchema>;
+export type CommonConcept = z.infer<typeof CommonConceptSchema>;
+export type StrategyDescriptionsData = z.infer<typeof StrategyDescriptionsDataSchema>;
 
 // Genetic model types
-
-export interface GeneticModelData {
-  best_genome: number[];
-  input_size: number;
-  hidden_size: number;
-  hidden1_size: number;
-  hidden2_size: number;
-  output_size: number;
-  generation: number;
-  total_games_trained: number;
-  input_labels: string[];
-  output_labels: string[];
-  input_groups: [string, number, number][];
-  output_groups: [string, number, number][];
-  lineage_hash: string;
-  architecture_version: number;
-}
-
-export interface SavedGenerationInfo {
-  name: string;
-  generation: number;
-  total_games_trained: number;
-  best_fitness: number;
-  saved_at: string;
-  lineage_hash: string;
-  architecture_version: number;
-}
-
-export interface GeneticTrainingStatus {
-  is_training: boolean;
-  generation: number;
-  total_games_trained: number;
-  best_fitness: number;
-  training_start_generation: number;
-  training_target_generation: number;
-  training_elapsed_ms: number;
-  training_last_gen_elapsed_ms: number;
-  training_mode: string;
-  training_target_fitness: number;
-  training_start_fitness: number;
-  lineage_hash: string;
-  current_mutation_rate: number;
-  current_mutation_sigma: number;
-}
+export type GeneticModelData = z.infer<typeof GeneticModelDataSchema>;
+export type SavedGenerationInfo = z.infer<typeof SavedGenerationInfoSchema>;
+export type GeneticTrainingStatus = z.infer<typeof GeneticTrainingStatusSchema>;

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { InteractiveGameState, PlayerAction } from '@/types';
+import { ServerMessageSchema } from '@/schemas';
 
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected';
 
@@ -109,7 +110,22 @@ export function useOnlineGame(
     };
 
     ws.onmessage = (event) => {
-      const msg: ServerMessage = JSON.parse(event.data);
+      let rawMessage: unknown;
+
+      try {
+        rawMessage = JSON.parse(event.data);
+      } catch {
+        setLastError('Received invalid JSON from server.');
+        return;
+      }
+
+      const parsedMessage = ServerMessageSchema.safeParse(rawMessage);
+      if (!parsedMessage.success) {
+        setLastError('Received invalid server message.');
+        return;
+      }
+
+      const msg: ServerMessage = parsedMessage.data;
 
       switch (msg.type) {
         case 'RoomState':
