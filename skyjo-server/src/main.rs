@@ -39,8 +39,8 @@ struct Args {
     genetic_model_path: Option<PathBuf>,
 
     /// Directory for persistent data (SQLite DB, genetic model)
-    #[arg(long, default_value = "./data")]
-    data_dir: String,
+    #[arg(long, env = "SKYJO_DATA_DIR", default_value = "./data")]
+    data_dir: PathBuf,
 
     /// API key for genetic endpoints (env: SKYJO_GENETIC_API_KEY). If not set, mutation endpoints return 403.
     #[arg(long, env = "SKYJO_GENETIC_API_KEY")]
@@ -64,14 +64,14 @@ async fn main() {
 
     let genetic_model_path = args
         .genetic_model_path
-        .unwrap_or_else(|| PathBuf::from(&args.data_dir).join("genetic_model.json"));
+        .unwrap_or_else(|| args.data_dir.join("genetic_model.json"));
 
     let genetic_state = Arc::new(Mutex::new(GeneticTrainingState::load_or_new(
         genetic_model_path,
     )));
 
     // Initialize persistence (SQLite)
-    let db_path = PathBuf::from(&args.data_dir).join("skyjo.db");
+    let db_path = args.data_dir.join("skyjo.db");
     let persistence = match Persistence::open(&db_path) {
         Ok(p) => {
             tracing::info!("Opened persistence database at {db_path:?}");
@@ -92,7 +92,11 @@ async fn main() {
 
     // Restore rooms from snapshots (best-effort crash recovery)
     if let Some(ref db) = persistence {
-        match db.load_all_room_snapshots() {
+        let db_clone = db.clone();
+        let snapshots = tokio::task::spawn_blocking(move || db_clone.load_all_room_snapshots())
+            .await
+            .expect("spawn_blocking panicked");
+        match snapshots {
             Ok(snapshots) => {
                 let count = snapshots.len();
                 for (code, data) in snapshots {
@@ -119,7 +123,12 @@ async fn main() {
                         }
                     }
                     // Clean up snapshot after restoration attempt
-                    db.delete_room_snapshot(&code).ok();
+                    let db_clone = db.clone();
+                    let code_clone = code.clone();
+                    let _ = tokio::task::spawn_blocking(move || {
+                        db_clone.delete_room_snapshot(&code_clone)
+                    })
+                    .await;
                 }
                 if count > 0 {
                     tracing::info!("Processed {count} room snapshot(s) from previous session");
@@ -152,7 +161,13 @@ async fn main() {
                     {
                         let snapshot = room.to_snapshot();
                         if let Ok(json) = serde_json::to_string(&snapshot) {
-                            db.save_room_snapshot(&code, &json).ok();
+                            let db = db.clone();
+                            let code_clone = code.clone();
+                            tokio::task::spawn_blocking(move || {
+                                if let Err(e) = db.save_room_snapshot(&code_clone, &json) {
+                                    tracing::warn!(room = %code_clone, "Failed to save snapshot: {e}");
+                                }
+                            });
                         }
                     }
                 }
@@ -208,13 +223,34 @@ async fn main() {
         .await
         .expect("Failed to bind");
 
-    // Graceful shutdown: listen for Ctrl+C / SIGTERM
+    // Graceful shutdown: listen for SIGINT (and SIGTERM on Unix)
     let shutdown_lobby = app_state.clone();
     let shutdown_persistence = persistence.clone();
     let shutdown_signal = async move {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("Failed to install Ctrl+C handler");
+        #[cfg(unix)]
+        {
+            let mut sigterm =
+                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                    .expect("Failed to install SIGTERM handler");
+
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {
+                    tracing::info!("Received SIGINT");
+                }
+                _ = sigterm.recv() => {
+                    tracing::info!("Received SIGTERM");
+                }
+            }
+        }
+
+        #[cfg(not(unix))]
+        {
+            tokio::signal::ctrl_c()
+                .await
+                .expect("Failed to install Ctrl+C handler");
+            tracing::info!("Received SIGINT");
+        }
+
         tracing::info!("Shutdown signal received, notifying clients and snapshotting rooms...");
 
         // Broadcast ServerShutdown to all connected clients & snapshot rooms
@@ -235,8 +271,16 @@ async fn main() {
                     && let Some(ref db) = shutdown_persistence
                     && let Ok(json) = serde_json::to_string(&room.to_snapshot())
                 {
-                    db.save_room_snapshot(&code, &json).ok();
-                    snapshot_count += 1;
+                    let db = db.clone();
+                    let code_clone = code.clone();
+                    if tokio::task::spawn_blocking(move || {
+                        db.save_room_snapshot(&code_clone, &json)
+                    })
+                    .await
+                    .is_ok()
+                    {
+                        snapshot_count += 1;
+                    }
                 }
             }
         }
