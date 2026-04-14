@@ -381,21 +381,6 @@ pub async fn user_count(pool: &PgPool) -> Result<i64, ServerError> {
     Ok(count)
 }
 
-/// Seed the admin account if no users exist.
-pub async fn seed_admin_account(
-    pool: &PgPool,
-    username: &str,
-    password: &str,
-) -> Result<bool, ServerError> {
-    let count = user_count(pool).await?;
-    if count > 0 {
-        return Ok(false);
-    }
-
-    create_user(pool, username, password, username, PermissionLevel::Admin).await?;
-    Ok(true)
-}
-
 /// Generate a random password suitable for admin-created accounts.
 pub fn generate_random_password() -> String {
     use rand::Rng;

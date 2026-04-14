@@ -49,18 +49,6 @@ struct Args {
     /// JWT signing secret
     #[arg(long, env = "SKYJO_JWT_SECRET")]
     jwt_secret: Option<String>,
-
-    /// Default admin username
-    #[arg(long, env = "SKYJO_ADMIN_USERNAME", default_value = "admin")]
-    admin_username: String,
-
-    /// Default admin password
-    #[arg(
-        long,
-        env = "SKYJO_ADMIN_PASSWORD",
-        default_value = "Skyjo-Change-Me-1!"
-    )]
-    admin_password: String,
 }
 
 #[tokio::main]
@@ -101,26 +89,11 @@ async fn main() {
         secret
     });
 
-    // Seed admin account
-    match auth::seed_admin_account(
-        persistence.pool(),
-        &args.admin_username,
-        &args.admin_password,
-    )
-    .await
-    {
-        Ok(true) => {
-            tracing::info!("Created initial admin account: {}", args.admin_username);
-            if args.admin_password == "Skyjo-Change-Me-1!" {
-                tracing::warn!("Admin account is using default password — change it immediately!");
-            }
-        }
-        Ok(false) => {
-            tracing::info!("Admin account already exists, skipping seed");
-        }
-        Err(e) => {
-            tracing::error!("Failed to seed admin account: {e}");
-        }
+    // Check setup status
+    match auth::user_count(persistence.pool()).await {
+        Ok(0) => tracing::info!("No users found — setup wizard will be required on first access"),
+        Ok(n) => tracing::info!("Database has {n} user(s)"),
+        Err(e) => tracing::error!("Failed to check user count: {e}"),
     }
 
     let rate_limiter = Arc::new(skyjo_server::rate_limit::RateLimiter::new());
@@ -252,6 +225,8 @@ async fn main() {
         .route("/auth/login", post(auth_login))
         .route("/auth/refresh", post(auth_refresh))
         .route("/auth/logout", post(auth_logout))
+        .route("/auth/setup-status", get(auth_setup_status))
+        .route("/auth/setup", post(auth_setup))
         .route(
             "/auth/me",
             get(auth_me).layer(axum::middleware::from_fn_with_state(
@@ -850,6 +825,94 @@ async fn auth_me(Extension(user): Extension<AuthUser>) -> Json<UserInfo> {
         display_name: user.display_name,
         permission: user.permission,
     })
+}
+
+// --- Setup Handlers ---
+
+#[derive(Serialize)]
+struct SetupStatus {
+    needs_setup: bool,
+}
+
+async fn auth_setup_status(
+    State(state): State<AppState>,
+) -> Result<Json<SetupStatus>, ServerError> {
+    let count = auth::user_count(state.persistence.pool()).await?;
+    Ok(Json(SetupStatus {
+        needs_setup: count == 0,
+    }))
+}
+
+#[derive(Deserialize)]
+struct SetupRequest {
+    username: String,
+    password: String,
+    display_name: Option<String>,
+}
+
+async fn auth_setup(
+    State(state): State<AppState>,
+    Json(req): Json<SetupRequest>,
+) -> Result<Response, ServerError> {
+    // Only allow setup when no users exist
+    let count = auth::user_count(state.persistence.pool()).await?;
+    if count > 0 {
+        return Err(ServerError::InvalidAction(
+            "Setup already completed — an admin account exists".to_string(),
+        ));
+    }
+
+    let username = req.username.trim().to_string();
+    if username.is_empty() {
+        return Err(ServerError::InvalidAction(
+            "Username cannot be empty".to_string(),
+        ));
+    }
+    if req.password.len() < 8 {
+        return Err(ServerError::InvalidAction(
+            "Password must be at least 8 characters".to_string(),
+        ));
+    }
+
+    let display_name = req
+        .display_name
+        .map(|d| d.trim().to_string())
+        .filter(|d| !d.is_empty())
+        .unwrap_or_else(|| username.clone());
+
+    let user = auth::create_user(
+        state.persistence.pool(),
+        &username,
+        &req.password,
+        &display_name,
+        PermissionLevel::Admin,
+    )
+    .await?;
+
+    tracing::info!("Setup complete: created admin account '{}'", user.username);
+
+    // Auto-login the new admin
+    let access_token = auth::create_access_token(&user, &state.jwt_secret)?;
+    let refresh_token = auth::generate_refresh_token();
+    let token_hash = auth::hash_refresh_token(&refresh_token);
+    let expires_at = auth::refresh_token_expiry();
+    auth::store_refresh_token(state.persistence.pool(), user.id, &token_hash, expires_at).await?;
+
+    let body = LoginResponse {
+        access_token,
+        user: UserInfo::from(&user),
+    };
+
+    let mut response = Json(body).into_response();
+    let cookie = format!(
+        "refresh_token={}; HttpOnly; Secure; SameSite=Strict; Path=/api/auth; Max-Age={}",
+        refresh_token,
+        7 * 24 * 60 * 60
+    );
+    response
+        .headers_mut()
+        .insert(header::SET_COOKIE, HeaderValue::from_str(&cookie).unwrap());
+    Ok(response)
 }
 
 // --- Admin Handlers ---

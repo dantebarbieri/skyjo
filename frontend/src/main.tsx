@@ -13,6 +13,7 @@ import GeneticManageRoute from '@/routes/genetic-manage';
 import LoginRoute from '@/routes/login';
 import AdminRoute from '@/routes/admin';
 import SettingsRoute from '@/routes/settings';
+import SetupRoute from '@/routes/setup';
 import './index.css';
 
 createRoot(document.getElementById('root')!).render(
@@ -32,6 +33,7 @@ createRoot(document.getElementById('root')!).render(
               <Route path="rules/strategies/Genetic/manage" element={<GeneticManageRoute />} />
               <Route path="rules/strategies/:strategyName" element={<StrategiesRoute />} />
               <Route path="login" element={<LoginRoute />} />
+              <Route path="setup" element={<SetupRoute />} />
               <Route path="admin" element={<AdminRoute />} />
               <Route path="settings" element={<SettingsRoute />} />
             </Route>

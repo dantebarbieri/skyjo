@@ -23,6 +23,7 @@ interface AuthState {
   user: AuthUser | null;
   isAuthenticated: boolean;
   isLoading: boolean;
+  needsSetup: boolean;
   login: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<boolean>;
@@ -37,6 +38,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [needsSetup, setNeedsSetup] = useState(false);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const scheduleRefresh = useCallback((token: string) => {
@@ -84,6 +86,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const data = await res.json();
     setAuth(data.access_token, data.user);
+    setNeedsSetup(false);
   }, [setAuth]);
 
   const logout = useCallback(async () => {
@@ -112,6 +115,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const data = await res.json();
       setAuth(data.access_token, data.user);
+      setNeedsSetup(false);
       return true;
     } catch {
       clearAuth();
@@ -119,9 +123,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [setAuth, clearAuth]);
 
-  // On mount: try to restore session from refresh cookie
+  // On mount: check setup status, then try to restore session
   useEffect(() => {
-    refresh().finally(() => setIsLoading(false));
+    async function init() {
+      try {
+        const setupRes = await fetch('/api/auth/setup-status');
+        if (setupRes.ok) {
+          const { needs_setup } = await setupRes.json();
+          setNeedsSetup(needs_setup);
+          if (needs_setup) {
+            setIsLoading(false);
+            return;
+          }
+        }
+      } catch {
+        // Server may be unreachable — proceed without setup check
+      }
+      await refresh();
+      setIsLoading(false);
+    }
+    init();
     return () => {
       if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
     };
@@ -133,6 +154,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user,
         isAuthenticated: user !== null,
         isLoading,
+        needsSetup,
         login,
         logout,
         refresh,

@@ -21,8 +21,6 @@ services:
     environment:
       - DATABASE_URL=postgres://skyjo:${DB_PASSWORD:-skyjo}@db:5432/skyjo
       - SKYJO_JWT_SECRET=${JWT_SECRET:-}
-      - SKYJO_ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
-      - SKYJO_ADMIN_PASSWORD=${ADMIN_PASSWORD:-Skyjo-Change-Me-1!}
       - SKYJO_DATA_DIR=/var/lib/skyjo
     volumes:
       - skyjo-data:/var/lib/skyjo
