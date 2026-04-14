@@ -526,8 +526,11 @@ export function NeuralNetworkViz({ className }: NeuralNetworkVizProps) {
         </Badge>
         {status && status.best_fitness !== 0 && (
           <Badge variant="outline" className="text-xs">
-            Fitness: {status.best_fitness.toFixed(1)}
+            Fitness: {status.best_fitness.toFixed(1)} {status.best_fitness >= 0 ? '✓' : ''}
           </Badge>
+        )}
+        {status && status.best_fitness !== 0 && (
+          <span className="text-muted-foreground text-[9px]">(less negative = better)</span>
         )}
         {lineageHash && (
           <Badge variant="outline" className="text-xs">
@@ -551,13 +554,18 @@ export function NeuralNetworkViz({ className }: NeuralNetworkVizProps) {
       </Card>
 
       {/* 5. Glossary */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 text-xs text-muted-foreground">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-1 text-xs text-muted-foreground">
         <p><strong className="text-foreground">Generation</strong> — one cycle of evolution. Each generation, 100 neural networks play games, and the best are selected, blended, and mutated to produce the next generation.</p>
-        <p><strong className="text-foreground">Fitness</strong> — how well the best network performs. Combines negative average score, win bonus, and score differential. Higher = better.</p>
+        <p><strong className="text-foreground">Fitness</strong> — how well the best network performs. Based on negative average score + win bonus + score differential. Since Skyjo scores are negative-is-good, fitness values are typically negative. <em>Less negative (closer to 0) = better performance.</em></p>
         <p><strong className="text-foreground">Inputs ({model.input_size})</strong> — what the network sees: board state, discard pile, deck size, scores, column match potential, drawn card, opponent hidden counts, and opponent near-done signals.</p>
         <p><strong className="text-foreground">Hidden ({model.hidden1_size || model.hidden_size} + {model.hidden2_size || '?'})</strong> — two layers of internal neurons with ReLU activation that learn patterns from the inputs.</p>
         <p><strong className="text-foreground">Outputs ({model.output_size})</strong> — decisions the network makes: which cards to flip, whether to draw from deck or discard, whether to keep or swap, and where to place cards.</p>
         <p><strong className="text-foreground">Lineage</strong> — a unique identifier for each independent training run. When you reset the model, a new lineage begins. Saved generations retain their lineage so you can compare models from different training runs.</p>
+        <p><strong className="text-foreground">ReLU</strong> — Rectified Linear Unit. An activation function: outputs the input if positive, 0 otherwise. Formula: max(0, x). Makes the network capable of learning non-linear patterns.</p>
+        <p><strong className="text-foreground">Weight</strong> — a number that scales a connection between two neurons. Positive weights amplify signals; negative weights suppress them. Training evolves these values.</p>
+        <p><strong className="text-foreground">Bias</strong> — an offset added to a neuron's output before activation. Allows the network to shift its decision boundary independently of inputs.</p>
+        <p><strong className="text-foreground">Mutation (μ / σ)</strong> — μ (mu) is the mutation rate — the probability a weight is changed each generation. σ (sigma) is the standard deviation of the Gaussian noise added to mutated weights. Adaptive: both increase when training stagnates.</p>
+        <p><strong className="text-foreground">Edge colors</strong> — connections between layers show average weights. <span className="text-blue-500 font-semibold">Blue = positive</span> (amplifying), <span className="text-red-500 font-semibold">Red = negative</span> (suppressing). Thicker = stronger. Each edge averages all weights between its source group and destination layer.</p>
       </div>
 
       {/* Reset confirmation dialog */}
@@ -624,17 +632,20 @@ function NetworkDiagram({ model }: { model: GeneticModelData }) {
   const normalize = (w: number) => w / maxAbsWeight;
 
   const svgWidth = 900;
-  const svgHeight = Math.max(
-    inputGroups.length * 38 + 40,
-    outputGroups.length * 38 + 40,
-    200
-  );
+  const inputHeight = inputGroups.length * 38;
+  const outputHeight = outputGroups.length * 38;
+  const hiddenHeight = 140; // minimum hidden layer visual height
+  const maxColHeight = Math.max(inputHeight, outputHeight, hiddenHeight);
+  const inputYOffset = (maxColHeight - inputHeight) / 2;
+  const outputYOffset = (maxColHeight - outputHeight) / 2;
+  const hiddenYOffset = (maxColHeight - hiddenHeight) / 2;
+  const svgHeight = maxColHeight + 60; // padding for legend
   const inputX = 20;
   const hidden1X = svgWidth * 0.33;
   const hidden2X = svgWidth * 0.58;
   const outputX = svgWidth - 20;
-  const hiddenBoxTop = 30;
-  const hiddenBoxBottom = svgHeight - 30;
+  const hiddenBoxTop = 10 + hiddenYOffset;
+  const hiddenBoxBottom = svgHeight - 30 - hiddenYOffset;
   const hidden1CenterY = (hiddenBoxTop + hiddenBoxBottom) / 2;
   const hidden2CenterY = hidden1CenterY;
 
@@ -677,10 +688,10 @@ function NetworkDiagram({ model }: { model: GeneticModelData }) {
   }
 
   return (
-    <div className="overflow-x-auto">
+    <div className="w-full overflow-x-auto">
       <svg
         viewBox={`0 0 ${svgWidth} ${svgHeight}`}
-        className="w-full max-w-[900px] mx-auto"
+        className="w-full max-w-[900px] min-w-[600px] mx-auto"
         style={{ minHeight: 200 }}
       >
         {/* Edges: input → hidden1 */}
@@ -703,7 +714,29 @@ function NetworkDiagram({ model }: { model: GeneticModelData }) {
 
         {/* Input group labels */}
         {inputGroups.map((g, i) => (
-          <g key={`in-${i}`}>
+          <g
+            key={`in-${i}`}
+            className="group cursor-pointer"
+            onMouseEnter={(e) => {
+              const circle = e.currentTarget.querySelector('circle');
+              const text = e.currentTarget.querySelector('text');
+              if (circle) {
+                circle.style.transform = 'scale(1.3)';
+                circle.style.transformOrigin = `${inputNodeCx}px ${g.y}px`;
+                circle.style.transition = 'transform 0.15s ease-out';
+              }
+              if (text) {
+                text.style.fontWeight = '700';
+                text.style.transition = 'font-weight 0.15s ease-out';
+              }
+            }}
+            onMouseLeave={(e) => {
+              const circle = e.currentTarget.querySelector('circle');
+              const text = e.currentTarget.querySelector('text');
+              if (circle) circle.style.transform = 'scale(1)';
+              if (text) text.style.fontWeight = '';
+            }}
+          >
             <circle cx={inputNodeCx} cy={g.y} r={6} fill="#6366f1" fillOpacity={0.8} />
             <text x={inputX} y={g.y + 4} className="fill-current text-muted-foreground" fontSize={10} textAnchor="start">
               {g.label}
@@ -712,38 +745,106 @@ function NetworkDiagram({ model }: { model: GeneticModelData }) {
         ))}
 
         {/* Hidden layer 1 box */}
-        <rect
-          x={hidden1X - 40} y={hiddenBoxTop} width={80} height={hiddenBoxBottom - hiddenBoxTop}
-          rx={8} fill="none" stroke="currentColor" strokeOpacity={0.3} strokeWidth={1.5} strokeDasharray="4 2"
-        />
-        <text x={hidden1X} y={hidden1CenterY - 8} textAnchor="middle" className="fill-current text-muted-foreground" fontSize={10}>
-          {hidden1Size}
-        </text>
-        <text x={hidden1X} y={hidden1CenterY + 6} textAnchor="middle" className="fill-current text-muted-foreground" fontSize={10}>
-          neurons
-        </text>
-        <text x={hidden1X} y={hidden1CenterY + 18} textAnchor="middle" className="fill-current text-muted-foreground" fontSize={9} fontStyle="italic">
-          (ReLU)
-        </text>
+        <g
+          className="group cursor-pointer"
+          onMouseEnter={(e) => {
+            const rect = e.currentTarget.querySelector('rect');
+            if (rect) {
+              rect.style.transform = 'scale(1.05)';
+              rect.style.transformOrigin = `${hidden1X}px ${hidden1CenterY}px`;
+              rect.style.transition = 'transform 0.15s ease-out';
+            }
+            e.currentTarget.querySelectorAll('text').forEach(t => {
+              t.style.fontWeight = '700';
+              t.style.transition = 'font-weight 0.15s ease-out';
+            });
+          }}
+          onMouseLeave={(e) => {
+            const rect = e.currentTarget.querySelector('rect');
+            if (rect) rect.style.transform = 'scale(1)';
+            e.currentTarget.querySelectorAll('text').forEach(t => {
+              t.style.fontWeight = '';
+            });
+          }}
+        >
+          <rect
+            x={hidden1X - 40} y={hiddenBoxTop} width={80} height={hiddenBoxBottom - hiddenBoxTop}
+            rx={8} fill="none" stroke="currentColor" strokeOpacity={0.3} strokeWidth={1.5} strokeDasharray="4 2"
+          />
+          <text x={hidden1X} y={hidden1CenterY - 8} textAnchor="middle" className="fill-current text-muted-foreground" fontSize={10}>
+            {hidden1Size}
+          </text>
+          <text x={hidden1X} y={hidden1CenterY + 6} textAnchor="middle" className="fill-current text-muted-foreground" fontSize={10}>
+            neurons
+          </text>
+          <text x={hidden1X} y={hidden1CenterY + 18} textAnchor="middle" className="fill-current text-muted-foreground" fontSize={9} fontStyle="italic">
+            (ReLU)
+          </text>
+        </g>
 
         {/* Hidden layer 2 box */}
-        <rect
-          x={hidden2X - 40} y={hiddenBoxTop} width={80} height={hiddenBoxBottom - hiddenBoxTop}
-          rx={8} fill="none" stroke="currentColor" strokeOpacity={0.3} strokeWidth={1.5} strokeDasharray="4 2"
-        />
-        <text x={hidden2X} y={hidden2CenterY - 8} textAnchor="middle" className="fill-current text-muted-foreground" fontSize={10}>
-          {hidden2Size}
-        </text>
-        <text x={hidden2X} y={hidden2CenterY + 6} textAnchor="middle" className="fill-current text-muted-foreground" fontSize={10}>
-          neurons
-        </text>
-        <text x={hidden2X} y={hidden2CenterY + 18} textAnchor="middle" className="fill-current text-muted-foreground" fontSize={9} fontStyle="italic">
-          (ReLU)
-        </text>
+        <g
+          className="group cursor-pointer"
+          onMouseEnter={(e) => {
+            const rect = e.currentTarget.querySelector('rect');
+            if (rect) {
+              rect.style.transform = 'scale(1.05)';
+              rect.style.transformOrigin = `${hidden2X}px ${hidden2CenterY}px`;
+              rect.style.transition = 'transform 0.15s ease-out';
+            }
+            e.currentTarget.querySelectorAll('text').forEach(t => {
+              t.style.fontWeight = '700';
+              t.style.transition = 'font-weight 0.15s ease-out';
+            });
+          }}
+          onMouseLeave={(e) => {
+            const rect = e.currentTarget.querySelector('rect');
+            if (rect) rect.style.transform = 'scale(1)';
+            e.currentTarget.querySelectorAll('text').forEach(t => {
+              t.style.fontWeight = '';
+            });
+          }}
+        >
+          <rect
+            x={hidden2X - 40} y={hiddenBoxTop} width={80} height={hiddenBoxBottom - hiddenBoxTop}
+            rx={8} fill="none" stroke="currentColor" strokeOpacity={0.3} strokeWidth={1.5} strokeDasharray="4 2"
+          />
+          <text x={hidden2X} y={hidden2CenterY - 8} textAnchor="middle" className="fill-current text-muted-foreground" fontSize={10}>
+            {hidden2Size}
+          </text>
+          <text x={hidden2X} y={hidden2CenterY + 6} textAnchor="middle" className="fill-current text-muted-foreground" fontSize={10}>
+            neurons
+          </text>
+          <text x={hidden2X} y={hidden2CenterY + 18} textAnchor="middle" className="fill-current text-muted-foreground" fontSize={9} fontStyle="italic">
+            (ReLU)
+          </text>
+        </g>
 
         {/* Output group labels */}
         {outputGroups.map((g, i) => (
-          <g key={`out-${i}`}>
+          <g
+            key={`out-${i}`}
+            className="group cursor-pointer"
+            onMouseEnter={(e) => {
+              const circle = e.currentTarget.querySelector('circle');
+              const text = e.currentTarget.querySelector('text');
+              if (circle) {
+                circle.style.transform = 'scale(1.3)';
+                circle.style.transformOrigin = `${outputNodeCx}px ${g.y}px`;
+                circle.style.transition = 'transform 0.15s ease-out';
+              }
+              if (text) {
+                text.style.fontWeight = '700';
+                text.style.transition = 'font-weight 0.15s ease-out';
+              }
+            }}
+            onMouseLeave={(e) => {
+              const circle = e.currentTarget.querySelector('circle');
+              const text = e.currentTarget.querySelector('text');
+              if (circle) circle.style.transform = 'scale(1)';
+              if (text) text.style.fontWeight = '';
+            }}
+          >
             <circle cx={outputNodeCx} cy={g.y} r={6} fill="#f59e0b" fillOpacity={0.8} />
             <text x={outputX} y={g.y + 4} className="fill-current text-muted-foreground" fontSize={10} textAnchor="end">
               {g.label}
@@ -775,6 +876,12 @@ function NetworkDiagram({ model }: { model: GeneticModelData }) {
           </g>
         )}
       </svg>
+      <p className="text-xs text-muted-foreground sm:hidden mt-1">← Scroll horizontally to see full network →</p>
+      <p className="text-xs text-muted-foreground italic mt-2">
+        Connections show the <strong>average weight</strong> across all neurons in each group.
+        For example, the edge from &quot;Board Slots (12×3)&quot; to Hidden Layer 1 averages all 36×{hidden1Size} = {36 * hidden1Size} individual weights into a single line.
+        The connection between hidden layers averages all {hidden1Size}×{hidden2Size} = {hidden1Size * hidden2Size} weights.
+      </p>
     </div>
   );
 }
@@ -802,8 +909,15 @@ function computeLayout(model: GeneticModelData) {
   const totalOutputGroups = output_groups.length;
   const maxGroups = Math.max(totalInputGroups, totalOutputGroups);
   const spacing = Math.max(30, Math.min(38, 300 / maxGroups));
-  const inputStartY = 30;
-  const outputStartY = 30;
+
+  const inputHeight = (totalInputGroups - 1) * spacing;
+  const outputHeight = (totalOutputGroups - 1) * spacing;
+  const hiddenMinHeight = 140;
+  const maxColHeight = Math.max(inputHeight, outputHeight, hiddenMinHeight);
+  const inputYOffset = (maxColHeight - inputHeight) / 2;
+  const outputYOffset = (maxColHeight - outputHeight) / 2;
+  const inputStartY = 30 + inputYOffset;
+  const outputStartY = 30 + outputYOffset;
 
   const inputGroupNodes: GroupNode[] = input_groups.map(([label], i) => ({
     label,
