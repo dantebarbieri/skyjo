@@ -50,7 +50,7 @@ pub async fn genetic_auth_middleware(
                 .get("authorization")
                 .and_then(|v| v.to_str().ok());
             match auth_header {
-                Some(h) if h.strip_prefix("Bearer ").map_or(false, |t| t == key.as_str()) => {
+                Some(h) if h.strip_prefix("Bearer ") == Some(key.as_str()) => {
                     next.run(req).await
                 }
                 _ => ServerError::Unauthorized.into_response(),

@@ -322,10 +322,10 @@ impl Room {
             return Err(ServerError::NotInLobby);
         }
         // Validate: must be None (unlimited) or within 10–300 seconds
-        if let Some(s) = secs {
-            if !(10..=300).contains(&s) {
-                return Err(ServerError::InvalidTurnTimer);
-            }
+        if let Some(s) = secs
+            && !(10..=300).contains(&s)
+        {
+            return Err(ServerError::InvalidTurnTimer);
         }
         self.turn_timer_secs = secs;
         self.touch();

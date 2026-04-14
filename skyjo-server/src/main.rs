@@ -149,12 +149,12 @@ async fn main() {
             if let Some(ref db) = cleanup_persistence {
                 for entry in cleanup_state.lobby.rooms.iter() {
                     let code = entry.key().clone();
-                    if let Ok(room) = entry.value().try_lock() {
-                        if room.phase == skyjo_server::room::RoomPhase::InGame {
-                            let snapshot = room.to_snapshot();
-                            if let Ok(json) = serde_json::to_string(&snapshot) {
-                                db.save_room_snapshot(&code, &json).ok();
-                            }
+                    if let Ok(room) = entry.value().try_lock()
+                        && room.phase == skyjo_server::room::RoomPhase::InGame
+                    {
+                        let snapshot = room.to_snapshot();
+                        if let Ok(json) = serde_json::to_string(&snapshot) {
+                            db.save_room_snapshot(&code, &json).ok();
                         }
                     }
                 }
@@ -200,7 +200,7 @@ async fn main() {
         .nest("/api", api_routes)
         .fallback_service(static_service)
         .layer(CompressionLayer::new())
-        .with_state(app_state);
+        .with_state(app_state.clone());
 
     let addr = format!("0.0.0.0:{}", args.port);
     tracing::info!("Starting server on {addr}");
@@ -233,14 +233,12 @@ async fn main() {
 
                 // Snapshot rooms that have active players or are in-game
                 let has_connected = room.players.iter().any(|p| p.connected);
-                if room.phase != RoomPhase::Lobby || has_connected {
-                    if let Some(ref db) = shutdown_persistence {
-                        let snapshot = room.to_snapshot();
-                        if let Ok(json) = serde_json::to_string(&snapshot) {
-                            db.save_room_snapshot(&code, &json).ok();
-                            snapshot_count += 1;
-                        }
-                    }
+                if (room.phase != RoomPhase::Lobby || has_connected)
+                    && let Some(ref db) = shutdown_persistence
+                    && let Ok(json) = serde_json::to_string(&room.to_snapshot())
+                {
+                    db.save_room_snapshot(&code, &json).ok();
+                    snapshot_count += 1;
                 }
             }
         }
