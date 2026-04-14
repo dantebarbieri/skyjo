@@ -34,6 +34,8 @@ pub struct PlayerSlot {
     pub ip: Option<String>,
     /// When this player disconnected (for auto-kick timer).
     pub disconnected_at: Option<Instant>,
+    /// True if this bot was converted from a disconnected human player.
+    pub was_human: bool,
 }
 
 /// A game room holding all state for one multiplayer session.
@@ -62,6 +64,9 @@ pub struct Room {
     pub genetic_games_trained: usize,
     /// Current generation of the genetic model.
     pub genetic_generation: usize,
+    /// Seconds before a disconnected player is converted to a bot during a game.
+    /// None means use the default (60 seconds).
+    pub disconnect_bot_timeout_secs: Option<u32>,
 }
 
 /// Validate and sanitize a player name.
@@ -109,6 +114,7 @@ impl Room {
             connected: false,
             ip: None,
             disconnected_at: None,
+            was_human: false,
         });
         // Remaining slots are empty
         for _ in 1..num_players {
@@ -119,6 +125,7 @@ impl Room {
                 connected: false,
                 ip: None,
                 disconnected_at: None,
+                was_human: false,
             });
         }
 
@@ -139,6 +146,7 @@ impl Room {
             genetic_genome: None,
             genetic_games_trained,
             genetic_generation,
+            disconnect_bot_timeout_secs: None,
         }
     }
 
@@ -188,6 +196,7 @@ impl Room {
                     connected: false,
                     ip: None,
                     disconnected_at: None,
+                    was_human: false,
                 };
             }
             s if s.starts_with("Bot:") => {
@@ -206,6 +215,7 @@ impl Room {
                     connected: false,
                     ip: None,
                     disconnected_at: None,
+                    was_human: false,
                 };
             }
             _ => return Err(ServerError::InvalidAction(format!("Unknown player type: {player_type}"))),
@@ -333,6 +343,7 @@ impl Room {
                     connected: false,
                     ip: None,
                     disconnected_at: None,
+                    was_human: false,
                 });
             }
         } else if num_players < self.num_players {
@@ -386,6 +397,7 @@ impl Room {
             connected: false,
             ip: None,
             disconnected_at: None,
+            was_human: false,
         };
 
         self.touch();
@@ -622,6 +634,7 @@ impl Room {
                     connected: false,
                     ip: None,
                     disconnected_at: None,
+                    was_human: false,
                 };
                 kicked.push((i, token));
             }
@@ -630,6 +643,67 @@ impl Room {
             self.touch();
         }
         kicked
+    }
+
+    /// Convert disconnected human players to bots after the given timeout.
+    /// Only applies during InGame phase. Returns the list of converted slot indices.
+    pub fn convert_disconnected_to_bots(&mut self, timeout: Duration) -> Vec<usize> {
+        let mut converted = Vec::new();
+        for i in 0..self.num_players {
+            if let PlayerSlotType::Human = self.players[i].slot_type {
+                if let Some(dc_at) = self.players[i].disconnected_at {
+                    if dc_at.elapsed() >= timeout {
+                        self.players[i].slot_type = PlayerSlotType::Bot {
+                            strategy: "Random".to_string(),
+                        };
+                        if !self.players[i].name.ends_with(" (Bot)") {
+                            self.players[i].name.push_str(" (Bot)");
+                        }
+                        self.players[i].was_human = true;
+                        converted.push(i);
+                    }
+                }
+            }
+        }
+        if !converted.is_empty() {
+            self.touch();
+        }
+        converted
+    }
+
+    /// Reconvert a bot-converted player back to human on reconnection.
+    /// Returns true if the player was reconverted.
+    pub fn reconnect_bot_to_human(&mut self, player_index: usize) -> bool {
+        if !self.players[player_index].was_human {
+            return false;
+        }
+        self.players[player_index].slot_type = PlayerSlotType::Human;
+        if let Some(name) = self.players[player_index].name.strip_suffix(" (Bot)") {
+            self.players[player_index].name = name.to_string();
+        }
+        self.players[player_index].was_human = false;
+        self.touch();
+        true
+    }
+
+    /// Set the disconnect-to-bot timeout (lobby only, creator only).
+    pub fn set_disconnect_bot_timeout(&mut self, secs: Option<u32>) -> Result<(), ServerError> {
+        if self.phase != RoomPhase::Lobby {
+            return Err(ServerError::NotInLobby);
+        }
+        if let Some(s) = secs {
+            if !(10..=300).contains(&s) {
+                return Err(ServerError::InvalidDisconnectTimeout);
+            }
+        }
+        self.disconnect_bot_timeout_secs = secs;
+        self.touch();
+        Ok(())
+    }
+
+    /// Get the effective disconnect-to-bot timeout in seconds.
+    pub fn effective_disconnect_bot_timeout(&self) -> Duration {
+        Duration::from_secs(self.disconnect_bot_timeout_secs.unwrap_or(60) as u64)
     }
 
     /// Get the per-player game state for a specific player.
@@ -699,6 +773,7 @@ impl Room {
             available_rules: available_rules(),
             idle_timeout_secs,
             turn_timer_secs: self.turn_timer_secs,
+            disconnect_bot_timeout_secs: self.disconnect_bot_timeout_secs,
             last_winners: self.last_winners.clone(),
             genetic_games_trained: self.genetic_games_trained,
             genetic_generation: self.genetic_generation,
@@ -1094,6 +1169,125 @@ mod tests {
         assert_eq!(err, ServerError::NotInLobby);
     }
 
+    #[test]
+    fn set_turn_timer_rejects_below_10() {
+        let mut room = test_room();
+        let err = room.set_turn_timer(Some(5)).unwrap_err();
+        assert_eq!(err, ServerError::InvalidTurnTimer);
+    }
+
+    #[test]
+    fn set_turn_timer_rejects_above_300() {
+        let mut room = test_room();
+        let err = room.set_turn_timer(Some(301)).unwrap_err();
+        assert_eq!(err, ServerError::InvalidTurnTimer);
+    }
+
+    #[test]
+    fn set_turn_timer_accepts_boundary_10() {
+        let mut room = test_room();
+        room.set_turn_timer(Some(10)).unwrap();
+        assert_eq!(room.turn_timer_secs, Some(10));
+    }
+
+    #[test]
+    fn set_turn_timer_accepts_boundary_300() {
+        let mut room = test_room();
+        room.set_turn_timer(Some(300)).unwrap();
+        assert_eq!(room.turn_timer_secs, Some(300));
+    }
+
+    // ========================================================================
+    // Player Name Validation
+    // ========================================================================
+
+    #[test]
+    fn player_name_max_length() {
+        let long_name = "A".repeat(33);
+        let result = validate_player_name(&long_name);
+        assert_eq!(result.unwrap_err(), ServerError::PlayerNameTooLong);
+    }
+
+    #[test]
+    fn player_name_exactly_32_accepted() {
+        let name = "A".repeat(32);
+        let result = validate_player_name(&name);
+        assert_eq!(result.unwrap(), name);
+    }
+
+    #[test]
+    fn player_name_trimmed() {
+        let result = validate_player_name("  Alice  ");
+        assert_eq!(result.unwrap(), "Alice");
+    }
+
+    #[test]
+    fn player_name_empty_rejected() {
+        assert_eq!(
+            validate_player_name("").unwrap_err(),
+            ServerError::PlayerNameEmpty
+        );
+    }
+
+    #[test]
+    fn player_name_whitespace_only_rejected() {
+        assert_eq!(
+            validate_player_name("   ").unwrap_err(),
+            ServerError::PlayerNameEmpty
+        );
+    }
+
+    // ========================================================================
+    // Room Code Validation
+    // ========================================================================
+
+    #[test]
+    fn room_code_valid_accepted() {
+        assert!(validate_room_code("ABC234").is_ok());
+        assert!(validate_room_code("XXXXXX").is_ok());
+    }
+
+    #[test]
+    fn room_code_rejects_lowercase() {
+        assert_eq!(
+            validate_room_code("abcdef").unwrap_err(),
+            ServerError::RoomCodeInvalid
+        );
+    }
+
+    #[test]
+    fn room_code_rejects_excluded_chars() {
+        // I and O are excluded from alphabet; 0 and 1 from digits
+        assert_eq!(
+            validate_room_code("ABCDEI").unwrap_err(),
+            ServerError::RoomCodeInvalid
+        );
+        assert_eq!(
+            validate_room_code("ABCDEO").unwrap_err(),
+            ServerError::RoomCodeInvalid
+        );
+        assert_eq!(
+            validate_room_code("ABCDE0").unwrap_err(),
+            ServerError::RoomCodeInvalid
+        );
+        assert_eq!(
+            validate_room_code("ABCDE1").unwrap_err(),
+            ServerError::RoomCodeInvalid
+        );
+    }
+
+    #[test]
+    fn room_code_rejects_wrong_length() {
+        assert_eq!(
+            validate_room_code("ABC").unwrap_err(),
+            ServerError::RoomCodeInvalid
+        );
+        assert_eq!(
+            validate_room_code("ABCDEFG").unwrap_err(),
+            ServerError::RoomCodeInvalid
+        );
+    }
+
     // ========================================================================
     // Game Lifecycle
     // ========================================================================
@@ -1250,6 +1444,7 @@ mod tests {
             connected: true,
             ip: Some("1.2.3.4".to_string()),
             disconnected_at: None,
+            was_human: false,
         };
 
         let token = room.kick_player(1).unwrap();
@@ -1297,6 +1492,7 @@ mod tests {
             connected: true,
             ip: Some("10.0.0.2".to_string()),
             disconnected_at: None,
+            was_human: false,
         };
 
         room.ban_player(1).unwrap();
@@ -1315,6 +1511,7 @@ mod tests {
             connected: true,
             ip: Some("10.0.0.1".to_string()),
             disconnected_at: None,
+            was_human: false,
         };
 
         let err = room.ban_player(1).unwrap_err();
@@ -1338,6 +1535,7 @@ mod tests {
             connected: true,
             ip: None,
             disconnected_at: None,
+            was_human: false,
         };
         room.promote_host(1).unwrap();
         assert_eq!(room.creator, 1);
@@ -1369,6 +1567,7 @@ mod tests {
             connected: true,
             ip: None,
             disconnected_at: None,
+            was_human: false,
         };
         room.players[2] = PlayerSlot {
             name: "Charlie".to_string(),
@@ -1377,6 +1576,7 @@ mod tests {
             connected: true,
             ip: None,
             disconnected_at: None,
+            was_human: false,
         };
 
         let promoted = room.auto_promote_host();
@@ -1411,6 +1611,7 @@ mod tests {
             connected: true,
             ip: None,
             disconnected_at: None,
+            was_human: false,
         };
 
         let promoted = room.auto_promote_host();
@@ -1442,6 +1643,7 @@ mod tests {
             connected: true,
             ip: None,
             disconnected_at: None,
+            was_human: false,
         };
         assert_eq!(room.next_available_slot(), None);
     }
@@ -1469,6 +1671,7 @@ mod tests {
             connected: false,
             ip: None,
             disconnected_at: Some(Instant::now() - Duration::from_secs(300)),
+            was_human: false,
         };
 
         let kicked = room.auto_kick_disconnected(Duration::from_secs(60));
@@ -1487,6 +1690,7 @@ mod tests {
             connected: false,
             ip: None,
             disconnected_at: Some(Instant::now()),
+            was_human: false,
         };
 
         let kicked = room.auto_kick_disconnected(Duration::from_secs(60));
@@ -1674,6 +1878,130 @@ mod tests {
     fn available_rules_returns_standard() {
         let rules = available_rules();
         assert_eq!(rules, vec!["Standard".to_string()]);
+    }
+
+    // ========================================================================
+    // Disconnect-to-Bot Conversion
+    // ========================================================================
+
+    #[test]
+    fn disconnect_converts_to_bot_after_timeout() {
+        let mut room = ingame_room();
+        // Simulate player 0 disconnecting long ago
+        room.players[0].connected = false;
+        room.players[0].disconnected_at = Some(Instant::now() - Duration::from_secs(300));
+
+        let converted = room.convert_disconnected_to_bots(Duration::from_secs(60));
+        assert_eq!(converted, vec![0]);
+        assert!(matches!(room.players[0].slot_type, PlayerSlotType::Bot { ref strategy } if strategy == "Random"));
+        assert!(room.players[0].name.ends_with(" (Bot)"));
+        assert!(room.players[0].was_human);
+    }
+
+    #[test]
+    fn bot_converted_player_can_rejoin() {
+        let mut room = ingame_room();
+        let original_name = room.players[0].name.clone();
+        let token = SessionToken::new();
+        room.players[0].session_token = Some(token.clone());
+
+        // Convert to bot
+        room.players[0].connected = false;
+        room.players[0].disconnected_at = Some(Instant::now() - Duration::from_secs(300));
+        room.convert_disconnected_to_bots(Duration::from_secs(60));
+        assert!(room.players[0].was_human);
+
+        // Simulate reconnection
+        let reconverted = room.reconnect_bot_to_human(0);
+        assert!(reconverted);
+        assert_eq!(room.players[0].slot_type, PlayerSlotType::Human);
+        assert!(!room.players[0].was_human);
+        assert_eq!(room.players[0].name, original_name);
+    }
+
+    #[test]
+    fn disconnect_in_lobby_still_kicks() {
+        let mut room = Room::new("R".to_string(), "Alice".to_string(), 3, None, 0, 0);
+        room.players[0].connected = true;
+        room.players[1] = PlayerSlot {
+            name: "Bob".to_string(),
+            slot_type: PlayerSlotType::Human,
+            session_token: Some(SessionToken::new()),
+            connected: false,
+            ip: None,
+            disconnected_at: Some(Instant::now() - Duration::from_secs(300)),
+            was_human: false,
+        };
+        // In lobby phase, auto_kick_disconnected should kick, not convert to bot
+        assert_eq!(room.phase, RoomPhase::Lobby);
+        let kicked = room.auto_kick_disconnected(Duration::from_secs(60));
+        assert_eq!(kicked.len(), 1);
+        assert_eq!(room.players[1].slot_type, PlayerSlotType::Empty);
+    }
+
+    #[test]
+    fn disconnect_bot_timeout_configurable() {
+        let mut room = test_room();
+        // Default is None
+        assert_eq!(room.disconnect_bot_timeout_secs, None);
+        assert_eq!(room.effective_disconnect_bot_timeout(), Duration::from_secs(60));
+
+        // Set custom
+        room.set_disconnect_bot_timeout(Some(120)).unwrap();
+        assert_eq!(room.disconnect_bot_timeout_secs, Some(120));
+        assert_eq!(room.effective_disconnect_bot_timeout(), Duration::from_secs(120));
+
+        // Reject out of range
+        assert!(room.set_disconnect_bot_timeout(Some(5)).is_err());
+        assert!(room.set_disconnect_bot_timeout(Some(301)).is_err());
+
+        // None resets to default
+        room.set_disconnect_bot_timeout(None).unwrap();
+        assert_eq!(room.disconnect_bot_timeout_secs, None);
+    }
+
+    #[test]
+    fn disconnect_bot_timeout_rejects_during_game() {
+        let mut room = ingame_room();
+        let err = room.set_disconnect_bot_timeout(Some(120)).unwrap_err();
+        assert_eq!(err, ServerError::NotInLobby);
+    }
+
+    #[test]
+    fn conversion_preserves_session_token() {
+        let mut room = ingame_room();
+        let token = SessionToken::new();
+        room.players[0].session_token = Some(token.clone());
+        room.players[0].connected = false;
+        room.players[0].disconnected_at = Some(Instant::now() - Duration::from_secs(300));
+
+        room.convert_disconnected_to_bots(Duration::from_secs(60));
+        // Session token should still be present
+        assert_eq!(
+            room.players[0].session_token.as_ref().unwrap().as_str(),
+            token.as_str()
+        );
+    }
+
+    #[test]
+    fn convert_skips_recently_disconnected() {
+        let mut room = ingame_room();
+        room.players[0].connected = false;
+        room.players[0].disconnected_at = Some(Instant::now());
+
+        let converted = room.convert_disconnected_to_bots(Duration::from_secs(60));
+        assert!(converted.is_empty());
+        assert_eq!(room.players[0].slot_type, PlayerSlotType::Human);
+    }
+
+    #[test]
+    fn reconnect_non_converted_player_is_noop() {
+        let mut room = ingame_room();
+        // Player 0 is Human, was_human is false
+        assert!(!room.players[0].was_human);
+        let result = room.reconnect_bot_to_human(0);
+        assert!(!result);
+        assert_eq!(room.players[0].slot_type, PlayerSlotType::Human);
     }
 
     // ========================================================================

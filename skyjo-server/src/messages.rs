@@ -32,6 +32,11 @@ pub enum ClientMessage {
         /// Seconds per turn, or null for unlimited.
         secs: Option<u64>,
     },
+    /// Set the disconnect-to-bot timeout (creator only, lobby phase).
+    SetDisconnectTimeout {
+        /// Seconds before a disconnected player becomes a bot, or null for default (60s).
+        secs: Option<u32>,
+    },
     /// Keepalive ping.
     Ping,
 }
@@ -77,6 +82,8 @@ pub enum ServerMessage {
     PlayerLeft { player_index: usize },
     /// A player reconnected.
     PlayerReconnected { player_index: usize },
+    /// A disconnected player was converted to a bot.
+    PlayerConvertedToBot { slot: usize, name: String },
     /// You were kicked from the room.
     Kicked { reason: String },
     /// An error in response to a client message.
@@ -99,6 +106,8 @@ pub struct RoomLobbyState {
     pub idle_timeout_secs: Option<u64>,
     /// Turn timer setting: seconds per turn, or None for unlimited.
     pub turn_timer_secs: Option<u64>,
+    /// Disconnect-to-bot timeout: seconds before a disconnected player becomes a bot, or None for default (60s).
+    pub disconnect_bot_timeout_secs: Option<u32>,
     /// Player indices who won the last game (shown as crowns in lobby).
     pub last_winners: Vec<usize>,
     /// Number of games the genetic bot model has been trained on.
@@ -290,6 +299,26 @@ mod tests {
     }
 
     #[test]
+    fn client_message_set_disconnect_timeout_with_value() {
+        let json = r#"{"type":"SetDisconnectTimeout","secs":120}"#;
+        let msg: ClientMessage = serde_json::from_str(json).unwrap();
+        assert!(matches!(
+            msg,
+            ClientMessage::SetDisconnectTimeout { secs: Some(120) }
+        ));
+    }
+
+    #[test]
+    fn client_message_set_disconnect_timeout_null() {
+        let json = r#"{"type":"SetDisconnectTimeout","secs":null}"#;
+        let msg: ClientMessage = serde_json::from_str(json).unwrap();
+        assert!(matches!(
+            msg,
+            ClientMessage::SetDisconnectTimeout { secs: None }
+        ));
+    }
+
+    #[test]
     fn client_message_rejects_unknown_type() {
         let json = r#"{"type":"Unknown"}"#;
         assert!(serde_json::from_str::<ClientMessage>(json).is_err());
@@ -345,6 +374,18 @@ mod tests {
     }
 
     #[test]
+    fn server_message_player_converted_to_bot_serializes() {
+        let msg = ServerMessage::PlayerConvertedToBot {
+            slot: 1,
+            name: "Alice (Bot)".to_string(),
+        };
+        let val: serde_json::Value = serde_json::to_value(&msg).unwrap();
+        assert_eq!(val["type"], "PlayerConvertedToBot");
+        assert_eq!(val["slot"], 1);
+        assert_eq!(val["name"], "Alice (Bot)");
+    }
+
+    #[test]
     fn server_message_player_left_serializes() {
         let msg = ServerMessage::PlayerLeft { player_index: 1 };
         let val: serde_json::Value = serde_json::to_value(&msg).unwrap();
@@ -372,6 +413,7 @@ mod tests {
             available_rules: vec!["Standard".to_string()],
             idle_timeout_secs: Some(300),
             turn_timer_secs: None,
+            disconnect_bot_timeout_secs: None,
             last_winners: vec![],
             genetic_games_trained: 0,
             genetic_generation: 0,
