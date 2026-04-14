@@ -32,8 +32,10 @@ export function NeuralNetworkViz({ className }: NeuralNetworkVizProps) {
   const [status, setStatus] = useState<GeneticTrainingStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [savedGenerations, setSavedGenerations] = useState<SavedGenerationInfo[]>([]);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastGenRef = useRef(0);
+  const pollIntervalRef = useRef(500);
+  const pollHistoryRef = useRef<boolean[]>([]);
   const [trainGenCount, setTrainGenCount] = useState('100');
   const [trainTargetGen, setTrainTargetGen] = useState('');
   const [trainTargetFitness, setTrainTargetFitness] = useState('-30');
@@ -78,27 +80,64 @@ export function NeuralNetworkViz({ className }: NeuralNetworkVizProps) {
     fetchSaved();
   }, [fetchModel, fetchStatus, fetchSaved]);
 
-  // Start/stop polling when training state changes
-  const startPolling = useCallback(() => {
-    stopPolling();
+  // Adaptive polling: speeds up when data changes, slows down when stale
+  const POLL_MIN_MS = 250;
+  const POLL_MAX_MS = 5000;
+  const POLL_WINDOW = 5;
 
-    // Poll status + model every 2s
-    pollRef.current = setInterval(async () => {
+  const schedulePoll = useCallback(() => {
+    stopPolling();
+    pollRef.current = setTimeout(async () => {
       const s = await fetchStatus();
+      const hadNewData = s != null && (
+        s.generation !== lastGenRef.current ||
+        s.training_elapsed_ms !== (statusRef.current?.training_elapsed_ms ?? 0)
+      );
+      if (s) statusRef.current = s;
+
       if (s && s.generation !== lastGenRef.current) {
         lastGenRef.current = s.generation;
-        await fetchModel(); // Refresh NN weights on each new generation
+        await fetchModel();
       }
       if (s && !s.is_training) {
         stopPolling();
         await fetchModel();
         await fetchSaved();
+        return;
       }
-    }, 2000);
+
+      // Track recent poll results and adapt interval
+      const history = pollHistoryRef.current;
+      history.push(hadNewData);
+      if (history.length > POLL_WINDOW) history.shift();
+
+      const freshCount = history.filter(Boolean).length;
+      let interval = pollIntervalRef.current;
+      if (freshCount >= POLL_WINDOW) {
+        // All recent polls had new data — speed up
+        interval = Math.max(POLL_MIN_MS, interval * 0.7);
+      } else if (freshCount === 0) {
+        // All stale — slow down
+        interval = Math.min(POLL_MAX_MS, interval * 1.5);
+      }
+      // Otherwise hold steady
+      pollIntervalRef.current = interval;
+
+      schedulePoll();
+    }, pollIntervalRef.current);
   }, [fetchStatus, fetchModel, fetchSaved]);
 
+  // Keep a ref to the latest status for comparison without triggering re-renders
+  const statusRef = useRef<GeneticTrainingStatus | null>(null);
+
+  const startPolling = useCallback(() => {
+    pollIntervalRef.current = POLL_MIN_MS;
+    pollHistoryRef.current = [];
+    schedulePoll();
+  }, [schedulePoll]);
+
   function stopPolling() {
-    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    if (pollRef.current) { clearTimeout(pollRef.current); pollRef.current = null; }
   }
 
   useEffect(() => () => stopPolling(), []);
