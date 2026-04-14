@@ -1,6 +1,5 @@
 //! Resilience-focused tests.
 
-use std::path::Path;
 use std::time::{Duration, Instant};
 
 use skyjo_server::messages::PlayerSlotType;
@@ -32,16 +31,23 @@ fn ingame_room() -> Room {
 // Room snapshot round-trip through persistence
 // ========================================================================
 
-#[test]
-fn snapshot_round_trip_through_persistence() {
-    let db = Persistence::open(Path::new(":memory:")).unwrap();
+#[tokio::test]
+async fn snapshot_round_trip_through_persistence() {
+    let database_url = match std::env::var("DATABASE_URL") {
+        Ok(url) => url,
+        Err(_) => {
+            eprintln!("Skipping test: DATABASE_URL not set");
+            return;
+        }
+    };
+    let db = Persistence::connect(&database_url).await.unwrap();
 
     let room = test_room();
     let snapshot = room.to_snapshot();
     let json = serde_json::to_string(&snapshot).unwrap();
 
-    db.save_room_snapshot("RESIL1", &json).unwrap();
-    let loaded_bytes = db.load_room_snapshot("RESIL1").unwrap().unwrap();
+    db.save_room_snapshot("RESIL1", &json).await.unwrap();
+    let loaded_bytes = db.load_room_snapshot("RESIL1").await.unwrap().unwrap();
     let loaded_json = String::from_utf8(loaded_bytes).unwrap();
     let restored: RoomSnapshot = serde_json::from_str(&loaded_json).unwrap();
 
@@ -54,36 +60,33 @@ fn snapshot_round_trip_through_persistence() {
     assert_eq!(restored.players[0].slot_type, PlayerSlotType::Human);
     assert_eq!(restored.players[1].slot_type, PlayerSlotType::Empty);
     assert_eq!(restored.rules_name, "Standard");
+
+    // Cleanup
+    db.delete_room_snapshot("RESIL1").await.unwrap();
 }
 
 // ========================================================================
-// Persistence handles missing database gracefully (in-memory creation)
+// Persistence connects and creates tables
 // ========================================================================
 
-#[test]
-fn persistence_creates_tables_on_open() {
-    let db = Persistence::open(Path::new(":memory:")).unwrap();
-    // Verify we can use the database immediately (tables exist)
-    db.save_room_snapshot("TEST01", r#"{"test":true}"#).unwrap();
-    let loaded = db.load_room_snapshot("TEST01").unwrap();
-    assert!(loaded.is_some());
-}
-
-#[test]
-fn persistence_open_at_new_file_path_succeeds() {
-    let path =
-        std::env::temp_dir().join(format!("skyjo_resilience_test_{}.db", std::process::id()));
-    // Ensure the file doesn't exist
-    let _ = std::fs::remove_file(&path);
-
-    let db = Persistence::open(&path).unwrap();
-    db.save_room_snapshot("FRESH1", "snapshot_data").unwrap();
-    let loaded = db.load_room_snapshot("FRESH1").unwrap();
+#[tokio::test]
+async fn persistence_creates_tables_on_connect() {
+    let database_url = match std::env::var("DATABASE_URL") {
+        Ok(url) => url,
+        Err(_) => {
+            eprintln!("Skipping test: DATABASE_URL not set");
+            return;
+        }
+    };
+    let db = Persistence::connect(&database_url).await.unwrap();
+    db.save_room_snapshot("TEST01", r#"{"test":true}"#)
+        .await
+        .unwrap();
+    let loaded = db.load_room_snapshot("TEST01").await.unwrap();
     assert!(loaded.is_some());
 
     // Cleanup
-    drop(db);
-    let _ = std::fs::remove_file(&path);
+    db.delete_room_snapshot("TEST01").await.unwrap();
 }
 
 // ========================================================================
