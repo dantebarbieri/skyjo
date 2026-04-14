@@ -650,19 +650,18 @@ impl Room {
     pub fn convert_disconnected_to_bots(&mut self, timeout: Duration) -> Vec<usize> {
         let mut converted = Vec::new();
         for i in 0..self.num_players {
-            if let PlayerSlotType::Human = self.players[i].slot_type {
-                if let Some(dc_at) = self.players[i].disconnected_at {
-                    if dc_at.elapsed() >= timeout {
-                        self.players[i].slot_type = PlayerSlotType::Bot {
-                            strategy: "Random".to_string(),
-                        };
-                        if !self.players[i].name.ends_with(" (Bot)") {
-                            self.players[i].name.push_str(" (Bot)");
-                        }
-                        self.players[i].was_human = true;
-                        converted.push(i);
-                    }
+            if let PlayerSlotType::Human = self.players[i].slot_type
+                && let Some(dc_at) = self.players[i].disconnected_at
+                && dc_at.elapsed() >= timeout
+            {
+                self.players[i].slot_type = PlayerSlotType::Bot {
+                    strategy: "Random".to_string(),
+                };
+                if !self.players[i].name.ends_with(" (Bot)") {
+                    self.players[i].name.push_str(" (Bot)");
                 }
+                self.players[i].was_human = true;
+                converted.push(i);
             }
         }
         if !converted.is_empty() {
@@ -691,10 +690,10 @@ impl Room {
         if self.phase != RoomPhase::Lobby {
             return Err(ServerError::NotInLobby);
         }
-        if let Some(s) = secs {
-            if !(10..=300).contains(&s) {
-                return Err(ServerError::InvalidDisconnectTimeout);
-            }
+        if let Some(s) = secs
+            && !(10..=300).contains(&s)
+        {
+            return Err(ServerError::InvalidDisconnectTimeout);
         }
         self.disconnect_bot_timeout_secs = secs;
         self.touch();

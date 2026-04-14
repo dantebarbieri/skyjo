@@ -37,6 +37,10 @@ pub async fn handle_ws(
         room_guard.players[player_index].connected = true;
         room_guard.players[player_index].ip = Some(client_ip);
         room_guard.players[player_index].disconnected_at = None;
+
+        // If this player was converted to a bot while disconnected, convert back to human
+        let was_reconverted = room_guard.reconnect_bot_to_human(player_index);
+
         room_guard.touch();
 
         // Send initial state
@@ -67,6 +71,18 @@ pub async fn handle_ws(
                 let _ = room_guard
                     .broadcast_tx
                     .send((i, ServerMessage::PlayerReconnected { player_index }));
+            }
+        }
+
+        // If reconverted from bot, broadcast updated lobby/game state so others see the name change
+        if was_reconverted {
+            match room_guard.phase {
+                crate::room::RoomPhase::InGame => {
+                    room_guard.broadcast_game_state();
+                }
+                _ => {
+                    room_guard.broadcast_lobby_state();
+                }
             }
         }
 
@@ -155,21 +171,57 @@ pub async fn handle_ws(
             });
         }
 
-        // Schedule auto-kick check for this player
+        // Schedule auto-kick or bot-conversion check for this player
         {
             let room_clone = room.clone();
             let state_ref = state.clone();
+            let timeout = room_guard.effective_disconnect_bot_timeout();
             tokio::spawn(async move {
-                tokio::time::sleep(Duration::from_secs(60)).await;
+                tokio::time::sleep(timeout).await;
                 let mut room_guard = room_clone.lock().await;
-                let kicked = room_guard.auto_kick_disconnected(Duration::from_secs(60));
-                for (_, token) in &kicked {
-                    if let Some(t) = token {
-                        state_ref.lobby.sessions.remove(t);
+                match room_guard.phase {
+                    crate::room::RoomPhase::InGame => {
+                        // Convert disconnected players to bots instead of kicking
+                        let converted = room_guard.convert_disconnected_to_bots(timeout);
+                        for &slot in &converted {
+                            let name = room_guard.players[slot].name.clone();
+                            // Broadcast conversion notification to all connected players
+                            for (i, p) in room_guard.players.iter().enumerate() {
+                                if p.connected {
+                                    let _ = room_guard.broadcast_tx.send((
+                                        i,
+                                        ServerMessage::PlayerConvertedToBot {
+                                            slot,
+                                            name: name.clone(),
+                                        },
+                                    ));
+                                }
+                            }
+                        }
+                        if !converted.is_empty() {
+                            room_guard.broadcast_game_state();
+                            // If it's now a bot's turn, run bot turns
+                            if room_guard.is_current_player_bot() {
+                                drop(room_guard);
+                                let room_clone2 = room_clone.clone();
+                                tokio::spawn(async move {
+                                    run_bot_turns(room_clone2).await;
+                                });
+                            }
+                        }
                     }
-                }
-                if !kicked.is_empty() {
-                    room_guard.broadcast_lobby_state();
+                    _ => {
+                        // In Lobby or GameOver, kick as before
+                        let kicked = room_guard.auto_kick_disconnected(timeout);
+                        for (_, token) in &kicked {
+                            if let Some(t) = token {
+                                state_ref.lobby.sessions.remove(t);
+                            }
+                        }
+                        if !kicked.is_empty() {
+                            room_guard.broadcast_lobby_state();
+                        }
+                    }
                 }
             });
         }
@@ -452,6 +504,22 @@ async fn handle_client_message(
             }
 
             match room_guard.set_turn_timer(secs) {
+                Ok(()) => {
+                    room_guard.broadcast_lobby_state();
+                    None
+                }
+                Err(e) => Some(error_msg(e)),
+            }
+        }
+
+        ClientMessage::SetDisconnectTimeout { secs } => {
+            let mut room_guard = room.lock().await;
+
+            if player_index != room_guard.creator {
+                return Some(error_msg(ServerError::NotHost));
+            }
+
+            match room_guard.set_disconnect_bot_timeout(secs) {
                 Ok(()) => {
                     room_guard.broadcast_lobby_state();
                     None
