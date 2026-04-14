@@ -62,7 +62,14 @@ impl Lobby {
         let token = SessionToken::new();
         let player_index = 0;
 
-        let mut room = Room::new(code.clone(), player_name, num_players, rules, genetic_games_trained, genetic_generation);
+        let mut room = Room::new(
+            code.clone(),
+            player_name,
+            num_players,
+            rules,
+            genetic_games_trained,
+            genetic_generation,
+        );
         room.players[player_index].session_token = Some(token.clone());
 
         let shared = Arc::new(Mutex::new(room));
@@ -79,11 +86,7 @@ impl Lobby {
         code: &str,
         player_name: String,
     ) -> Result<(SessionToken, usize), String> {
-        let room_ref = self
-            .rooms
-            .get(code)
-            .ok_or("Room not found")?
-            .clone();
+        let room_ref = self.rooms.get(code).ok_or("Room not found")?.clone();
 
         let mut room = room_ref.lock().await;
 

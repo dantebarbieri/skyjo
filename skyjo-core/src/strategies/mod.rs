@@ -7,8 +7,8 @@ pub mod greedy;
 pub mod mimic;
 pub mod random;
 pub mod rusher;
-pub mod statistician;
 pub mod saboteur;
+pub mod statistician;
 pub mod survivor;
 
 pub use clearer::ClearerStrategy;

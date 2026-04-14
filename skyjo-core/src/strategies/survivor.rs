@@ -1,6 +1,6 @@
-use rand::seq::IndexedRandom;
-use rand::prelude::SliceRandom;
 use rand::RngCore;
+use rand::prelude::SliceRandom;
+use rand::seq::IndexedRandom;
 
 use crate::card::{CardValue, VisibleSlot};
 use crate::strategy::{
@@ -241,13 +241,11 @@ impl Strategy for SurvivorStrategy {
             }
             DangerLevel::High => {
                 // Keep only if drawn <= 0 or replaces a revealed card >= 8
-                drawn_card <= 0
-                    || highest_revealed_at_least(&view.my_board, 8).is_some()
+                drawn_card <= 0 || highest_revealed_at_least(&view.my_board, 8).is_some()
             }
             DangerLevel::Critical => {
                 // Keep only if drawn <= 0 or replaces a revealed card >= 10
-                drawn_card <= 0
-                    || highest_revealed_at_least(&view.my_board, 10).is_some()
+                drawn_card <= 0 || highest_revealed_at_least(&view.my_board, 10).is_some()
             }
         };
 
@@ -305,8 +303,8 @@ impl Strategy for SurvivorStrategy {
         let danger = danger_level(view.cumulative_scores[view.my_index]);
 
         let min_diff = match danger {
-            DangerLevel::Low => 1,    // any improvement
-            DangerLevel::High => 5,   // significant improvement only
+            DangerLevel::Low => 1,      // any improvement
+            DangerLevel::High => 5,     // significant improvement only
             DangerLevel::Critical => 8, // large improvement only
         };
 

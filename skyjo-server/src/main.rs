@@ -10,11 +10,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use axum::Router;
 use axum::extract::{ConnectInfo, Path, Query, State, WebSocketUpgrade};
 use axum::http::StatusCode;
 use axum::response::{Json, Response};
 use axum::routing::{get, post};
-use axum::Router;
 use clap::Parser;
 use serde::Deserialize;
 use tokio::sync::Mutex;
@@ -78,8 +78,8 @@ async fn main() {
         loop {
             interval.tick().await;
             cleanup_state.lobby.cleanup_stale_rooms(
-                Duration::from_secs(300),  // 5 min after game over
-                Duration::from_secs(600),  // 10 min after all disconnect
+                Duration::from_secs(300), // 5 min after game over
+                Duration::from_secs(600), // 10 min after all disconnect
             );
         }
     });
@@ -92,16 +92,22 @@ async fn main() {
         .route("/rooms/{code}/ws", get(ws_upgrade))
         .route("/genetic/model", get(genetic_model))
         .route("/genetic/train", post(genetic_train))
+        .route("/genetic/stop", post(genetic_stop))
+        .route("/genetic/reset", post(genetic_reset))
+        .route("/genetic/load", post(genetic_load))
         .route("/genetic/status", get(genetic_status))
         .route("/genetic/saved", get(genetic_saved_list).post(genetic_save))
         .route("/genetic/saved/import", post(genetic_import))
-        .route("/genetic/saved/{name}", axum::routing::delete(genetic_saved_delete))
+        .route(
+            "/genetic/saved/{name}",
+            axum::routing::delete(genetic_saved_delete),
+        )
         .route("/genetic/saved/{name}/model", get(genetic_saved_model));
 
     // SPA fallback: serve index.html for any non-file route
     let index_path = args.static_dir.join("index.html");
-    let static_service = ServeDir::new(&args.static_dir)
-        .not_found_service(ServeFile::new(&index_path));
+    let static_service =
+        ServeDir::new(&args.static_dir).not_found_service(ServeFile::new(&index_path));
 
     let app = Router::new()
         .nest("/api", api_routes)
@@ -117,9 +123,12 @@ async fn main() {
         .await
         .expect("Failed to bind");
 
-    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
-        .await
-        .expect("Server error");
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    .expect("Server error");
 }
 
 // --- REST Handlers ---
@@ -134,7 +143,13 @@ async fn create_room(
     };
     let (code, token, player_index) = state
         .lobby
-        .create_room(req.player_name, req.num_players, req.rules, genetic_games, genetic_gen)
+        .create_room(
+            req.player_name,
+            req.num_players,
+            req.rules,
+            genetic_games,
+            genetic_gen,
+        )
         .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
 
     Ok(Json(CreateRoomResponse {
@@ -205,10 +220,10 @@ async fn ws_upgrade(
     ws: WebSocketUpgrade,
 ) -> Result<Response, (StatusCode, String)> {
     // Authenticate session token
-    let (room_code, player_index) = state
-        .lobby
-        .get_session(&query.token)
-        .ok_or((StatusCode::UNAUTHORIZED, "Invalid session token".to_string()))?;
+    let (room_code, player_index) = state.lobby.get_session(&query.token).ok_or((
+        StatusCode::UNAUTHORIZED,
+        "Invalid session token".to_string(),
+    ))?;
 
     if room_code != code {
         return Err((
@@ -242,32 +257,72 @@ async fn ws_upgrade(
 
 // --- Genetic API handlers ---
 
-async fn genetic_model(
-    State(state): State<AppState>,
-) -> Json<genetic::GeneticModelData> {
+async fn genetic_model(State(state): State<AppState>) -> Json<genetic::GeneticModelData> {
     let s = state.genetic.lock().await;
     Json(s.model_data())
 }
 
 #[derive(Deserialize)]
-struct TrainRequest {
-    generations: usize,
+#[serde(tag = "mode")]
+enum TrainRequest {
+    #[serde(rename = "generations")]
+    ForGenerations { generations: usize },
+    #[serde(rename = "until_generation")]
+    UntilGeneration { target_generation: usize },
+    #[serde(rename = "until_fitness")]
+    UntilFitness {
+        target_fitness: f64,
+        max_generations: Option<usize>,
+    },
 }
 
 async fn genetic_train(
     State(state): State<AppState>,
     Json(req): Json<TrainRequest>,
 ) -> Result<Json<genetic::TrainingStatus>, (StatusCode, String)> {
-    let generations = req.generations.min(10000); // cap at 10k
-
     let mut s = state.genetic.lock().await;
     if s.is_training {
         return Ok(Json(s.status()));
     }
+
+    let (generations, mode, target_fitness) = match req {
+        TrainRequest::ForGenerations { generations } => {
+            (generations.min(10_000), "generations".to_string(), 0.0)
+        }
+        TrainRequest::UntilGeneration { target_generation } => {
+            let current = s.generation;
+            if target_generation <= current {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    format!(
+                        "Target generation {target_generation} must be greater than current generation {current}"
+                    ),
+                ));
+            }
+            let gens = (target_generation - current).min(10_000);
+            (gens, "until_generation".to_string(), 0.0)
+        }
+        TrainRequest::UntilFitness {
+            target_fitness,
+            max_generations,
+        } => {
+            let cap = max_generations.unwrap_or(100_000).min(100_000);
+            (cap, "until_fitness".to_string(), target_fitness)
+        }
+    };
+
     s.is_training = true;
     s.training_start_generation = s.generation;
     s.training_target_generation = s.generation + generations;
+    s.training_mode = mode;
+    s.training_target_fitness = target_fitness;
+    s.training_start_fitness = if s.best_fitness.is_finite() {
+        s.best_fitness
+    } else {
+        0.0
+    };
     s.training_started_at = Some(std::time::Instant::now());
+    s.training_last_gen_elapsed_ms = 0;
     let status = s.status();
     drop(s);
 
@@ -279,9 +334,49 @@ async fn genetic_train(
     Ok(Json(status))
 }
 
-async fn genetic_status(
+async fn genetic_stop(State(state): State<AppState>) -> Json<genetic::TrainingStatus> {
+    let mut s = state.genetic.lock().await;
+    if s.is_training {
+        s.is_training = false;
+        // training_started_at is cleared by the training loop when it detects is_training=false
+    }
+    Json(s.status())
+}
+
+async fn genetic_reset(
     State(state): State<AppState>,
-) -> Json<genetic::TrainingStatus> {
+) -> Result<Json<genetic::TrainingStatus>, (StatusCode, String)> {
+    let mut s = state.genetic.lock().await;
+    if s.is_training {
+        return Err((
+            StatusCode::CONFLICT,
+            "Cannot reset while training is in progress. Stop training first.".to_string(),
+        ));
+    }
+    s.reset();
+    Ok(Json(s.status()))
+}
+
+async fn genetic_load(
+    State(state): State<AppState>,
+    Json(req): Json<SaveRequest>,
+) -> Result<Json<genetic::TrainingStatus>, (StatusCode, String)> {
+    let mut s = state.genetic.lock().await;
+    if s.is_training {
+        return Err((
+            StatusCode::CONFLICT,
+            "Cannot load while training is in progress. Stop training first.".to_string(),
+        ));
+    }
+    let name = req
+        .name
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, "name is required".to_string()))?;
+    s.load_saved(&name)
+        .map_err(|e| (StatusCode::NOT_FOUND, e))?;
+    Ok(Json(s.status()))
+}
+
+async fn genetic_status(State(state): State<AppState>) -> Json<genetic::TrainingStatus> {
     let s = state.genetic.lock().await;
     Json(s.status())
 }
@@ -325,6 +420,7 @@ struct ImportRequest {
     generation: Option<usize>,
     total_games_trained: Option<usize>,
     best_fitness: Option<f64>,
+    lineage_hash: Option<String>,
 }
 
 async fn genetic_import(
@@ -338,6 +434,7 @@ async fn genetic_import(
         req.generation.unwrap_or(0),
         req.total_games_trained.unwrap_or(0),
         req.best_fitness.unwrap_or(0.0),
+        req.lineage_hash,
     )
     .map(Json)
     .map_err(|e| (StatusCode::BAD_REQUEST, e))

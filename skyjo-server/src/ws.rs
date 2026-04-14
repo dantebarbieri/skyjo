@@ -37,27 +37,27 @@ pub async fn handle_ws(
                     state: room_guard.lobby_state(),
                 }
             }
-            crate::room::RoomPhase::InGame => {
-                match room_guard.get_player_state(player_index) {
-                    Ok(state) => {
-                        let turn_deadline_secs = room_guard.turn_deadline_secs();
-                        ServerMessage::GameState { state, turn_deadline_secs }
+            crate::room::RoomPhase::InGame => match room_guard.get_player_state(player_index) {
+                Ok(state) => {
+                    let turn_deadline_secs = room_guard.turn_deadline_secs();
+                    ServerMessage::GameState {
+                        state,
+                        turn_deadline_secs,
                     }
-                    Err(_) => ServerMessage::RoomState {
-                        state: room_guard.lobby_state(),
-                    },
                 }
-            }
+                Err(_) => ServerMessage::RoomState {
+                    state: room_guard.lobby_state(),
+                },
+            },
         };
         send_msg(&mut ws_tx, &msg).await;
 
         // Notify others of reconnection
         for (i, slot) in room_guard.players.iter().enumerate() {
             if i != player_index && slot.connected {
-                let _ = room_guard.broadcast_tx.send((
-                    i,
-                    ServerMessage::PlayerReconnected { player_index },
-                ));
+                let _ = room_guard
+                    .broadcast_tx
+                    .send((i, ServerMessage::PlayerReconnected { player_index }));
             }
         }
 
@@ -127,10 +127,9 @@ pub async fn handle_ws(
         // Notify others
         for (i, slot) in room_guard.players.iter().enumerate() {
             if i != player_index && slot.connected {
-                let _ = room_guard.broadcast_tx.send((
-                    i,
-                    ServerMessage::PlayerLeft { player_index },
-                ));
+                let _ = room_guard
+                    .broadcast_tx
+                    .send((i, ServerMessage::PlayerLeft { player_index }));
             }
         }
 

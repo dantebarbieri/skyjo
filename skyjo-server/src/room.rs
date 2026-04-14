@@ -2,18 +2,16 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use rand::Rng;
-use tokio::sync::{broadcast, Mutex};
+use tokio::sync::{Mutex, broadcast};
 
 use skyjo_core::{
     ClearerStrategy, DefensiveStrategy, GamblerStrategy, GeneticStrategy, GreedyStrategy,
-    InteractiveGame, InteractiveGameState, MimicStrategy, PlayerAction, RandomStrategy,
-    RusherStrategy, Rules, SaboteurStrategy, StandardRules, StatisticianStrategy, Strategy,
+    InteractiveGame, InteractiveGameState, MimicStrategy, PlayerAction, RandomStrategy, Rules,
+    RusherStrategy, SaboteurStrategy, StandardRules, StatisticianStrategy, Strategy,
     SurvivorStrategy,
 };
 
-use crate::messages::{
-    LobbyPlayer, PlayerSlotType, RoomLobbyState, ServerMessage,
-};
+use crate::messages::{LobbyPlayer, PlayerSlotType, RoomLobbyState, ServerMessage};
 use crate::session::SessionToken;
 
 /// Room lifecycle state.
@@ -66,7 +64,14 @@ pub struct Room {
 }
 
 impl Room {
-    pub fn new(code: String, creator_name: String, num_players: usize, rules: Option<String>, genetic_games_trained: usize, genetic_generation: usize) -> Self {
+    pub fn new(
+        code: String,
+        creator_name: String,
+        num_players: usize,
+        rules: Option<String>,
+        genetic_games_trained: usize,
+        genetic_generation: usize,
+    ) -> Self {
         let (broadcast_tx, _) = broadcast::channel(256);
 
         let rules_name = rules.unwrap_or_else(|| "Standard".to_string());
@@ -138,11 +143,7 @@ impl Room {
     }
 
     /// Configure a player slot (creator only).
-    pub fn configure_slot(
-        &mut self,
-        slot: usize,
-        player_type: &str,
-    ) -> Result<(), String> {
+    pub fn configure_slot(&mut self, slot: usize, player_type: &str) -> Result<(), String> {
         if slot >= self.num_players {
             return Err("Invalid slot".to_string());
         }
@@ -267,9 +268,7 @@ impl Room {
             let game = self.game.as_mut().ok_or("No active game")?;
             let current = game.current_player_index().ok_or("No active player")?;
             let strategy = RandomStrategy;
-            let action = game
-                .get_bot_action(&strategy)
-                .map_err(|e| e.to_string())?;
+            let action = game.get_bot_action(&strategy).map_err(|e| e.to_string())?;
             game.apply_action(action.clone())
                 .map_err(|e| e.to_string())?;
             (current, action)
@@ -570,23 +569,26 @@ impl Room {
                 && dc_at.elapsed() >= timeout
                 && matches!(self.players[i].slot_type, PlayerSlotType::Human)
             {
-                    let token = self.players[i].session_token.as_ref().map(|t| t.to_string());
-                    // Send kick notification
-                    let _ = self.broadcast_tx.send((
-                        i,
-                        crate::messages::ServerMessage::Kicked {
-                            reason: "Disconnected for too long".to_string(),
-                        },
-                    ));
-                    self.players[i] = PlayerSlot {
-                        name: String::new(),
-                        slot_type: PlayerSlotType::Empty,
-                        session_token: None,
-                        connected: false,
-                        ip: None,
-                        disconnected_at: None,
-                    };
-                    kicked.push((i, token));
+                let token = self.players[i]
+                    .session_token
+                    .as_ref()
+                    .map(|t| t.to_string());
+                // Send kick notification
+                let _ = self.broadcast_tx.send((
+                    i,
+                    crate::messages::ServerMessage::Kicked {
+                        reason: "Disconnected for too long".to_string(),
+                    },
+                ));
+                self.players[i] = PlayerSlot {
+                    name: String::new(),
+                    slot_type: PlayerSlotType::Empty,
+                    session_token: None,
+                    connected: false,
+                    ip: None,
+                    disconnected_at: None,
+                };
+                kicked.push((i, token));
             }
         }
         if !kicked.is_empty() {
@@ -622,7 +624,8 @@ impl Room {
             .enumerate()
             .map(|(i, p)| {
                 // For human players (not creator), check if they share an IP with the host
-                let shares_ip = if i != self.creator && matches!(p.slot_type, PlayerSlotType::Human) {
+                let shares_ip = if i != self.creator && matches!(p.slot_type, PlayerSlotType::Human)
+                {
                     match (&p.ip, creator_ip) {
                         (Some(pip), Some(cip)) => Some(pip.as_str() == cip),
                         _ => None,
@@ -681,7 +684,10 @@ impl Room {
                 let state = game.get_player_state(i);
                 let _ = self.broadcast_tx.send((
                     i,
-                    ServerMessage::GameState { state, turn_deadline_secs: deadline },
+                    ServerMessage::GameState {
+                        state,
+                        turn_deadline_secs: deadline,
+                    },
                 ));
             }
         }
@@ -689,12 +695,7 @@ impl Room {
 
     /// Broadcast a message with per-player state to all connected human players.
     /// `make_msg` receives the player index and their filtered game state.
-    pub fn broadcast_action(
-        &self,
-        player: usize,
-        action: &PlayerAction,
-        is_bot: bool,
-    ) {
+    pub fn broadcast_action(&self, player: usize, action: &PlayerAction, is_bot: bool) {
         let game = match &self.game {
             Some(g) => g,
             None => return,
@@ -726,11 +727,7 @@ impl Room {
     }
 
     /// Broadcast a timeout action to all connected human players.
-    pub fn broadcast_timeout_action(
-        &self,
-        player: usize,
-        action: &PlayerAction,
-    ) {
+    pub fn broadcast_timeout_action(&self, player: usize, action: &PlayerAction) {
         let game = match &self.game {
             Some(g) => g,
             None => return,
@@ -788,7 +785,10 @@ fn make_strategy(
             let genome = genetic_genome
                 .ok_or("Genetic strategy requires a trained model")?
                 .clone();
-            Ok(Box::new(GeneticStrategy::new(genome, genetic_games_trained)))
+            Ok(Box::new(GeneticStrategy::new(
+                genome,
+                genetic_games_trained,
+            )))
         }
         s if s.starts_with("Genetic:") => {
             // Specific saved generation: "Genetic:Gen 50"
@@ -796,7 +796,10 @@ fn make_strategy(
             let genome = genetic_genome
                 .ok_or("Saved genetic generation not found")?
                 .clone();
-            Ok(Box::new(GeneticStrategy::new(genome, genetic_games_trained)))
+            Ok(Box::new(GeneticStrategy::new(
+                genome,
+                genetic_games_trained,
+            )))
         }
         _ => Err(format!("Unknown strategy: {name}")),
     }

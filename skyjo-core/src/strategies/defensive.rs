@@ -1,6 +1,6 @@
-use rand::seq::IndexedRandom;
-use rand::prelude::SliceRandom;
 use rand::RngCore;
+use rand::prelude::SliceRandom;
+use rand::seq::IndexedRandom;
 
 use crate::card::{CardValue, VisibleSlot};
 use crate::strategy::{
@@ -8,9 +8,7 @@ use crate::strategy::{
     PhaseDescription, PriorityRule, Strategy, StrategyDescription, StrategyView,
 };
 
-use super::common::{
-    card_usefulness_to_player, column_analysis, next_player_board,
-};
+use super::common::{card_usefulness_to_player, column_analysis, next_player_board};
 
 /// A defensive strategy that focuses on avoiding helping the next player.
 ///
@@ -184,9 +182,7 @@ impl Strategy for DefensiveStrategy {
             {
                 // Displaced card goes to discard — evaluate how useful it is to next player
                 let displaced_usefulness = next_board
-                    .map(|b| {
-                        card_usefulness_to_player(b, view.num_rows, view.num_cols, *v)
-                    })
+                    .map(|b| card_usefulness_to_player(b, view.num_rows, view.num_cols, *v))
                     .unwrap_or(0.0);
                 keep_candidates.push((i, *v, displaced_usefulness));
             }
@@ -240,9 +236,7 @@ impl Strategy for DefensiveStrategy {
                 VisibleSlot::Revealed(v) => {
                     let improvement = (*v as i32) - (drawn_card as i32);
                     let displaced_usefulness = next_board
-                        .map(|b| {
-                            card_usefulness_to_player(b, view.num_rows, view.num_cols, *v)
-                        })
+                        .map(|b| card_usefulness_to_player(b, view.num_rows, view.num_cols, *v))
                         .unwrap_or(0.0);
                     candidates.push((i, improvement, displaced_usefulness));
                 }
@@ -314,10 +308,7 @@ fn pick_hidden_for_column_progress(
 mod tests {
     use super::*;
 
-    fn make_view(
-        my_board: Vec<VisibleSlot>,
-        opponent_board: Vec<VisibleSlot>,
-    ) -> StrategyView {
+    fn make_view(my_board: Vec<VisibleSlot>, opponent_board: Vec<VisibleSlot>) -> StrategyView {
         StrategyView {
             my_index: 0,
             my_board,
@@ -375,7 +366,7 @@ mod tests {
         // 9 is not very useful to opponent (high value), so should discard
         match action {
             DeckDrawAction::DiscardAndFlip(_) => {} // Expected
-            DeckDrawAction::Keep(_) => {} // Also acceptable if keeping on hidden
+            DeckDrawAction::Keep(_) => {}           // Also acceptable if keeping on hidden
         }
     }
 
@@ -468,7 +459,10 @@ mod tests {
         let action = strategy.choose_deck_draw_action(&view, 3, &mut rng);
         match action {
             DeckDrawAction::Keep(pos) => {
-                assert_eq!(pos, 0, "Should replace the 10, not the 7 (7 helps opponent)");
+                assert_eq!(
+                    pos, 0,
+                    "Should replace the 10, not the 7 (7 helps opponent)"
+                );
             }
             _ => panic!("Should keep the 3"),
         }

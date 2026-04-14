@@ -6,38 +6,23 @@ use skyjo_core::interactive::{InteractiveGameState, PlayerAction};
 #[serde(tag = "type", deny_unknown_fields)]
 pub enum ClientMessage {
     /// Configure a player slot in the lobby (creator only).
-    ConfigureSlot {
-        slot: usize,
-        player_type: String,
-    },
+    ConfigureSlot { slot: usize, player_type: String },
     /// Change the number of player slots (creator only, lobby phase).
-    SetNumPlayers {
-        num_players: usize,
-    },
+    SetNumPlayers { num_players: usize },
     /// Change the rule set (creator only, lobby phase).
-    SetRules {
-        rules: String,
-    },
+    SetRules { rules: String },
     /// Kick a player from the room (creator only).
-    KickPlayer {
-        slot: usize,
-    },
+    KickPlayer { slot: usize },
     /// Ban a player from the room by IP (creator only). IP is never exposed.
-    BanPlayer {
-        slot: usize,
-    },
+    BanPlayer { slot: usize },
     /// Promote a player to host (creator only).
-    PromoteHost {
-        slot: usize,
-    },
+    PromoteHost { slot: usize },
     /// Return to lobby after game ends (preserves room and players).
     ReturnToLobby,
     /// Start the game (creator only).
     StartGame,
     /// Submit a game action. The server derives the player from the session.
-    Action {
-        action: PlayerAction,
-    },
+    Action { action: PlayerAction },
     /// Continue to next round (any player can trigger).
     ContinueRound,
     /// Start a new game after game over (creator only).
@@ -56,9 +41,7 @@ pub enum ClientMessage {
 #[serde(tag = "type")]
 pub enum ServerMessage {
     /// Current lobby state (sent on join and on changes).
-    RoomState {
-        state: RoomLobbyState,
-    },
+    RoomState { state: RoomLobbyState },
     /// Full game state update for this player's perspective.
     GameState {
         state: InteractiveGameState,
@@ -89,27 +72,15 @@ pub enum ServerMessage {
         state: InteractiveGameState,
     },
     /// A player joined the room.
-    PlayerJoined {
-        player_index: usize,
-        name: String,
-    },
+    PlayerJoined { player_index: usize, name: String },
     /// A player disconnected.
-    PlayerLeft {
-        player_index: usize,
-    },
+    PlayerLeft { player_index: usize },
     /// A player reconnected.
-    PlayerReconnected {
-        player_index: usize,
-    },
+    PlayerReconnected { player_index: usize },
     /// You were kicked from the room.
-    Kicked {
-        reason: String,
-    },
+    Kicked { reason: String },
     /// An error in response to a client message.
-    Error {
-        code: String,
-        message: String,
-    },
+    Error { code: String, message: String },
     /// Keepalive pong.
     Pong,
 }

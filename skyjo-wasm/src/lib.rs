@@ -4,10 +4,11 @@ use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
 
 use skyjo_core::{
-    AggregateStats, ClearerStrategy, DefensiveStrategy, GamblerStrategy, Game, GameHistory,
-    GameStats, GeneticStrategy, GreedyStrategy, InteractiveGame, MimicStrategy, PlayerAction,
-    RandomStrategy, Rules, RusherStrategy, SaboteurStrategy, Simulator, SimulatorConfig,
-    StandardRules, StatisticianStrategy, Strategy, SurvivorStrategy, common_concepts, GENOME_SIZE,
+    AggregateStats, ClearerStrategy, DefensiveStrategy, GENOME_SIZE, GamblerStrategy, Game,
+    GameHistory, GameStats, GeneticStrategy, GreedyStrategy, InteractiveGame, MimicStrategy,
+    PlayerAction, RandomStrategy, Rules, RusherStrategy, SaboteurStrategy, Simulator,
+    SimulatorConfig, StandardRules, StatisticianStrategy, Strategy, SurvivorStrategy,
+    common_concepts,
 };
 
 #[derive(Deserialize)]
@@ -237,7 +238,20 @@ pub fn simulate_one_with_history(config_json: &str) -> String {
 #[wasm_bindgen]
 pub fn get_available_strategies() -> String {
     // Ordered by complexity: Trivial → Low → Medium → High
-    serde_json::to_string(&["Random", "Greedy", "Gambler", "Rusher", "Defensive", "Clearer", "Mimic", "Saboteur", "Survivor", "Statistician", "Genetic"]).unwrap()
+    serde_json::to_string(&[
+        "Random",
+        "Greedy",
+        "Gambler",
+        "Rusher",
+        "Defensive",
+        "Clearer",
+        "Mimic",
+        "Saboteur",
+        "Survivor",
+        "Statistician",
+        "Genetic",
+    ])
+    .unwrap()
 }
 
 #[wasm_bindgen]
@@ -251,7 +265,18 @@ pub fn get_available_rules() -> String {
 pub fn get_strategy_descriptions() -> String {
     to_json_or_error(|| {
         // Ordered by complexity: Trivial → Low → Medium → High
-        let names = ["Random", "Greedy", "Gambler", "Rusher", "Defensive", "Clearer", "Mimic", "Saboteur", "Survivor", "Statistician"];
+        let names = [
+            "Random",
+            "Greedy",
+            "Gambler",
+            "Rusher",
+            "Defensive",
+            "Clearer",
+            "Mimic",
+            "Saboteur",
+            "Survivor",
+            "Statistician",
+        ];
         let mut descriptions: Vec<_> = names
             .iter()
             .map(|n| make_strategy(n).map(|s| s.describe()))

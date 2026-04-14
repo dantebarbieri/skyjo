@@ -1,6 +1,6 @@
-use rand::seq::IndexedRandom;
-use rand::prelude::SliceRandom;
 use rand::RngCore;
+use rand::prelude::SliceRandom;
+use rand::seq::IndexedRandom;
 
 use crate::card::{CardValue, VisibleSlot};
 use crate::strategy::{
@@ -296,9 +296,7 @@ impl Strategy for StatisticianStrategy {
         // Discarding the drawn card: delta = 0 from the flip (hidden was avg, revealed is actual)
         // But we also consider: how useful is the drawn card to the next player?
         let drawn_usefulness = next_board
-            .map(|b| {
-                card_usefulness_to_player(b, view.num_rows, view.num_cols, drawn_card)
-            })
+            .map(|b| card_usefulness_to_player(b, view.num_rows, view.num_cols, drawn_card))
             .unwrap_or(0.0);
 
         if let Some(best) = best_keep {
@@ -354,12 +352,7 @@ impl Strategy for StatisticianStrategy {
                     delta += column_clear_bonus(view, i, drawn_card, avg);
                     let usefulness = next_board
                         .map(|b| {
-                            card_usefulness_to_player(
-                                b,
-                                view.num_rows,
-                                view.num_cols,
-                                *old_val,
-                            )
+                            card_usefulness_to_player(b, view.num_rows, view.num_cols, *old_val)
                         })
                         .unwrap_or(0.0);
                     options.push((i, delta, usefulness));
@@ -377,10 +370,7 @@ impl Strategy for StatisticianStrategy {
         options.sort_by(|a, b| {
             b.1.partial_cmp(&a.1)
                 .unwrap_or(std::cmp::Ordering::Equal)
-                .then(
-                    a.2.partial_cmp(&b.2)
-                        .unwrap_or(std::cmp::Ordering::Equal),
-                )
+                .then(a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal))
         });
 
         options.first().map(|o| o.0).unwrap_or(0)
@@ -662,7 +652,10 @@ mod tests {
         // So bonus should actually be positive since we're placing the completing card
         // Let me reconsider: the 5 is being placed, so hidden_count in the rest of col is 0
         // All other slots are Revealed(5), so all_match=true, hidden_count=0 → clear triggers!
-        assert!(bonus > 0.0, "Should recognize clear completes by placing card");
+        assert!(
+            bonus > 0.0,
+            "Should recognize clear completes by placing card"
+        );
     }
 
     #[test]

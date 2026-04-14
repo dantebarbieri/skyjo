@@ -11,10 +11,7 @@ pub enum SkyjoError {
     EmptyDiscardPile,
     GameAlreadyOver,
     InvalidAction(String),
-    NotYourTurn {
-        expected: usize,
-        got: usize,
-    },
+    NotYourTurn { expected: usize, got: usize },
 }
 
 impl fmt::Display for SkyjoError {

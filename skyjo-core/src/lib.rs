@@ -18,14 +18,14 @@ pub use interactive::{ActionNeeded, InteractiveGame, InteractiveGameState, Playe
 pub use rules::{Rules, StandardRules};
 pub use simulator::{AggregateStats, GameStats, Simulator, SimulatorConfig};
 pub use strategies::common::common_concepts;
+pub use strategies::genetic::{
+    self as genetic_nn, GENOME_SIZE, HIDDEN_SIZE, INPUT_GROUPS, INPUT_LABELS, INPUT_SIZE,
+    NeuralNetwork, OUTPUT_GROUPS, OUTPUT_LABELS, OUTPUT_SIZE,
+};
 pub use strategies::{
     ClearerStrategy, DefensiveStrategy, GamblerStrategy, GeneticStrategy, GreedyStrategy,
     MimicStrategy, RandomStrategy, RusherStrategy, SaboteurStrategy, StatisticianStrategy,
     SurvivorStrategy,
-};
-pub use strategies::genetic::{
-    self as genetic_nn, NeuralNetwork, GENOME_SIZE, HIDDEN_SIZE, INPUT_GROUPS, INPUT_LABELS,
-    INPUT_SIZE, OUTPUT_GROUPS, OUTPUT_LABELS, OUTPUT_SIZE,
 };
 pub use strategy::{
     Complexity, ConceptReference, DecisionLogic, DecisionNode, DeckDrawAction, DrawChoice, Phase,

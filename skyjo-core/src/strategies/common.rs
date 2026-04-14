@@ -113,7 +113,11 @@ pub fn total_unknown(view: &StrategyView) -> usize {
     let hidden_opp: usize = view
         .opponent_boards
         .iter()
-        .map(|b| b.iter().filter(|s| matches!(s, VisibleSlot::Hidden)).count())
+        .map(|b| {
+            b.iter()
+                .filter(|s| matches!(s, VisibleSlot::Hidden))
+                .count()
+        })
         .sum();
     view.deck_remaining + hidden_own + hidden_opp
 }
