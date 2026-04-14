@@ -1,13 +1,48 @@
 services:
-  skyjo:
-    build: .
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
     ports:
-      - "${PORT:-8080}:8080"
+      - "${PORT:-8080}:80"
+    depends_on:
+      - backend
     restart: unless-stopped
+
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    expose:
+      - "8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgres://skyjo:${DB_PASSWORD:-skyjo}@db:5432/skyjo
+      - SKYJO_JWT_SECRET=${JWT_SECRET:-}
+      - SKYJO_ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - SKYJO_ADMIN_PASSWORD=${ADMIN_PASSWORD:-Skyjo-Change-Me-1!}
+      - SKYJO_DATA_DIR=/var/lib/skyjo
     volumes:
       - skyjo-data:/var/lib/skyjo
+    restart: unless-stopped
+
+  db:
+    image: postgres:17-alpine
     environment:
-      - SKYJO_DATA_DIR=/var/lib/skyjo
+      - POSTGRES_DB=skyjo
+      - POSTGRES_USER=skyjo
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-skyjo}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U skyjo"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
 
 volumes:
   skyjo-data:
+  postgres-data:
