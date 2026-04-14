@@ -632,23 +632,26 @@ function NetworkDiagram({ model }: { model: GeneticModelData }) {
   const normalize = (w: number) => w / maxAbsWeight;
 
   const svgWidth = 900;
-  const inputHeight = inputGroups.length * 38;
-  const outputHeight = outputGroups.length * 38;
+  // Match computeLayout spacing: (count - 1) * spacing, starting at y=30
+  const spacing = Math.max(30, Math.min(38, 300 / Math.max(inputGroups.length, outputGroups.length)));
+  const inputHeight = (inputGroups.length - 1) * spacing;
+  const outputHeight = (outputGroups.length - 1) * spacing;
   const ioHeight = Math.max(inputHeight, outputHeight);
-  const hiddenBoxHeight = Math.min(140, ioHeight * 0.4); // hidden boxes are compact
-  const maxColHeight = ioHeight;
-  const inputYOffset = (maxColHeight - inputHeight) / 2;
-  const outputYOffset = (maxColHeight - outputHeight) / 2;
-  const svgHeight = maxColHeight + 40; // tight padding for legend
-  const inputX = 20;
-  const hidden1X = svgWidth * 0.33;
-  const hidden2X = svgWidth * 0.58;
-  const outputX = svgWidth - 20;
-  const centerY = maxColHeight / 2 + 10;
+  const topPadding = 30; // same as computeLayout's inputStartY base
+  const hiddenBoxHeight = Math.min(140, ioHeight * 0.4);
+  // Center of the I/O columns: topPadding + ioHeight / 2
+  const centerY = topPadding + ioHeight / 2;
   const hiddenBoxTop = centerY - hiddenBoxHeight / 2;
   const hiddenBoxBottom = centerY + hiddenBoxHeight / 2;
   const hidden1CenterY = centerY;
   const hidden2CenterY = centerY;
+  // SVG height: just enough for content + legend
+  const contentBottom = topPadding + ioHeight;
+  const svgHeight = contentBottom + 25; // 25px for legend below content
+  const inputX = 20;
+  const hidden1X = svgWidth * 0.33;
+  const hidden2X = svgWidth * 0.58;
+  const outputX = svgWidth - 20;
 
   const inputNodeCx = inputX + 155;
   const outputNodeCx = outputX - 155;
@@ -854,7 +857,7 @@ function NetworkDiagram({ model }: { model: GeneticModelData }) {
         ))}
 
         {/* Legend */}
-        <g transform={`translate(${svgWidth / 2 - 80}, ${svgHeight - 15})`}>
+        <g transform={`translate(${svgWidth / 2 - 80}, ${contentBottom + 12})`}>
           <line x1={0} y1={0} x2={20} y2={0} stroke="#3b82f6" strokeWidth={3} />
           <text x={24} y={4} fontSize={9} className="fill-current text-muted-foreground">Positive</text>
           <line x1={70} y1={0} x2={90} y2={0} stroke="rgb(85,85,85)" strokeWidth={3} />
