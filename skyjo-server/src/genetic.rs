@@ -759,6 +759,12 @@ pub async fn train_generations(
                 s.best_fitness = best_fitness;
             }
 
+            // Capture the first real fitness as the training start baseline
+            // (before training, best_fitness may be NEG_INFINITY → 0.0 placeholder)
+            if generation_i == 0 {
+                s.training_start_fitness = s.best_fitness;
+            }
+
             s.population = new_population;
             s.generation += 1;
             s.total_games_trained += games_played;
