@@ -111,7 +111,7 @@ describe('ConfigPanel', () => {
     const { props } = renderPanel();
     fireEvent.click(screen.getByText('Run Simulation'));
     expect(props.onStart).toHaveBeenCalledTimes(1);
-    const config = props.onStart.mock.calls[0][0];
+    const config = vi.mocked(props.onStart).mock.calls[0][0];
     expect(config.num_games).toBe(100);
     expect(config.seed).toBe(42);
     expect(config.strategies).toHaveLength(4);
@@ -122,7 +122,7 @@ describe('ConfigPanel', () => {
     const { props } = renderPanel();
     fireEvent.click(screen.getByText('Run & Save Histories'));
     expect(props.onStart).toHaveBeenCalledTimes(1);
-    expect(props.onStart.mock.calls[0][0].withHistories).toBe(true);
+    expect(vi.mocked(props.onStart).mock.calls[0][0].withHistories).toBe(true);
   });
 
   it('disables start buttons when simulation is running', () => {
