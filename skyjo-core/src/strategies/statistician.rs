@@ -2,7 +2,10 @@ use rand::seq::SliceRandom;
 use rand::RngCore;
 
 use crate::card::{CardValue, VisibleSlot};
-use crate::strategy::{DeckDrawAction, DrawChoice, Strategy, StrategyView};
+use crate::strategy::{
+    Complexity, ConceptReference, DecisionLogic, DecisionNode, DeckDrawAction, DrawChoice, Phase,
+    PhaseDescription, PriorityRule, Strategy, StrategyDescription, StrategyView,
+};
 
 use super::common::{
     average_unknown_value, card_usefulness_to_player, column_analysis, count_remaining,
@@ -24,6 +27,147 @@ pub struct StatisticianStrategy;
 impl Strategy for StatisticianStrategy {
     fn name(&self) -> &str {
         "Statistician"
+    }
+
+    fn describe(&self) -> StrategyDescription {
+        StrategyDescription {
+            name: "Statistician".into(),
+            summary: "Makes every decision using expected value (EV) calculations based on the remaining card distribution. Dynamically switches between \"go out\" mode (when winning) and \"reduce\" mode (when behind), and tiebreaks by denying useful cards to the next player.".into(),
+            complexity: Complexity::High,
+            strengths: vec![
+                "Mathematically optimal card-by-card decisions".into(),
+                "Uses card counting to track the remaining distribution".into(),
+                "Dynamically adjusts strategy based on relative position".into(),
+                "Abandons column clears when no remaining copies exist".into(),
+                "Tiebreaks marginal decisions by opponent denial".into(),
+            ],
+            weaknesses: vec![
+                "EV approximation for deck draws uses the average card, not the full distribution".into(),
+            ],
+            phases: vec![
+                PhaseDescription {
+                    phase: Phase::InitialFlips,
+                    label: "Initial Flips".into(),
+                    logic: DecisionLogic::Simple {
+                        text: "Random — no information to optimize on before any cards are revealed.".into(),
+                    },
+                },
+                PhaseDescription {
+                    phase: Phase::ChooseDraw,
+                    label: "Draw Decision".into(),
+                    logic: DecisionLogic::DecisionTree {
+                        root: DecisionNode::Condition {
+                            test: "Is the best EV delta from taking the discard significantly better than drawing from deck? (difference > 0.5)".into(),
+                            if_true: Box::new(DecisionNode::Action {
+                                action: "Take from discard pile".into(),
+                                detail: Some("The discard EV delta is the best score improvement from placing that specific card. The deck EV delta estimates the improvement from an average card, or 0 if discarding+flipping is better.".into()),
+                            }),
+                            if_false: Box::new(DecisionNode::Condition {
+                                test: "Is drawing from deck significantly better?".into(),
+                                if_true: Box::new(DecisionNode::Action {
+                                    action: "Draw from deck".into(),
+                                    detail: Some("The deck offers more flexibility: you can keep or discard what you draw.".into()),
+                                }),
+                                if_false: Box::new(DecisionNode::Action {
+                                    action: "Draw from deck (default tiebreaker)".into(),
+                                    detail: Some("When EV is roughly equal, deck draw is preferred because it offers the keep-or-discard option.".into()),
+                                }),
+                            }),
+                        },
+                    },
+                },
+                PhaseDescription {
+                    phase: Phase::DeckDrawAction,
+                    label: "After Drawing from Deck".into(),
+                    logic: DecisionLogic::DecisionTree {
+                        root: DecisionNode::Condition {
+                            test: "Is the best keep delta clearly positive? (> 0.5)".into(),
+                            if_true: Box::new(DecisionNode::Action {
+                                action: "Keep the card at the best position".into(),
+                                detail: Some("For each position, delta = old_value - drawn_card + column_clear_bonus. The column clear bonus is the sum of all cards in the column if placing this card completes the clear, but only if enough copies remain in the deck. Among equal-delta positions, prefers displacing cards least useful to the next player.".into()),
+                            }),
+                            if_false: Box::new(DecisionNode::Condition {
+                                test: "Is the keep delta marginal (between -0.5 and +0.5)?".into(),
+                                if_true: Box::new(DecisionNode::Condition {
+                                    test: "Would discarding the drawn card help the next player much more than displacing our card? (drawn usefulness > displaced usefulness + 3)".into(),
+                                    if_true: Box::new(DecisionNode::Action {
+                                        action: "Keep the card to deny the opponent".into(),
+                                        detail: Some("Absorbs a marginally useful card rather than leaving it on the discard pile for the opponent.".into()),
+                                    }),
+                                    if_false: Box::new(DecisionNode::Condition {
+                                        test: "In \"go out\" mode and hidden cards remain?".into(),
+                                        if_true: Box::new(DecisionNode::Action {
+                                            action: "Discard and flip a hidden card (prefer columns closest to full reveal)".into(),
+                                            detail: None,
+                                        }),
+                                        if_false: Box::new(DecisionNode::Action {
+                                            action: "Discard and flip a hidden card (prefer columns with partial matches)".into(),
+                                            detail: None,
+                                        }),
+                                    }),
+                                }),
+                                if_false: Box::new(DecisionNode::Condition {
+                                    test: "In \"go out\" mode and hidden cards remain?".into(),
+                                    if_true: Box::new(DecisionNode::Action {
+                                        action: "Discard and flip — prioritize revealing cards to go out".into(),
+                                        detail: None,
+                                    }),
+                                    if_false: Box::new(DecisionNode::Action {
+                                        action: "Discard and flip a hidden card (prefer columns with partial matches)".into(),
+                                        detail: None,
+                                    }),
+                                }),
+                            }),
+                        },
+                    },
+                },
+                PhaseDescription {
+                    phase: Phase::DiscardDrawPlacement,
+                    label: "After Drawing from Discard".into(),
+                    logic: DecisionLogic::PriorityList {
+                        rules: vec![
+                            PriorityRule {
+                                condition: "Position with highest EV delta (including column-clear bonus)".into(),
+                                action: "Place at that position".into(),
+                                detail: Some("Delta = old_value - drawn_card + column_clear_bonus. For hidden slots, old_value is the average unknown value.".into()),
+                            },
+                            PriorityRule {
+                                condition: "Tied EV delta between positions".into(),
+                                action: "Choose the position that displaces the card least useful to the next player".into(),
+                                detail: None,
+                            },
+                        ],
+                    },
+                },
+            ],
+            concepts: vec![
+                ConceptReference {
+                    id: "card_counting".into(),
+                    label: "Card Counting".into(),
+                    used_for: "Tracking which cards remain to compute accurate probabilities and detect when column clears are impossible.".into(),
+                },
+                ConceptReference {
+                    id: "average_unknown".into(),
+                    label: "Average Unknown Value".into(),
+                    used_for: "Estimating the value of hidden cards and the expected value of deck draws.".into(),
+                },
+                ConceptReference {
+                    id: "expected_score".into(),
+                    label: "Expected Score".into(),
+                    used_for: "Comparing scores with opponents to decide whether to enter \"go out\" mode.".into(),
+                },
+                ConceptReference {
+                    id: "column_analysis".into(),
+                    label: "Column Analysis".into(),
+                    used_for: "Computing column-clear bonuses and choosing which hidden cards to flip.".into(),
+                },
+                ConceptReference {
+                    id: "opponent_denial".into(),
+                    label: "Opponent Denial".into(),
+                    used_for: "Tiebreaking marginal decisions by choosing moves that least benefit the next player.".into(),
+                },
+            ],
+        }
     }
 
     fn choose_initial_flips(

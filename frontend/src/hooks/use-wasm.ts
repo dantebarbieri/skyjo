@@ -54,3 +54,12 @@ export function getRulesInfo(rulesName: string): Record<string, string> | null {
     return null;
   }
 }
+
+export function getStrategyDescriptions(): import('@/types').StrategyDescriptionsData | null {
+  if (!wasmModule) return null;
+  try {
+    return JSON.parse(wasmModule.get_strategy_descriptions());
+  } catch {
+    return null;
+  }
+}

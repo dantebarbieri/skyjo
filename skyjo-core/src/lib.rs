@@ -17,5 +17,44 @@ pub use history::GameHistory;
 pub use interactive::{ActionNeeded, InteractiveGame, InteractiveGameState, PlayerAction};
 pub use rules::{Rules, StandardRules};
 pub use simulator::{AggregateStats, GameStats, Simulator, SimulatorConfig};
+pub use strategies::common::common_concepts;
 pub use strategies::{ClearerStrategy, DefensiveStrategy, GreedyStrategy, RandomStrategy, StatisticianStrategy};
-pub use strategy::{DeckDrawAction, DrawChoice, Strategy, StrategyView};
+pub use strategy::{
+    Complexity, ConceptReference, DecisionLogic, DecisionNode, DeckDrawAction, DrawChoice, Phase,
+    PhaseDescription, PriorityRule, Strategy, StrategyDescription, StrategyView,
+};
+
+#[cfg(test)]
+mod describe_tests {
+    use super::*;
+
+    #[test]
+    fn all_strategies_describe_and_serialize() {
+        let strategies: Vec<Box<dyn Strategy>> = vec![
+            Box::new(RandomStrategy),
+            Box::new(GreedyStrategy),
+            Box::new(DefensiveStrategy),
+            Box::new(ClearerStrategy),
+            Box::new(StatisticianStrategy),
+        ];
+        for s in &strategies {
+            let desc = s.describe();
+            assert_eq!(desc.name, s.name());
+            assert!(!desc.summary.is_empty());
+            assert_eq!(desc.phases.len(), 4, "{} should have 4 phases", desc.name);
+            // Verify serialization round-trips
+            let json = serde_json::to_string(&desc).unwrap();
+            let parsed: StrategyDescription = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed.name, desc.name);
+        }
+    }
+
+    #[test]
+    fn common_concepts_serializes() {
+        let concepts = common_concepts();
+        assert!(concepts.len() >= 5);
+        let json = serde_json::to_string(&concepts).unwrap();
+        assert!(json.contains("card_counting"));
+        assert!(json.contains("average_unknown"));
+    }
+}

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import SkyjoCard from '@/components/skyjo-card';
@@ -108,6 +109,12 @@ function OverviewSection() {
             On each turn, you draw a card and decide where to place it or whether to flip a hidden
             card. When all of a player's cards are revealed, the round ends. The game continues
             until someone reaches 100 points — the player with the lowest total wins.
+          </p>
+          <p>
+            Want to learn how the bot strategies work?{' '}
+            <Link to="/rules/strategies" className="text-primary hover:underline font-medium">
+              View the Strategy Guide →
+            </Link>
           </p>
         </CardContent>
       </Card>

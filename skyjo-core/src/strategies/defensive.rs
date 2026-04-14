@@ -2,7 +2,10 @@ use rand::seq::SliceRandom;
 use rand::RngCore;
 
 use crate::card::{CardValue, VisibleSlot};
-use crate::strategy::{DeckDrawAction, DrawChoice, Strategy, StrategyView};
+use crate::strategy::{
+    Complexity, ConceptReference, DecisionLogic, DecisionNode, DeckDrawAction, DrawChoice, Phase,
+    PhaseDescription, PriorityRule, Strategy, StrategyDescription, StrategyView,
+};
 
 use super::common::{
     card_usefulness_to_player, column_analysis, next_player_board,
@@ -19,6 +22,109 @@ pub struct DefensiveStrategy;
 impl Strategy for DefensiveStrategy {
     fn name(&self) -> &str {
         "Defensive"
+    }
+
+    fn describe(&self) -> StrategyDescription {
+        StrategyDescription {
+            name: "Defensive".into(),
+            summary: "Balances personal improvement with opponent denial. Tracks the next player's board and avoids leaving useful cards on the discard pile for them.".into(),
+            complexity: Complexity::Medium,
+            strengths: vec![
+                "Actively hinders the next player".into(),
+                "Absorbs cards that would help opponents".into(),
+                "Prefers flipping in columns with partial matches".into(),
+            ],
+            weaknesses: vec![
+                "No card counting or EV calculations".into(),
+                "May sacrifice board quality to deny opponents".into(),
+            ],
+            phases: vec![
+                PhaseDescription {
+                    phase: Phase::InitialFlips,
+                    label: "Initial Flips".into(),
+                    logic: DecisionLogic::Simple {
+                        text: "Random — no information to optimize on before any cards are revealed.".into(),
+                    },
+                },
+                PhaseDescription {
+                    phase: Phase::ChooseDraw,
+                    label: "Draw Decision".into(),
+                    logic: DecisionLogic::PriorityList {
+                        rules: vec![
+                            PriorityRule {
+                                condition: "Discard top is ≤ 0".into(),
+                                action: "Take from discard pile".into(),
+                                detail: Some("Same as Greedy — low cards are always worth taking.".into()),
+                            },
+                            PriorityRule {
+                                condition: "Discard top < highest revealed card on board".into(),
+                                action: "Take from discard pile".into(),
+                                detail: None,
+                            },
+                            PriorityRule {
+                                condition: "Otherwise".into(),
+                                action: "Draw from deck".into(),
+                                detail: None,
+                            },
+                        ],
+                    },
+                },
+                PhaseDescription {
+                    phase: Phase::DeckDrawAction,
+                    label: "After Drawing from Deck".into(),
+                    logic: DecisionLogic::DecisionTree {
+                        root: DecisionNode::Condition {
+                            test: "Does the drawn card improve the board? (lower than a revealed card)".into(),
+                            if_true: Box::new(DecisionNode::Action {
+                                action: "Keep it — replace the highest revealed card, preferring to displace cards least useful to the next player".into(),
+                                detail: Some("Among positions that improve score equally, picks the one whose displaced card helps the opponent least.".into()),
+                            }),
+                            if_false: Box::new(DecisionNode::Condition {
+                                test: "Is the drawn card very useful to the next player (usefulness > 5)?".into(),
+                                if_true: Box::new(DecisionNode::Action {
+                                    action: "Absorb it — keep the card on a hidden slot to deny the opponent".into(),
+                                    detail: Some("Accepts a card that doesn't improve our board to prevent the opponent from getting it off the discard pile.".into()),
+                                }),
+                                if_false: Box::new(DecisionNode::Action {
+                                    action: "Discard the drawn card and flip a hidden card (preferring columns with partial matches)".into(),
+                                    detail: None,
+                                }),
+                            }),
+                        },
+                    },
+                },
+                PhaseDescription {
+                    phase: Phase::DiscardDrawPlacement,
+                    label: "After Drawing from Discard".into(),
+                    logic: DecisionLogic::PriorityList {
+                        rules: vec![
+                            PriorityRule {
+                                condition: "A revealed card can be improved".into(),
+                                action: "Replace the best improvement target, tiebreaking by displacing cards least useful to the next player".into(),
+                                detail: Some("Sorts candidates by improvement first, then by how much the displaced card would help the opponent.".into()),
+                            },
+                            PriorityRule {
+                                condition: "No improvement available".into(),
+                                action: "Replace a hidden card".into(),
+                                detail: None,
+                            },
+                        ],
+                    },
+                },
+            ],
+            concepts: vec![
+                ConceptReference {
+                    id: "opponent_denial".into(),
+                    label: "Opponent Denial".into(),
+                    used_for: "Scoring how useful each card is to the next player to decide which card to leave on the discard pile.".into(),
+                },
+                ConceptReference {
+                    id: "column_analysis".into(),
+                    label: "Column Analysis".into(),
+                    used_for: "When flipping a hidden card, prefers columns that already have partial matches.".into(),
+                },
+            ],
+        }
     }
 
     fn choose_initial_flips(

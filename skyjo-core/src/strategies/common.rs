@@ -1,6 +1,54 @@
+use serde::{Deserialize, Serialize};
+
 use crate::card::{CardValue, VisibleSlot, standard_deck};
 use crate::strategy::StrategyView;
 use std::collections::HashMap;
+
+// --- Common concept descriptions for the strategy guide ---
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommonConcept {
+    pub id: String,
+    pub label: String,
+    pub description: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub formula: Option<String>,
+}
+
+pub fn common_concepts() -> Vec<CommonConcept> {
+    vec![
+        CommonConcept {
+            id: "card_counting".into(),
+            label: "Card Counting".into(),
+            description: "The deck has a known composition: 5x(-2), 10x(-1), 15x(0), and 10 copies each of 1-12 (150 total). By tracking which cards are visible — on all players' boards and in the discard pile — the bot can calculate exactly how many copies of each value remain unseen.".into(),
+            formula: Some("remaining(value) = total_in_deck(value) - visible_on_boards(value) - visible_in_discard(value)".into()),
+        },
+        CommonConcept {
+            id: "average_unknown".into(),
+            label: "Average Unknown Value".into(),
+            description: "The expected value of any unseen card (in the deck or hidden on any board). Computed as a weighted average of all remaining card values. For a fresh game this is about 5.07, but it shifts as cards are revealed — if many high cards are already visible, the average of remaining cards drops.".into(),
+            formula: Some("avg = sum(value * remaining(value) for each value) / total_remaining".into()),
+        },
+        CommonConcept {
+            id: "expected_score".into(),
+            label: "Expected Score".into(),
+            description: "An estimate of a player's total board score. Revealed cards contribute their face value, cleared columns contribute 0, and hidden cards are estimated using the average unknown value.".into(),
+            formula: Some("expected = sum(revealed_values) + hidden_count * average_unknown_value".into()),
+        },
+        CommonConcept {
+            id: "column_analysis".into(),
+            label: "Column Analysis".into(),
+            description: "Examining each column on the board to detect 'partial matches' — columns where 2 or more revealed cards share the same value. These columns are candidates for column clears if the remaining hidden slots can be filled with the matching value.".into(),
+            formula: None,
+        },
+        CommonConcept {
+            id: "opponent_denial".into(),
+            label: "Opponent Denial".into(),
+            description: "Evaluating how useful a card would be to the next player before leaving it on the discard pile. Low/negative cards are always useful. Cards matching an opponent's partial column are extremely valuable to them — especially if they only need one more to complete a clear. The bot avoids leaving such cards on the discard pile.".into(),
+            formula: None,
+        },
+    ]
+}
 
 /// Build the full deck distribution as a map: value → total count.
 pub fn deck_distribution() -> HashMap<CardValue, usize> {

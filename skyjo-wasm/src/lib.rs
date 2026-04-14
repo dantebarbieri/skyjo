@@ -6,7 +6,7 @@ use wasm_bindgen::prelude::*;
 use skyjo_core::{
     AggregateStats, ClearerStrategy, DefensiveStrategy, Game, GameHistory, GameStats,
     GreedyStrategy, InteractiveGame, PlayerAction, RandomStrategy, Rules, Simulator,
-    SimulatorConfig, StandardRules, StatisticianStrategy, Strategy,
+    SimulatorConfig, StandardRules, StatisticianStrategy, Strategy, common_concepts,
 };
 
 #[derive(Deserialize)]
@@ -210,6 +210,24 @@ pub fn get_available_strategies() -> String {
 #[wasm_bindgen]
 pub fn get_available_rules() -> String {
     serde_json::to_string(&["Standard"]).unwrap()
+}
+
+/// Returns all strategy descriptions and common concepts as JSON.
+/// Shape: { strategies: StrategyDescription[], common_concepts: CommonConcept[] }
+#[wasm_bindgen]
+pub fn get_strategy_descriptions() -> String {
+    to_json_or_error(|| {
+        let names = ["Random", "Greedy", "Defensive", "Clearer", "Statistician"];
+        let descriptions: Vec<_> = names
+            .iter()
+            .map(|n| make_strategy(n).map(|s| s.describe()))
+            .collect::<Result<_, _>>()?;
+        let concepts = common_concepts();
+        Ok(serde_json::json!({
+            "strategies": descriptions,
+            "common_concepts": concepts,
+        }))
+    })
 }
 
 #[derive(Serialize)]

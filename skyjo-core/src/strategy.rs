@@ -3,6 +3,84 @@ use serde::{Deserialize, Serialize};
 
 use crate::card::{CardValue, VisibleSlot};
 
+// --- Strategy description types (for human-readable strategy guide) ---
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StrategyDescription {
+    pub name: String,
+    pub summary: String,
+    pub complexity: Complexity,
+    pub strengths: Vec<String>,
+    pub weaknesses: Vec<String>,
+    pub phases: Vec<PhaseDescription>,
+    /// References to common concepts this strategy uses.
+    pub concepts: Vec<ConceptReference>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Complexity {
+    Trivial,
+    Low,
+    Medium,
+    High,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PhaseDescription {
+    pub phase: Phase,
+    pub label: String,
+    pub logic: DecisionLogic,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Phase {
+    InitialFlips,
+    ChooseDraw,
+    DeckDrawAction,
+    DiscardDrawPlacement,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum DecisionLogic {
+    Simple { text: String },
+    PriorityList { rules: Vec<PriorityRule> },
+    DecisionTree { root: DecisionNode },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PriorityRule {
+    pub condition: String,
+    pub action: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum DecisionNode {
+    Condition {
+        test: String,
+        if_true: Box<DecisionNode>,
+        if_false: Box<DecisionNode>,
+    },
+    Action {
+        action: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
+    PriorityList {
+        rules: Vec<PriorityRule>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConceptReference {
+    pub id: String,
+    pub label: String,
+    pub used_for: String,
+}
+
 /// Read-only game snapshot visible to a player during their turn.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StrategyView {
@@ -50,6 +128,10 @@ pub enum DeckDrawAction {
 /// All methods receive `&mut dyn RngCore` to enable deterministic randomness.
 pub trait Strategy: Send + Sync {
     fn name(&self) -> &str;
+
+    /// Return a structured description of this strategy's decision logic.
+    /// Co-located with algorithm code so descriptions stay in sync.
+    fn describe(&self) -> StrategyDescription;
 
     /// Choose which positions to flip during setup.
     /// Must return exactly `count` distinct positions that are Hidden.

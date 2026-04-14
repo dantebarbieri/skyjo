@@ -2,7 +2,10 @@ use rand::RngCore;
 use rand::seq::SliceRandom;
 
 use crate::card::{CardValue, VisibleSlot};
-use crate::strategy::{DeckDrawAction, DrawChoice, Strategy, StrategyView};
+use crate::strategy::{
+    Complexity, DecisionLogic, DeckDrawAction, DrawChoice, Phase, PhaseDescription, Strategy,
+    StrategyDescription, StrategyView,
+};
 
 /// Completely random strategy — all decisions are uniformly random.
 pub struct RandomStrategy;
@@ -10,6 +13,50 @@ pub struct RandomStrategy;
 impl Strategy for RandomStrategy {
     fn name(&self) -> &str {
         "Random"
+    }
+
+    fn describe(&self) -> StrategyDescription {
+        StrategyDescription {
+            name: "Random".into(),
+            summary: "Makes every decision by pure chance. Each valid option has equal probability of being chosen.".into(),
+            complexity: Complexity::Trivial,
+            strengths: vec!["Completely unpredictable".into()],
+            weaknesses: vec![
+                "No strategy at all".into(),
+                "Will keep high cards and discard low ones just as often as the reverse".into(),
+            ],
+            phases: vec![
+                PhaseDescription {
+                    phase: Phase::InitialFlips,
+                    label: "Initial Flips".into(),
+                    logic: DecisionLogic::Simple {
+                        text: "Pick random hidden positions to flip.".into(),
+                    },
+                },
+                PhaseDescription {
+                    phase: Phase::ChooseDraw,
+                    label: "Draw Decision".into(),
+                    logic: DecisionLogic::Simple {
+                        text: "50/50 chance between drawing from the deck and taking from the discard pile.".into(),
+                    },
+                },
+                PhaseDescription {
+                    phase: Phase::DeckDrawAction,
+                    label: "After Drawing from Deck".into(),
+                    logic: DecisionLogic::Simple {
+                        text: "50/50 chance between keeping the card (placed at a random position) and discarding it (flipping a random hidden card).".into(),
+                    },
+                },
+                PhaseDescription {
+                    phase: Phase::DiscardDrawPlacement,
+                    label: "After Drawing from Discard".into(),
+                    logic: DecisionLogic::Simple {
+                        text: "Place the card at a random non-cleared position.".into(),
+                    },
+                },
+            ],
+            concepts: vec![],
+        }
     }
 
     fn choose_initial_flips(

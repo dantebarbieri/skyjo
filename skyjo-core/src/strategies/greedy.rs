@@ -2,7 +2,10 @@ use rand::RngCore;
 use rand::seq::SliceRandom;
 
 use crate::card::{CardValue, VisibleSlot};
-use crate::strategy::{DeckDrawAction, DrawChoice, Strategy, StrategyView};
+use crate::strategy::{
+    Complexity, DecisionLogic, DeckDrawAction, DrawChoice, Phase, PhaseDescription, PriorityRule,
+    Strategy, StrategyDescription, StrategyView,
+};
 
 /// A greedy strategy:
 /// - Takes from discard if the card is ≤ 0 or lower than the highest revealed card.
@@ -15,6 +18,102 @@ pub struct GreedyStrategy;
 impl Strategy for GreedyStrategy {
     fn name(&self) -> &str {
         "Greedy"
+    }
+
+    fn describe(&self) -> StrategyDescription {
+        StrategyDescription {
+            name: "Greedy".into(),
+            summary: "Makes locally optimal choices by comparing card values. Takes known-good cards from the discard pile and only keeps deck draws that strictly improve the board.".into(),
+            complexity: Complexity::Low,
+            strengths: vec![
+                "Simple and predictable".into(),
+                "Never makes the board worse".into(),
+            ],
+            weaknesses: vec![
+                "Ignores column-clear opportunities".into(),
+                "No card counting or probability analysis".into(),
+                "Doesn't consider what opponents need".into(),
+            ],
+            phases: vec![
+                PhaseDescription {
+                    phase: Phase::InitialFlips,
+                    label: "Initial Flips".into(),
+                    logic: DecisionLogic::Simple {
+                        text: "Random — no information to optimize on before any cards are revealed.".into(),
+                    },
+                },
+                PhaseDescription {
+                    phase: Phase::ChooseDraw,
+                    label: "Draw Decision".into(),
+                    logic: DecisionLogic::PriorityList {
+                        rules: vec![
+                            PriorityRule {
+                                condition: "Discard top is ≤ 0".into(),
+                                action: "Take from discard pile".into(),
+                                detail: Some("Negative and zero cards always improve or maintain score.".into()),
+                            },
+                            PriorityRule {
+                                condition: "Discard top < highest revealed card on board".into(),
+                                action: "Take from discard pile".into(),
+                                detail: Some("Guaranteed improvement by replacing the worst card.".into()),
+                            },
+                            PriorityRule {
+                                condition: "Otherwise".into(),
+                                action: "Draw from deck".into(),
+                                detail: None,
+                            },
+                        ],
+                    },
+                },
+                PhaseDescription {
+                    phase: Phase::DeckDrawAction,
+                    label: "After Drawing from Deck".into(),
+                    logic: DecisionLogic::PriorityList {
+                        rules: vec![
+                            PriorityRule {
+                                condition: "Drawn card < highest revealed card".into(),
+                                action: "Keep it — replace the highest revealed card".into(),
+                                detail: Some("Only keeps the card when it's a strict improvement.".into()),
+                            },
+                            PriorityRule {
+                                condition: "Hidden cards remain".into(),
+                                action: "Discard the drawn card and flip a random hidden card".into(),
+                                detail: Some("Makes progress toward revealing all cards and going out.".into()),
+                            },
+                            PriorityRule {
+                                condition: "No hidden cards left".into(),
+                                action: "Keep it — replace the highest revealed card".into(),
+                                detail: Some("Forced to keep since there's nothing to flip.".into()),
+                            },
+                        ],
+                    },
+                },
+                PhaseDescription {
+                    phase: Phase::DiscardDrawPlacement,
+                    label: "After Drawing from Discard".into(),
+                    logic: DecisionLogic::PriorityList {
+                        rules: vec![
+                            PriorityRule {
+                                condition: "A revealed card is higher than drawn card".into(),
+                                action: "Replace the highest such revealed card".into(),
+                                detail: None,
+                            },
+                            PriorityRule {
+                                condition: "No revealed card is higher".into(),
+                                action: "Replace a hidden card".into(),
+                                detail: Some("Reveals the position while placing the known card.".into()),
+                            },
+                            PriorityRule {
+                                condition: "No hidden cards left".into(),
+                                action: "Replace the highest revealed card".into(),
+                                detail: None,
+                            },
+                        ],
+                    },
+                },
+            ],
+            concepts: vec![],
+        }
     }
 
     fn choose_initial_flips(

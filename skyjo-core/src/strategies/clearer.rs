@@ -2,7 +2,10 @@ use rand::seq::SliceRandom;
 use rand::RngCore;
 
 use crate::card::{CardValue, VisibleSlot};
-use crate::strategy::{DeckDrawAction, DrawChoice, Strategy, StrategyView};
+use crate::strategy::{
+    Complexity, ConceptReference, DecisionLogic, DeckDrawAction, DrawChoice, Phase,
+    PhaseDescription, PriorityRule, Strategy, StrategyDescription, StrategyView,
+};
 
 use super::common::column_analysis;
 
@@ -18,22 +21,159 @@ impl Strategy for ClearerStrategy {
         "Clearer"
     }
 
+    fn describe(&self) -> StrategyDescription {
+        StrategyDescription {
+            name: "Clearer".into(),
+            summary: "Prioritizes column clearing as the primary way to reduce score. Willing to keep high-value cards (e.g., a 10) if they complete or advance a column clear, since a cleared column scores 0.".into(),
+            complexity: Complexity::Medium,
+            strengths: vec![
+                "Exploits the powerful column-clear mechanic".into(),
+                "Can eliminate high-value columns entirely".into(),
+                "Falls back to greedy logic when no clear opportunity exists".into(),
+            ],
+            weaknesses: vec![
+                "May hold high cards hoping for a clear that never comes".into(),
+                "No card counting — doesn't check if remaining copies exist".into(),
+                "Doesn't consider what opponents need".into(),
+            ],
+            phases: vec![
+                PhaseDescription {
+                    phase: Phase::InitialFlips,
+                    label: "Initial Flips".into(),
+                    logic: DecisionLogic::Simple {
+                        text: "Flip cards in the same column to maximize the chance of discovering an early match. Picks a random column and flips there first, spilling into another column only if needed.".into(),
+                    },
+                },
+                PhaseDescription {
+                    phase: Phase::ChooseDraw,
+                    label: "Draw Decision".into(),
+                    logic: DecisionLogic::PriorityList {
+                        rules: vec![
+                            PriorityRule {
+                                condition: "Discard top completes or advances a column clear".into(),
+                                action: "Take from discard pile".into(),
+                                detail: Some("Takes high-value cards if they match a partial column.".into()),
+                            },
+                            PriorityRule {
+                                condition: "Discard top ≤ 0".into(),
+                                action: "Take from discard pile".into(),
+                                detail: Some("Greedy fallback — low cards are always worth taking.".into()),
+                            },
+                            PriorityRule {
+                                condition: "Discard top < highest revealed card".into(),
+                                action: "Take from discard pile".into(),
+                                detail: Some("Greedy fallback — guaranteed improvement.".into()),
+                            },
+                            PriorityRule {
+                                condition: "Otherwise".into(),
+                                action: "Draw from deck".into(),
+                                detail: None,
+                            },
+                        ],
+                    },
+                },
+                PhaseDescription {
+                    phase: Phase::DeckDrawAction,
+                    label: "After Drawing from Deck".into(),
+                    logic: DecisionLogic::PriorityList {
+                        rules: vec![
+                            PriorityRule {
+                                condition: "Card completes a column clear (fills the last slot)".into(),
+                                action: "Keep it — place in the completing position".into(),
+                                detail: Some("Highest priority: the entire column is removed and scores 0.".into()),
+                            },
+                            PriorityRule {
+                                condition: "Card advances a partial column (1+ matching cards in a column)".into(),
+                                action: "Keep it — place in that column".into(),
+                                detail: Some("Builds toward a future clear by increasing the match count.".into()),
+                            },
+                            PriorityRule {
+                                condition: "Card < highest revealed card (greedy improvement)".into(),
+                                action: "Keep it — replace the highest revealed card".into(),
+                                detail: None,
+                            },
+                            PriorityRule {
+                                condition: "Card ≤ 8 and matches a card in a column with hidden slots".into(),
+                                action: "Keep it — place in that column to start building".into(),
+                                detail: Some("Early-game building: tolerates moderate values to seed future clears.".into()),
+                            },
+                            PriorityRule {
+                                condition: "Otherwise".into(),
+                                action: "Discard and flip a hidden card (preferring columns with partial matches)".into(),
+                                detail: None,
+                            },
+                        ],
+                    },
+                },
+                PhaseDescription {
+                    phase: Phase::DiscardDrawPlacement,
+                    label: "After Drawing from Discard".into(),
+                    logic: DecisionLogic::PriorityList {
+                        rules: vec![
+                            PriorityRule {
+                                condition: "Card completes a column clear".into(),
+                                action: "Place in the completing position".into(),
+                                detail: None,
+                            },
+                            PriorityRule {
+                                condition: "Card advances a partial column".into(),
+                                action: "Place in that column".into(),
+                                detail: None,
+                            },
+                            PriorityRule {
+                                condition: "A revealed card is higher than drawn card".into(),
+                                action: "Replace the highest such revealed card".into(),
+                                detail: None,
+                            },
+                            PriorityRule {
+                                condition: "Otherwise".into(),
+                                action: "Replace a hidden card, or the highest revealed as last resort".into(),
+                                detail: None,
+                            },
+                        ],
+                    },
+                },
+            ],
+            concepts: vec![
+                ConceptReference {
+                    id: "column_analysis".into(),
+                    label: "Column Analysis".into(),
+                    used_for: "Detecting partial column matches and finding positions that complete or advance clears.".into(),
+                },
+            ],
+        }
+    }
+
     fn choose_initial_flips(
         &self,
         view: &StrategyView,
         count: usize,
         rng: &mut dyn RngCore,
     ) -> Vec<usize> {
-        let mut hidden: Vec<usize> = view
-            .my_board
-            .iter()
-            .enumerate()
-            .filter(|(_, s)| matches!(s, VisibleSlot::Hidden))
-            .map(|(i, _)| i)
-            .collect();
-        hidden.shuffle(rng);
-        hidden.truncate(count);
-        hidden
+        // Flip cards in the same column to maximize chance of finding an early match.
+        // Pick a random column, take as many flips there as possible, then spill into
+        // another random column if needed.
+        let mut result = Vec::with_capacity(count);
+        let mut cols: Vec<usize> = (0..view.num_cols).collect();
+        cols.shuffle(rng);
+
+        for &col in &cols {
+            if result.len() >= count {
+                break;
+            }
+            let base = col * view.num_rows;
+            for row in 0..view.num_rows {
+                if result.len() >= count {
+                    break;
+                }
+                let idx = base + row;
+                if matches!(view.my_board[idx], VisibleSlot::Hidden) {
+                    result.push(idx);
+                }
+            }
+        }
+
+        result
     }
 
     fn choose_draw(&self, view: &StrategyView, _rng: &mut dyn RngCore) -> DrawChoice {

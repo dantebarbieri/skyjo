@@ -227,3 +227,55 @@ export interface BotActionResponse {
   action: PlayerAction;
   state: InteractiveGameState;
 }
+
+// Strategy description types (from Rust describe() trait method)
+
+export interface StrategyDescription {
+  name: string;
+  summary: string;
+  complexity: 'Trivial' | 'Low' | 'Medium' | 'High';
+  strengths: string[];
+  weaknesses: string[];
+  phases: PhaseDescription[];
+  concepts: ConceptReference[];
+}
+
+export interface PhaseDescription {
+  phase: 'InitialFlips' | 'ChooseDraw' | 'DeckDrawAction' | 'DiscardDrawPlacement';
+  label: string;
+  logic: DecisionLogic;
+}
+
+export type DecisionLogic =
+  | { type: 'Simple'; text: string }
+  | { type: 'PriorityList'; rules: PriorityRule[] }
+  | { type: 'DecisionTree'; root: DecisionNode };
+
+export interface PriorityRule {
+  condition: string;
+  action: string;
+  detail?: string;
+}
+
+export type DecisionNode =
+  | { type: 'Condition'; test: string; if_true: DecisionNode; if_false: DecisionNode }
+  | { type: 'Action'; action: string; detail?: string }
+  | { type: 'PriorityList'; rules: PriorityRule[] };
+
+export interface ConceptReference {
+  id: string;
+  label: string;
+  used_for: string;
+}
+
+export interface CommonConcept {
+  id: string;
+  label: string;
+  description: string;
+  formula?: string;
+}
+
+export interface StrategyDescriptionsData {
+  strategies: StrategyDescription[];
+  common_concepts: CommonConcept[];
+}
