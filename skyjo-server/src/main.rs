@@ -216,7 +216,7 @@ async fn genetic_train(
             unlimited,
         } => {
             let gens = if unlimited && is_local {
-                generations
+                generations.min(10_000_000)
             } else {
                 generations.min(50_000)
             };
@@ -236,7 +236,7 @@ async fn genetic_train(
                 ));
             }
             let gens = if unlimited && is_local {
-                target_generation - current
+                (target_generation - current).min(10_000_000)
             } else {
                 (target_generation - current).min(50_000)
             };

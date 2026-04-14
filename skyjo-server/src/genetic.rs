@@ -49,6 +49,10 @@ pub struct SavedGeneration {
     pub lineage_hash: String,
     #[serde(default)]
     pub architecture_version: u32,
+    /// How this generation was saved: "manual", "milestone", "checkpoint", "training_result", "import".
+    /// Used to distinguish auto-checkpoints (safe to prune) from user saves.
+    #[serde(default)]
+    pub source: String,
 }
 
 /// Summary of a saved generation (without genome, for listing).
@@ -363,6 +367,7 @@ impl GeneticTrainingState {
             saved_at: chrono_now(),
             lineage_hash: self.lineage_hash.clone(),
             architecture_version: ARCHITECTURE_VERSION,
+            source: "manual".to_string(),
         };
         let info = SavedGenerationInfo::from(&saved);
         self.saved_generations.push(saved);
@@ -453,7 +458,8 @@ impl GeneticTrainingState {
             genome,
             saved_at: chrono_now(),
             lineage_hash,
-            architecture_version: architecture_version.unwrap_or(0),
+            architecture_version: architecture_version.unwrap_or(ARCHITECTURE_VERSION),
+            source: "import".to_string(),
         };
         let info = SavedGenerationInfo::from(&saved);
         self.saved_generations.push(saved);
@@ -817,6 +823,7 @@ fn auto_save_milestone(state: &mut GeneticTrainingState) {
                 saved_at: chrono_now(),
                 lineage_hash: state.lineage_hash.clone(),
                 architecture_version: ARCHITECTURE_VERSION,
+                source: "milestone".to_string(),
             };
             state.saved_generations.push(saved);
             tracing::info!("Auto-saved milestone: {name}");
@@ -985,6 +992,7 @@ fn auto_save_training_result(state: &mut GeneticTrainingState) {
         saved_at: chrono_now(),
         lineage_hash: state.lineage_hash.clone(),
         architecture_version: ARCHITECTURE_VERSION,
+        source: "training_result".to_string(),
     };
     state.saved_generations.push(saved);
     save_model(state);
@@ -1055,29 +1063,17 @@ fn auto_save_checkpoint(state: &mut GeneticTrainingState) {
         saved_at: chrono_now(),
         lineage_hash: state.lineage_hash.clone(),
         architecture_version: ARCHITECTURE_VERSION,
+        source: "checkpoint".to_string(),
     };
     state.saved_generations.push(saved);
     tracing::info!("Periodic checkpoint saved: {name}");
 
-    // Prune old periodic checkpoints (keep only the most recent ones).
-    // A periodic checkpoint has a name like "Gen 1000", "Gen 2000", etc.
-    // We keep milestones (power-of-10), training results, and user-saved generations.
+    // Prune old periodic checkpoints using the source field.
     let mut periodic: Vec<usize> = state
         .saved_generations
         .iter()
         .enumerate()
-        .filter(|(_, sg)| {
-            // Periodic checkpoints match "Gen N" where N is a multiple of CHECKPOINT_INTERVAL
-            // but NOT a power of 10 (those are milestones we always keep)
-            if let Some(rest) = sg.name.strip_prefix("Gen ")
-                && let Ok(gen_num) = rest.parse::<usize>()
-            {
-                let is_checkpoint = gen_num % CHECKPOINT_INTERVAL == 0;
-                let is_milestone = is_power_of_10(gen_num);
-                return is_checkpoint && !is_milestone;
-            }
-            false
-        })
+        .filter(|(_, sg)| sg.source == "checkpoint")
         .map(|(i, _)| i)
         .collect();
 
@@ -1092,18 +1088,6 @@ fn auto_save_checkpoint(state: &mut GeneticTrainingState) {
         }
         tracing::info!("Pruned {to_remove} old periodic checkpoint(s)");
     }
-}
-
-/// Check if a number is a power of 10.
-fn is_power_of_10(n: usize) -> bool {
-    if n == 0 {
-        return false;
-    }
-    let mut v = n;
-    while v.is_multiple_of(10) {
-        v /= 10;
-    }
-    v == 1
 }
 
 #[cfg(test)]
