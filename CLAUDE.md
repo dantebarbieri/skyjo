@@ -114,7 +114,11 @@ Axum-based multiplayer game server providing room management, real-time WebSocke
 - `POST /api/genetic/reset` — reset population
 - `POST /api/genetic/load` — load saved generation
 - `GET /api/genetic/status` — training progress
-- `GET|POST|DELETE /api/genetic/saved[/{name}]` — save/list/import/delete generations
+- `GET /api/genetic/saved` — list saved generations
+- `POST /api/genetic/saved` — save current generation
+- `POST /api/genetic/saved/import` — import external genome
+- `DELETE /api/genetic/saved/{name}` — delete a saved generation
+- `GET /api/genetic/saved/{name}/model` — get a specific saved genome
 
 **WebSocket protocol (client → server):** `ConfigureSlot`, `SetNumPlayers`, `SetRules`, `SetTurnTimer`, `KickPlayer`, `BanPlayer`, `PromoteHost`, `StartGame`, `PlayAgain`, `ReturnToLobby`, `Action`, `ContinueRound`, `Ping`
 
@@ -122,11 +126,11 @@ Axum-based multiplayer game server providing room management, real-time WebSocke
 
 **Room features:** 2–8 player rooms with 6-character codes, player slots (Human/Bot/Empty), IP banning (creator-only), optional turn timers, automatic cleanup (5min after game over, 10min after disconnect).
 
-**Genetic training:** Population of 50, 10 games per individual, 3-way tournament selection, 5% mutation rate (σ=0.3), 0.5% reset rate, parallel evaluation via `rayon`, persistent save/load with lineage tracking, max 10,000 generations per session.
+**Genetic training:** Population of 50, 10 games per individual, 3-way tournament selection, 5% mutation rate (σ=0.3), 0.5% reset rate, parallel evaluation via `rayon`, persistent save/load with lineage tracking, max 10,000 generations per session (100,000 in `until_fitness` mode).
 
 **CLI args:** `--port` (default 8080), `--static-dir` (default `./static`), `--genetic-model-path` (default `./genetic_model.json`).
 
-**Dependencies:** axum (HTTP + WebSocket), tokio (async runtime), tower-http (static files, gzip, CORS), dashmap (concurrent state), rayon (parallel genetic eval), clap (CLI), tracing (structured logging).
+**Dependencies:** axum (HTTP + WebSocket), tokio (async runtime), tower-http (static files, gzip compression), dashmap (concurrent state), rayon (parallel genetic eval), clap (CLI), tracing (structured logging).
 
 ### Frontend (`frontend`)
 
