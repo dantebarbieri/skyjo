@@ -64,6 +64,29 @@ pub struct Room {
     pub genetic_generation: usize,
 }
 
+/// Validate and sanitize a player name.
+/// Trims whitespace, rejects empty names and names longer than 32 characters.
+pub fn validate_player_name(name: &str) -> Result<String, ServerError> {
+    let trimmed = name.trim().to_string();
+    if trimmed.is_empty() {
+        return Err(ServerError::PlayerNameEmpty);
+    }
+    if trimmed.len() > 32 {
+        return Err(ServerError::PlayerNameTooLong);
+    }
+    Ok(trimmed)
+}
+
+/// Validate a room code format: exactly 6 uppercase alphanumeric characters,
+/// excluding I, O, and L.
+pub fn validate_room_code(code: &str) -> Result<(), ServerError> {
+    let valid_chars: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    if code.len() != 6 || !code.bytes().all(|b| valid_chars.contains(&b)) {
+        return Err(ServerError::RoomCodeInvalid);
+    }
+    Ok(())
+}
+
 impl Room {
     pub fn new(
         code: String,
@@ -208,9 +231,11 @@ impl Room {
         if self.phase != RoomPhase::Lobby {
             return Err(ServerError::NotInLobby);
         }
-        // Validate: must be None (unlimited) or a positive value
-        if let Some(0) = secs {
-            return Err(ServerError::InvalidTurnTimer);
+        // Validate: must be None (unlimited) or within 10–300 seconds
+        if let Some(s) = secs {
+            if !(10..=300).contains(&s) {
+                return Err(ServerError::InvalidTurnTimer);
+            }
         }
         self.turn_timer_secs = secs;
         self.touch();
@@ -239,6 +264,11 @@ impl Room {
                 self.turn_start = None;
             }
         }
+    }
+
+    /// Get the elapsed duration since the current turn started, or None if not tracked.
+    pub fn elapsed_since_turn_start(&self) -> Option<Duration> {
+        self.turn_start.map(|t| t.elapsed())
     }
 
     /// Get seconds remaining for the current turn, or None if unlimited / not applicable.

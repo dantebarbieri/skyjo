@@ -87,6 +87,7 @@ pub async fn handle_ws(
                             &text,
                             &state,
                             &room,
+                            &room_code,
                             player_index,
                         ).await;
 
@@ -181,6 +182,7 @@ async fn handle_client_message(
     text: &str,
     state: &Arc<AppStateInner>,
     room: &SharedRoom,
+    room_code: &str,
     player_index: usize,
 ) -> Option<ServerMessage> {
     let msg: ClientMessage = match serde_json::from_str(text) {
@@ -345,8 +347,30 @@ async fn handle_client_message(
         ClientMessage::Action { action } => {
             let mut room_guard = room.lock().await;
 
+            // Capture timing before applying
+            let elapsed_before = room_guard.elapsed_since_turn_start();
+
+            if let Some(elapsed) = elapsed_before {
+                if elapsed < Duration::from_millis(100) {
+                    tracing::warn!(
+                        room = %room_code,
+                        player = player_index,
+                        elapsed_ms = elapsed.as_millis(),
+                        "suspiciously_fast_action"
+                    );
+                }
+            }
+
             match room_guard.apply_action(player_index, action.clone()) {
                 Ok(()) => {
+                    tracing::info!(
+                        room = %room_code,
+                        player = player_index,
+                        action = ?action,
+                        elapsed_since_turn_start_ms = elapsed_before.map(|d| d.as_millis()),
+                        "action_applied"
+                    );
+
                     room_guard.broadcast_action(player_index, &action, false);
 
                     // Schedule bot turns if the next player is a bot
