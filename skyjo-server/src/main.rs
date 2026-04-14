@@ -248,16 +248,8 @@ async fn genetic_train(
             unlimited,
         } => {
             let allow_unlimited = unlimited && is_local;
-            let default_cap = if allow_unlimited {
-                10_000_000
-            } else {
-                50_000
-            };
-            let max_cap = if allow_unlimited {
-                10_000_000
-            } else {
-                50_000
-            };
+            let default_cap = if allow_unlimited { 10_000_000 } else { 50_000 };
+            let max_cap = if allow_unlimited { 10_000_000 } else { 50_000 };
             let cap = max_generations.unwrap_or(default_cap).min(max_cap);
             (cap, "until_fitness".to_string(), target_fitness)
         }

@@ -19,7 +19,7 @@ pub use rules::{Rules, StandardRules};
 pub use simulator::{AggregateStats, GameStats, Simulator, SimulatorConfig};
 pub use strategies::common::common_concepts;
 pub use strategies::genetic::{
-    self as genetic_nn, ARCHITECTURE_VERSION, GENOME_SIZE, HIDDEN1_SIZE, HIDDEN2_SIZE, HIDDEN_SIZE,
+    self as genetic_nn, ARCHITECTURE_VERSION, GENOME_SIZE, HIDDEN_SIZE, HIDDEN1_SIZE, HIDDEN2_SIZE,
     INPUT_GROUPS, INPUT_LABELS, INPUT_SIZE, NeuralNetwork, OUTPUT_GROUPS, OUTPUT_LABELS,
     OUTPUT_SIZE,
 };

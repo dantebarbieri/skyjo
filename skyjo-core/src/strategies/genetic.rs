@@ -21,10 +21,9 @@ pub const HIDDEN2_SIZE: usize = 32;
 pub const OUTPUT_SIZE: usize = 39;
 /// Total number of f32 weights in the genome.
 /// Layout: [W_ih1, b_h1, W_h1h2, b_h2, W_h2o, b_o]
-pub const GENOME_SIZE: usize =
-    INPUT_SIZE * HIDDEN1_SIZE + HIDDEN1_SIZE +     // input → hidden1
+pub const GENOME_SIZE: usize = INPUT_SIZE * HIDDEN1_SIZE + HIDDEN1_SIZE +     // input → hidden1
     HIDDEN1_SIZE * HIDDEN2_SIZE + HIDDEN2_SIZE +   // hidden1 → hidden2
-    HIDDEN2_SIZE * OUTPUT_SIZE + OUTPUT_SIZE;       // hidden2 → output
+    HIDDEN2_SIZE * OUTPUT_SIZE + OUTPUT_SIZE; // hidden2 → output
 
 /// Deprecated alias for backward compatibility.
 pub const HIDDEN_SIZE: usize = HIDDEN1_SIZE;
@@ -398,7 +397,10 @@ pub fn extract_features(view: &StrategyView, drawn_card: Option<CardValue>) -> V
     // Opponent hidden counts (7 slots, padded with 0 for fewer opponents)
     for opp_idx in 0..7 {
         if let Some(board) = view.opponent_boards.get(opp_idx) {
-            let hidden = board.iter().filter(|s| matches!(s, VisibleSlot::Hidden)).count();
+            let hidden = board
+                .iter()
+                .filter(|s| matches!(s, VisibleSlot::Hidden))
+                .count();
             features.push(hidden as f32 / 12.0);
         } else {
             features.push(0.0);
@@ -410,17 +412,40 @@ pub fn extract_features(view: &StrategyView, drawn_card: Option<CardValue>) -> V
     features.push(discard_depth as f32 / 150.0);
 
     // Score rank (0.0 = best, 1.0 = worst among players)
-    let my_cum_score = view.cumulative_scores.get(view.my_index).copied().unwrap_or(0);
+    let my_cum_score = view
+        .cumulative_scores
+        .get(view.my_index)
+        .copied()
+        .unwrap_or(0);
     let num_players = view.cumulative_scores.len();
-    let rank = view.cumulative_scores.iter().filter(|&&s| s < my_cum_score).count();
-    features.push(if num_players > 1 { rank as f32 / (num_players - 1) as f32 } else { 0.0 });
+    let rank = view
+        .cumulative_scores
+        .iter()
+        .filter(|&&s| s < my_cum_score)
+        .count();
+    features.push(if num_players > 1 {
+        rank as f32 / (num_players - 1) as f32
+    } else {
+        0.0
+    });
 
     // Opponent "near done" signals (5 closest opponents, ratio of revealed cards)
-    let mut opp_revealed_ratios: Vec<f32> = view.opponent_boards.iter().map(|board| {
-        let total = board.len();
-        let revealed = board.iter().filter(|s| !matches!(s, VisibleSlot::Hidden)).count();
-        if total > 0 { revealed as f32 / total as f32 } else { 0.0 }
-    }).collect();
+    let mut opp_revealed_ratios: Vec<f32> = view
+        .opponent_boards
+        .iter()
+        .map(|board| {
+            let total = board.len();
+            let revealed = board
+                .iter()
+                .filter(|s| !matches!(s, VisibleSlot::Hidden))
+                .count();
+            if total > 0 {
+                revealed as f32 / total as f32
+            } else {
+                0.0
+            }
+        })
+        .collect();
     opp_revealed_ratios.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
     for i in 0..5 {
         features.push(opp_revealed_ratios.get(i).copied().unwrap_or(0.0));
@@ -701,9 +726,12 @@ mod tests {
     fn genome_size_consistent() {
         assert_eq!(
             GENOME_SIZE,
-            INPUT_SIZE * HIDDEN1_SIZE + HIDDEN1_SIZE
-                + HIDDEN1_SIZE * HIDDEN2_SIZE + HIDDEN2_SIZE
-                + HIDDEN2_SIZE * OUTPUT_SIZE + OUTPUT_SIZE
+            INPUT_SIZE * HIDDEN1_SIZE
+                + HIDDEN1_SIZE
+                + HIDDEN1_SIZE * HIDDEN2_SIZE
+                + HIDDEN2_SIZE
+                + HIDDEN2_SIZE * OUTPUT_SIZE
+                + OUTPUT_SIZE
         );
     }
 

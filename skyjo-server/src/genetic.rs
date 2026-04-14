@@ -12,7 +12,7 @@ use skyjo_core::rules::StandardRules;
 use skyjo_core::strategy::Strategy;
 use skyjo_core::{
     ARCHITECTURE_VERSION, ClearerStrategy, DefensiveStrategy, GENOME_SIZE, GeneticStrategy,
-    GreedyStrategy, HIDDEN1_SIZE, HIDDEN2_SIZE, HIDDEN_SIZE, INPUT_GROUPS, INPUT_LABELS,
+    GreedyStrategy, HIDDEN_SIZE, HIDDEN1_SIZE, HIDDEN2_SIZE, INPUT_GROUPS, INPUT_LABELS,
     INPUT_SIZE, OUTPUT_GROUPS, OUTPUT_LABELS, OUTPUT_SIZE, RandomStrategy, StatisticianStrategy,
 };
 
@@ -236,7 +236,8 @@ impl GeneticTrainingState {
                         {
                             tracing::warn!(
                                 "Model architecture version {} does not match current version {}, creating new random model",
-                                data.architecture_version, ARCHITECTURE_VERSION
+                                data.architecture_version,
+                                ARCHITECTURE_VERSION
                             );
                             return Self::new_random(model_path);
                         }
@@ -259,7 +260,13 @@ impl GeneticTrainingState {
                         population.push(data.best_genome.clone());
                         for _ in 1..POPULATION_SIZE {
                             let mut child = data.best_genome.clone();
-                            mutate(&mut child, &mut rng, BASE_MUTATION_RATE, BASE_MUTATION_SIGMA, BASE_RESET_RATE);
+                            mutate(
+                                &mut child,
+                                &mut rng,
+                                BASE_MUTATION_RATE,
+                                BASE_MUTATION_SIGMA,
+                                BASE_RESET_RATE,
+                            );
                             population.push(child);
                         }
                         // Backward compat: compute hash if not stored
@@ -475,7 +482,13 @@ impl GeneticTrainingState {
         population.push(saved.genome.clone());
         for _ in 1..POPULATION_SIZE {
             let mut child = saved.genome.clone();
-            mutate(&mut child, &mut rng, BASE_MUTATION_RATE, BASE_MUTATION_SIGMA, BASE_RESET_RATE);
+            mutate(
+                &mut child,
+                &mut rng,
+                BASE_MUTATION_RATE,
+                BASE_MUTATION_SIGMA,
+                BASE_RESET_RATE,
+            );
             population.push(child);
         }
         self.population = population;
@@ -584,7 +597,13 @@ fn crossover(parent_a: &[f32], parent_b: &[f32], rng: &mut impl Rng) -> Vec<f32>
 }
 
 /// Mutate a genome in place with Gaussian perturbation and occasional resets.
-fn mutate(genome: &mut [f32], rng: &mut impl Rng, mutation_rate: f64, mutation_sigma: f32, reset_rate: f64) {
+fn mutate(
+    genome: &mut [f32],
+    rng: &mut impl Rng,
+    mutation_rate: f64,
+    mutation_sigma: f32,
+    reset_rate: f64,
+) {
     for gene in genome.iter_mut() {
         let r: f64 = rng.random();
         if r < reset_rate {
@@ -757,7 +776,13 @@ fn run_generation(
         let parent_a = tournament_select(population, &fitnesses, &mut rng);
         let parent_b = tournament_select(population, &fitnesses, &mut rng);
         let mut child = crossover(&parent_a, &parent_b, &mut rng);
-        mutate(&mut child, &mut rng, mutation_rate, mutation_sigma, reset_rate);
+        mutate(
+            &mut child,
+            &mut rng,
+            mutation_rate,
+            mutation_sigma,
+            reset_rate,
+        );
         next_population.push(child);
     }
 
@@ -825,7 +850,16 @@ fn save_model(state: &GeneticTrainingState) {
 pub async fn train_generations(state: Arc<Mutex<GeneticTrainingState>>, num_generations: usize) {
     for generation_i in 0..num_generations {
         // Clone population from state (brief lock)
-        let (population, generation_num, games_trained, target_fitness, mode, mutation_rate, mutation_sigma, reset_rate) = {
+        let (
+            population,
+            generation_num,
+            games_trained,
+            target_fitness,
+            mode,
+            mutation_rate,
+            mutation_sigma,
+            reset_rate,
+        ) = {
             let s = state.lock().await;
             if !s.is_training {
                 tracing::info!("Training was stopped, ending at generation {generation_i}");
@@ -847,7 +881,14 @@ pub async fn train_generations(state: Arc<Mutex<GeneticTrainingState>>, num_gene
         let generation_seed = (generation_num as u64).wrapping_mul(7919) ^ 0xDEADBEEF;
         let (new_population, fitnesses, best_idx, games_played) =
             tokio::task::spawn_blocking(move || {
-                run_generation(&population, generation_seed, games_trained, mutation_rate, mutation_sigma, reset_rate)
+                run_generation(
+                    &population,
+                    generation_seed,
+                    games_trained,
+                    mutation_rate,
+                    mutation_sigma,
+                    reset_rate,
+                )
             })
             .await
             .expect("Training task panicked");
@@ -986,7 +1027,8 @@ fn update_adaptive_mutation(state: &mut GeneticTrainingState) {
     } else {
         // Good progress — decrease toward baseline
         state.current_mutation_rate = (state.current_mutation_rate * 0.95).max(BASE_MUTATION_RATE);
-        state.current_mutation_sigma = (state.current_mutation_sigma * 0.95).max(BASE_MUTATION_SIGMA);
+        state.current_mutation_sigma =
+            (state.current_mutation_sigma * 0.95).max(BASE_MUTATION_SIGMA);
         state.current_reset_rate = (state.current_reset_rate * 0.95).max(BASE_RESET_RATE);
     }
 }
@@ -1298,7 +1340,15 @@ mod tests {
         let mut state = test_state("get_saved_genome");
         let genome = vec![0.3_f32; GENOME_SIZE];
         state
-            .import_generation("sg_test".to_string(), genome.clone(), 5, 5000, -25.0, None, None)
+            .import_generation(
+                "sg_test".to_string(),
+                genome.clone(),
+                5,
+                5000,
+                -25.0,
+                None,
+                None,
+            )
             .unwrap();
 
         let (g, games) = state.get_saved_genome("sg_test").unwrap();
@@ -1339,7 +1389,13 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(99);
         let mut genome = vec![0.0_f32; GENOME_SIZE];
         let original = genome.clone();
-        mutate(&mut genome, &mut rng, BASE_MUTATION_RATE, BASE_MUTATION_SIGMA, BASE_RESET_RATE);
+        mutate(
+            &mut genome,
+            &mut rng,
+            BASE_MUTATION_RATE,
+            BASE_MUTATION_SIGMA,
+            BASE_RESET_RATE,
+        );
         assert_eq!(genome.len(), GENOME_SIZE);
         // At least some genes should have mutated (statistically near-certain)
         let changed = genome
