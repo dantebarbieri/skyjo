@@ -30,6 +30,8 @@ pub const NUM_OPPONENTS: usize = 3; // opponents per game (4-player games)
 pub const STAGNATION_WINDOW: usize = 20;
 /// Periodic checkpoint interval (in generations).
 pub const CHECKPOINT_INTERVAL: usize = 1000;
+/// Maximum number of periodic checkpoints to retain (older ones are pruned).
+pub const MAX_PERIODIC_CHECKPOINTS: usize = 10;
 
 // --- Types ---
 
@@ -562,15 +564,21 @@ fn tournament_select(population: &[Vec<f32>], fitnesses: &[f64], rng: &mut impl 
     population[best_idx].clone()
 }
 
-/// BLX-α blend crossover: each gene is a weighted blend of the two parents.
-/// Much better than uniform crossover for neuroevolution — preserves weight magnitudes.
+/// BLX-α blend crossover: for each gene, sample uniformly from the interval
+/// [min(a,b) - α*d, max(a,b) + α*d] where d = |a - b| and α = 0.5.
+/// This explores beyond the parents' range, unlike simple arithmetic crossover.
 fn crossover(parent_a: &[f32], parent_b: &[f32], rng: &mut impl Rng) -> Vec<f32> {
+    const ALPHA: f32 = 0.5;
     parent_a
         .iter()
         .zip(parent_b.iter())
         .map(|(&a, &b)| {
-            let alpha: f32 = rng.random_range(0.3f32..0.7);
-            alpha * a + (1.0 - alpha) * b
+            let lo = a.min(b);
+            let hi = a.max(b);
+            let d = hi - lo;
+            let expanded_lo = lo - ALPHA * d;
+            let expanded_hi = hi + ALPHA * d;
+            rng.random_range(expanded_lo..=expanded_hi)
         })
         .collect()
 }
@@ -957,7 +965,7 @@ fn update_adaptive_mutation(state: &mut GeneticTrainingState) {
     // Keep only the last STAGNATION_WINDOW entries
     let len = state.fitness_history.len();
     if len > STAGNATION_WINDOW {
-        state.fitness_history = state.fitness_history[len - STAGNATION_WINDOW..].to_vec();
+        state.fitness_history.drain(..len - STAGNATION_WINDOW);
     }
 
     // Calculate improvement over the window
@@ -1008,6 +1016,52 @@ fn auto_save_checkpoint(state: &mut GeneticTrainingState) {
     };
     state.saved_generations.push(saved);
     tracing::info!("Periodic checkpoint saved: {name}");
+
+    // Prune old periodic checkpoints (keep only the most recent ones).
+    // A periodic checkpoint has a name like "Gen 1000", "Gen 2000", etc.
+    // We keep milestones (power-of-10), training results, and user-saved generations.
+    let mut periodic: Vec<usize> = state
+        .saved_generations
+        .iter()
+        .enumerate()
+        .filter(|(_, sg)| {
+            // Periodic checkpoints match "Gen N" where N is a multiple of CHECKPOINT_INTERVAL
+            // but NOT a power of 10 (those are milestones we always keep)
+            if let Some(rest) = sg.name.strip_prefix("Gen ")
+                && let Ok(gen_num) = rest.parse::<usize>()
+            {
+                let is_checkpoint = gen_num % CHECKPOINT_INTERVAL == 0;
+                let is_milestone = is_power_of_10(gen_num);
+                return is_checkpoint && !is_milestone;
+            }
+            false
+        })
+        .map(|(i, _)| i)
+        .collect();
+
+    // Remove oldest periodic checkpoints beyond the cap
+    if periodic.len() > MAX_PERIODIC_CHECKPOINTS {
+        let to_remove = periodic.len() - MAX_PERIODIC_CHECKPOINTS;
+        // Remove from the front (oldest), but indices shift as we remove
+        periodic.truncate(to_remove);
+        // Remove in reverse order to keep indices valid
+        for &idx in periodic.iter().rev() {
+            state.saved_generations.remove(idx);
+        }
+        tracing::info!("Pruned {to_remove} old periodic checkpoint(s)");
+    }
+}
+
+/// Check if a number is a power of 10.
+fn is_power_of_10(n: usize) -> bool {
+    if n == 0 {
+        return false;
+    }
+    let mut v = n;
+    while v.is_multiple_of(10) {
+        v /= 10;
+    }
+    v == 1
 }
 
 #[cfg(test)]
@@ -1264,15 +1318,18 @@ mod tests {
         let parent_b: Vec<f32> = (0..GENOME_SIZE).map(|i| -(i as f32)).collect();
         let child = crossover(&parent_a, &parent_b, &mut rng);
         assert_eq!(child.len(), GENOME_SIZE);
-        // Each gene should be a blend between the two parents
+        // BLX-α: each gene should be within the expanded interval [min - α*d, max + α*d]
         for (i, &gene) in child.iter().enumerate() {
             let a = parent_a[i];
             let b = parent_b[i];
-            let min_val = a.min(b);
-            let max_val = a.max(b);
+            let lo = a.min(b);
+            let hi = a.max(b);
+            let d = hi - lo;
+            let expanded_lo = lo - 0.5 * d;
+            let expanded_hi = hi + 0.5 * d;
             assert!(
-                gene >= min_val && gene <= max_val,
-                "Gene {i} should be a blend between parents, got {gene} (parents: {a}, {b})"
+                gene >= expanded_lo && gene <= expanded_hi,
+                "Gene {i} should be within BLX-α range [{expanded_lo}, {expanded_hi}], got {gene}"
             );
         }
     }

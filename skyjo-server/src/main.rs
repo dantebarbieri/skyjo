@@ -199,6 +199,7 @@ enum TrainRequest {
 
 async fn genetic_train(
     State(state): State<AppState>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Json(req): Json<TrainRequest>,
 ) -> Result<Json<genetic::TrainingStatus>, (StatusCode, String)> {
     let mut s = state.genetic.lock().await;
@@ -206,12 +207,15 @@ async fn genetic_train(
         return Ok(Json(s.status()));
     }
 
+    // Only allow unlimited training from localhost
+    let is_local = addr.ip().is_loopback();
+
     let (generations, mode, target_fitness) = match req {
         TrainRequest::ForGenerations {
             generations,
             unlimited,
         } => {
-            let gens = if unlimited {
+            let gens = if unlimited && is_local {
                 generations
             } else {
                 generations.min(50_000)
@@ -231,7 +235,7 @@ async fn genetic_train(
                     ),
                 ));
             }
-            let gens = if unlimited {
+            let gens = if unlimited && is_local {
                 target_generation - current
             } else {
                 (target_generation - current).min(50_000)
@@ -243,19 +247,25 @@ async fn genetic_train(
             max_generations,
             unlimited,
         } => {
-            let default_cap = if unlimited { usize::MAX } else { 50_000 };
-            let cap = max_generations.unwrap_or(default_cap).min(if unlimited {
-                usize::MAX
+            let allow_unlimited = unlimited && is_local;
+            let default_cap = if allow_unlimited {
+                10_000_000
             } else {
                 50_000
-            });
+            };
+            let max_cap = if allow_unlimited {
+                10_000_000
+            } else {
+                50_000
+            };
+            let cap = max_generations.unwrap_or(default_cap).min(max_cap);
             (cap, "until_fitness".to_string(), target_fitness)
         }
     };
 
     s.is_training = true;
     s.training_start_generation = s.generation;
-    s.training_target_generation = s.generation + generations;
+    s.training_target_generation = s.generation.saturating_add(generations);
     s.training_mode = mode;
     s.training_target_fitness = target_fitness;
     s.training_start_fitness = if s.best_fitness.is_finite() {
