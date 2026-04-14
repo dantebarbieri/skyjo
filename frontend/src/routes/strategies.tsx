@@ -12,6 +12,7 @@ import { cn } from '@/lib/utils';
 import { useDocumentTitle } from '@/hooks/use-document-title';
 import { getStrategyDescriptions } from '@/hooks/use-wasm';
 import { useWasmContext } from '@/contexts/wasm-context';
+import { NeuralNetworkViz } from '@/components/neural-network-viz';
 import type {
   StrategyDescriptionsData,
   StrategyDescription,
@@ -256,13 +257,25 @@ function StrategyDetail({
         </Card>
       </div>
 
-      {/* Decision Phases */}
-      <div className="space-y-5">
-        <h3 className="text-lg font-semibold">Decision Logic</h3>
-        {strategy.phases.map((phase) => (
-          <PhaseSection key={phase.phase} phase={phase} />
-        ))}
-      </div>
+      {/* Decision Phases / Neural Network */}
+      {strategy.name === 'Genetic' ? (
+        <div className="space-y-5">
+          <h3 className="text-lg font-semibold">Neural Network</h3>
+          <NeuralNetworkViz />
+          <Separator />
+          <h3 className="text-lg font-semibold">Decision Logic</h3>
+          {strategy.phases.map((phase) => (
+            <PhaseSection key={phase.phase} phase={phase} />
+          ))}
+        </div>
+      ) : (
+        <div className="space-y-5">
+          <h3 className="text-lg font-semibold">Decision Logic</h3>
+          {strategy.phases.map((phase) => (
+            <PhaseSection key={phase.phase} phase={phase} />
+          ))}
+        </div>
+      )}
 
       {/* Concepts Used */}
       {usedConcepts.length > 0 && (
@@ -374,7 +387,7 @@ function StrategyNav({
         </a>
       </nav>
       {/* Mobile: horizontal scrollable tabs */}
-      <nav className="lg:hidden flex gap-2 overflow-x-auto pb-2 -mx-1 px-1">
+      <nav className="lg:hidden sticky top-0 z-10 bg-background flex gap-2 overflow-x-auto py-2 -mx-4 px-4 border-b">
         {strategies.map((s) => (
           <button
             key={s.name}

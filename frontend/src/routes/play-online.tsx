@@ -609,7 +609,9 @@ function Lobby({
                   <SelectContent>
                     <SelectItem value="Empty">Empty</SelectItem>
                     {state.available_strategies.map(s => (
-                      <SelectItem key={s} value={`Bot:${s}`}>Bot: {s}</SelectItem>
+                      <SelectItem key={s} value={`Bot:${s}`}>
+                        Bot: {s}{s === 'Genetic' && state.genetic_generation > 0 ? ` (Gen ${state.genetic_generation})` : ''}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -618,7 +620,7 @@ function Lobby({
               {/* Non-creator sees bot badges */}
               {!isCreator && player.player_type.kind === 'Bot' && (
                 <Badge variant="secondary" className="text-xs shrink-0">
-                  Bot: {player.player_type.strategy}
+                  Bot: {player.player_type.strategy}{player.player_type.strategy === 'Genetic' && state.genetic_generation > 0 ? ` (Gen ${state.genetic_generation})` : ''}
                 </Badge>
               )}
 

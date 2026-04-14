@@ -5,9 +5,9 @@ use wasm_bindgen::prelude::*;
 
 use skyjo_core::{
     AggregateStats, ClearerStrategy, DefensiveStrategy, GamblerStrategy, Game, GameHistory,
-    GameStats, GreedyStrategy, InteractiveGame, MimicStrategy, PlayerAction, RandomStrategy, Rules,
-    RusherStrategy, SaboteurStrategy, Simulator, SimulatorConfig, StandardRules,
-    StatisticianStrategy, Strategy, SurvivorStrategy, common_concepts,
+    GameStats, GeneticStrategy, GreedyStrategy, InteractiveGame, MimicStrategy, PlayerAction,
+    RandomStrategy, Rules, RusherStrategy, SaboteurStrategy, Simulator, SimulatorConfig,
+    StandardRules, StatisticianStrategy, Strategy, SurvivorStrategy, common_concepts, GENOME_SIZE,
 };
 
 #[derive(Deserialize)]
@@ -50,6 +50,20 @@ fn make_strategy_factory(name: &str) -> Result<Box<dyn Fn() -> Box<dyn Strategy>
         "Survivor" => Ok(Box::new(|| Box::new(SurvivorStrategy))),
         "Mimic" => Ok(Box::new(|| Box::new(MimicStrategy))),
         "Saboteur" => Ok(Box::new(|| Box::new(SaboteurStrategy))),
+        s if s == "Genetic" || s.starts_with("Genetic:") => {
+            // Validate that the genome is loaded
+            GENETIC_MODEL.with(|m| {
+                let model = m.borrow();
+                let (genome, games) = model
+                    .as_ref()
+                    .ok_or("Genetic model not loaded. Call set_genetic_genome() first.")?;
+                let g = genome.clone();
+                let gt = *games;
+                Ok(Box::new(move || {
+                    Box::new(GeneticStrategy::new(g.clone(), gt)) as Box<dyn Strategy>
+                }) as Box<dyn Fn() -> Box<dyn Strategy>>)
+            })
+        }
         _ => Err(format!("Unknown strategy: {name}")),
     }
 }
@@ -77,6 +91,13 @@ fn make_strategy(name: &str) -> Result<Box<dyn Strategy>, String> {
         "Survivor" => Ok(Box::new(SurvivorStrategy)),
         "Mimic" => Ok(Box::new(MimicStrategy)),
         "Saboteur" => Ok(Box::new(SaboteurStrategy)),
+        s if s == "Genetic" || s.starts_with("Genetic:") => GENETIC_MODEL.with(|m| {
+            let model = m.borrow();
+            let (genome, games) = model
+                .as_ref()
+                .ok_or("Genetic model not loaded. Call set_genetic_genome() first.")?;
+            Ok(Box::new(GeneticStrategy::new(genome.clone(), *games)) as Box<dyn Strategy>)
+        }),
         _ => Err(format!("Unknown strategy: {name}")),
     }
 }
@@ -215,7 +236,8 @@ pub fn simulate_one_with_history(config_json: &str) -> String {
 
 #[wasm_bindgen]
 pub fn get_available_strategies() -> String {
-    serde_json::to_string(&["Random", "Greedy", "Defensive", "Clearer", "Statistician", "Rusher", "Gambler", "Survivor", "Mimic", "Saboteur"]).unwrap()
+    // Ordered by complexity: Trivial → Low → Medium → High
+    serde_json::to_string(&["Random", "Greedy", "Gambler", "Rusher", "Defensive", "Clearer", "Mimic", "Saboteur", "Survivor", "Statistician", "Genetic"]).unwrap()
 }
 
 #[wasm_bindgen]
@@ -228,11 +250,15 @@ pub fn get_available_rules() -> String {
 #[wasm_bindgen]
 pub fn get_strategy_descriptions() -> String {
     to_json_or_error(|| {
-        let names = ["Random", "Greedy", "Defensive", "Clearer", "Statistician", "Rusher", "Gambler", "Survivor", "Mimic", "Saboteur"];
-        let descriptions: Vec<_> = names
+        // Ordered by complexity: Trivial → Low → Medium → High
+        let names = ["Random", "Greedy", "Gambler", "Rusher", "Defensive", "Clearer", "Mimic", "Saboteur", "Survivor", "Statistician"];
+        let mut descriptions: Vec<_> = names
             .iter()
             .map(|n| make_strategy(n).map(|s| s.describe()))
             .collect::<Result<_, _>>()?;
+        // Genetic doesn't need a loaded genome to describe itself — use zero weights
+        let genetic = GeneticStrategy::new(vec![0.0; GENOME_SIZE], 0);
+        descriptions.push(genetic.describe());
         let concepts = common_concepts();
         Ok(serde_json::json!({
             "strategies": descriptions,
@@ -299,6 +325,8 @@ pub fn get_rules_info(rules_name: &str) -> String {
 thread_local! {
     static INTERACTIVE_GAMES: RefCell<HashMap<u32, InteractiveGame>> = RefCell::new(HashMap::new());
     static NEXT_GAME_ID: RefCell<u32> = const { RefCell::new(1) };
+    /// Cached genetic model genome and games_trained count, set via set_genetic_genome().
+    static GENETIC_MODEL: RefCell<Option<(Vec<f32>, usize)>> = const { RefCell::new(None) };
 }
 
 #[derive(Deserialize)]
@@ -420,4 +448,38 @@ pub fn destroy_interactive_game(game_id: u32) -> String {
         let removed = games.borrow_mut().remove(&game_id).is_some();
         serde_json::json!({ "removed": removed }).to_string()
     })
+}
+
+/// Set the genetic model genome for use in simulations and interactive games.
+/// Call this before using "Genetic" as a strategy name.
+/// Input: JSON string `{ "genome": [f32, ...], "games_trained": usize }`
+#[wasm_bindgen]
+pub fn set_genetic_genome(model_json: &str) -> String {
+    #[derive(Deserialize)]
+    struct GeneticInput {
+        genome: Vec<f32>,
+        games_trained: usize,
+    }
+
+    match serde_json::from_str::<GeneticInput>(model_json) {
+        Ok(input) => {
+            if input.genome.len() != GENOME_SIZE {
+                return serde_json::json!({
+                    "error": format!("Expected genome of size {GENOME_SIZE}, got {}", input.genome.len())
+                })
+                .to_string();
+            }
+            GENETIC_MODEL.with(|m| {
+                *m.borrow_mut() = Some((input.genome, input.games_trained));
+            });
+            serde_json::json!({ "ok": true }).to_string()
+        }
+        Err(e) => serde_json::json!({ "error": format!("Invalid model JSON: {e}") }).to_string(),
+    }
+}
+
+/// Check if a genetic model is currently loaded.
+#[wasm_bindgen]
+pub fn is_genetic_loaded() -> bool {
+    GENETIC_MODEL.with(|m| m.borrow().is_some())
 }

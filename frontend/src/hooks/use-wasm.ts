@@ -63,3 +63,24 @@ export function getStrategyDescriptions(): import('@/types').StrategyDescription
     return null;
   }
 }
+
+export function setGeneticGenome(genome: number[], gamesTrained: number): boolean {
+  if (!wasmModule) return false;
+  try {
+    const result = JSON.parse(
+      wasmModule.set_genetic_genome(JSON.stringify({ genome, games_trained: gamesTrained }))
+    );
+    return !!result.ok;
+  } catch {
+    return false;
+  }
+}
+
+export function isGeneticLoaded(): boolean {
+  if (!wasmModule) return false;
+  try {
+    return wasmModule.is_genetic_loaded();
+  } catch {
+    return false;
+  }
+}

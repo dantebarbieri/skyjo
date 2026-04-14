@@ -7,14 +7,14 @@ use tokio::sync::broadcast;
 
 use std::sync::Arc;
 
-use crate::lobby::Lobby;
+use crate::AppStateInner;
 use crate::messages::{ClientMessage, ServerMessage};
 use crate::room::SharedRoom;
 
 /// Handle a WebSocket connection for a player in a room.
 pub async fn handle_ws(
     ws: WebSocket,
-    lobby: Arc<Lobby>,
+    state: Arc<AppStateInner>,
     room: SharedRoom,
     room_code: String,
     player_index: usize,
@@ -73,7 +73,7 @@ pub async fn handle_ws(
                     Some(Ok(Message::Text(text))) => {
                         let response = handle_client_message(
                             &text,
-                            &lobby,
+                            &state,
                             &room,
                             player_index,
                         ).await;
@@ -145,14 +145,14 @@ pub async fn handle_ws(
         // Schedule auto-kick check for this player
         {
             let room_clone = room.clone();
-            let lobby_ref = lobby.clone();
+            let state_ref = state.clone();
             tokio::spawn(async move {
                 tokio::time::sleep(Duration::from_secs(60)).await;
                 let mut room_guard = room_clone.lock().await;
                 let kicked = room_guard.auto_kick_disconnected(Duration::from_secs(60));
                 for (_, token) in &kicked {
                     if let Some(t) = token {
-                        lobby_ref.sessions.remove(t);
+                        state_ref.lobby.sessions.remove(t);
                     }
                 }
                 if !kicked.is_empty() {
@@ -167,7 +167,7 @@ pub async fn handle_ws(
 
 async fn handle_client_message(
     text: &str,
-    lobby: &Lobby,
+    state: &Arc<AppStateInner>,
     room: &SharedRoom,
     player_index: usize,
 ) -> Option<ServerMessage> {
@@ -264,7 +264,7 @@ async fn handle_client_message(
                 Ok(token) => {
                     // Clean up the kicked player's session
                     if let Some(t) = token {
-                        lobby.sessions.remove(&t);
+                        state.lobby.sessions.remove(&t);
                     }
                     room_guard.broadcast_lobby_state();
                     None
@@ -289,7 +289,7 @@ async fn handle_client_message(
             match room_guard.ban_player(slot) {
                 Ok(token) => {
                     if let Some(t) = token {
-                        lobby.sessions.remove(&t);
+                        state.lobby.sessions.remove(&t);
                     }
                     room_guard.broadcast_lobby_state();
                     None
@@ -309,6 +309,36 @@ async fn handle_client_message(
                     code: "not_creator".to_string(),
                     message: "Only the room creator can start the game".to_string(),
                 });
+            }
+
+            // Snapshot the genetic genome if any player uses a Genetic strategy
+            let has_genetic = room_guard.players.iter().any(|p| {
+                matches!(&p.slot_type, crate::messages::PlayerSlotType::Bot { strategy } if strategy.starts_with("Genetic"))
+            });
+            if has_genetic {
+                let genetic = state.genetic.lock().await;
+                // For "Genetic" (latest), use best genome
+                // For "Genetic:name" (saved), resolve from saved generations
+                // We store the latest genome by default; saved generation lookups
+                // happen in apply_bot_action via the strategy name prefix
+                room_guard.genetic_genome = Some(genetic.best_genome.clone());
+                room_guard.genetic_games_trained = genetic.total_games_trained;
+                room_guard.genetic_generation = genetic.generation;
+
+                // If any player uses a saved generation, resolve its genome
+                let saved_name: Option<String> = room_guard.players.iter().find_map(|p| {
+                    if let crate::messages::PlayerSlotType::Bot { strategy } = &p.slot_type {
+                        strategy.strip_prefix("Genetic:").map(|s| s.to_string())
+                    } else {
+                        None
+                    }
+                });
+                if let Some(name) = saved_name
+                    && let Some((genome, games)) = genetic.get_saved_genome(&name)
+                {
+                    room_guard.genetic_genome = Some(genome);
+                    room_guard.genetic_games_trained = games;
+                }
             }
 
             match room_guard.start_game() {

@@ -194,6 +194,34 @@ export function useInteractiveGame(): UseInteractiveGame {
       setError(null);
       const mod = await ensureWasm();
 
+      // Download genetic model if any player uses a Genetic strategy
+      const geneticType = config.player_types.find(t => t.startsWith('Bot:Genetic'));
+      if (geneticType) {
+        try {
+          // Determine which endpoint to fetch from
+          const savedName = geneticType.startsWith('Bot:Genetic:') ? geneticType.slice(12) : null;
+          const url = savedName
+            ? `/api/genetic/saved/${encodeURIComponent(savedName)}/model`
+            : '/api/genetic/model';
+          const res = await fetch(url);
+          if (!res.ok) throw new Error('Server unavailable');
+          const modelData = await res.json();
+          const setResult = JSON.parse(
+            mod.set_genetic_genome(JSON.stringify({
+              genome: modelData.best_genome,
+              games_trained: modelData.total_games_trained,
+            }))
+          );
+          if (!setResult.ok) {
+            setError('Failed to load genetic model: ' + (setResult.error || 'unknown error'));
+            return;
+          }
+        } catch {
+          setError('Could not download genetic model. Make sure the game server is running.');
+          return;
+        }
+      }
+
       // Destroy previous game if any
       if (gameIdRef.current !== null) {
         mod.destroy_interactive_game(gameIdRef.current);

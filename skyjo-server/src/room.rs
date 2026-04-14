@@ -5,8 +5,10 @@ use rand::Rng;
 use tokio::sync::{broadcast, Mutex};
 
 use skyjo_core::{
-    ClearerStrategy, DefensiveStrategy, GreedyStrategy, InteractiveGame, InteractiveGameState,
-    PlayerAction, RandomStrategy, Rules, StandardRules, StatisticianStrategy, Strategy,
+    ClearerStrategy, DefensiveStrategy, GamblerStrategy, GeneticStrategy, GreedyStrategy,
+    InteractiveGame, InteractiveGameState, MimicStrategy, PlayerAction, RandomStrategy,
+    RusherStrategy, Rules, SaboteurStrategy, StandardRules, StatisticianStrategy, Strategy,
+    SurvivorStrategy,
 };
 
 use crate::messages::{
@@ -51,10 +53,16 @@ pub struct Room {
     pub banned_ips: Vec<String>,
     /// Winners from the last completed game (for crown display in lobby).
     pub last_winners: Vec<usize>,
+    /// Cached best genetic genome for constructing GeneticStrategy bots.
+    pub genetic_genome: Option<Vec<f32>>,
+    /// Number of games the genetic model has been trained on.
+    pub genetic_games_trained: usize,
+    /// Current generation of the genetic model.
+    pub genetic_generation: usize,
 }
 
 impl Room {
-    pub fn new(code: String, creator_name: String, num_players: usize, rules: Option<String>) -> Self {
+    pub fn new(code: String, creator_name: String, num_players: usize, rules: Option<String>, genetic_games_trained: usize, genetic_generation: usize) -> Self {
         let (broadcast_tx, _) = broadcast::channel(256);
 
         let rules_name = rules.unwrap_or_else(|| "Standard".to_string());
@@ -93,6 +101,9 @@ impl Room {
             broadcast_tx,
             banned_ips: Vec::new(),
             last_winners: Vec::new(),
+            genetic_genome: None,
+            genetic_games_trained,
+            genetic_generation,
         }
     }
 
@@ -150,7 +161,10 @@ impl Room {
             }
             s if s.starts_with("Bot:") => {
                 let strategy = &s[4..];
-                make_strategy(strategy)?;
+                // Validate strategy name (Genetic variants are valid even without genome at config time)
+                if !strategy.starts_with("Genetic") {
+                    make_strategy(strategy, None, 0)?;
+                }
                 // If this slot had a human, disconnect them
                 self.players[slot] = PlayerSlot {
                     name: format!("Bot ({})", strategy),
@@ -364,7 +378,11 @@ impl Room {
                 _ => return Err("Current player is not a bot".to_string()),
             };
 
-            let strategy = make_strategy(&strategy_name)?;
+            let strategy = make_strategy(
+                &strategy_name,
+                self.genetic_genome.as_ref(),
+                self.genetic_games_trained,
+            )?;
             let action = game
                 .get_bot_action(strategy.as_ref())
                 .map_err(|e| e.to_string())?;
@@ -553,6 +571,8 @@ impl Room {
             available_rules: available_rules(),
             idle_timeout_secs,
             last_winners: self.last_winners.clone(),
+            genetic_games_trained: self.genetic_games_trained,
+            genetic_generation: self.genetic_generation,
         }
     }
 
@@ -627,13 +647,36 @@ impl Room {
 /// Shared room handle for concurrent access.
 pub type SharedRoom = Arc<Mutex<Room>>;
 
-fn make_strategy(name: &str) -> Result<Box<dyn Strategy>, String> {
+fn make_strategy(
+    name: &str,
+    genetic_genome: Option<&Vec<f32>>,
+    genetic_games_trained: usize,
+) -> Result<Box<dyn Strategy>, String> {
     match name {
         "Random" => Ok(Box::new(RandomStrategy)),
         "Greedy" => Ok(Box::new(GreedyStrategy)),
         "Defensive" => Ok(Box::new(DefensiveStrategy)),
         "Clearer" => Ok(Box::new(ClearerStrategy)),
         "Statistician" => Ok(Box::new(StatisticianStrategy)),
+        "Rusher" => Ok(Box::new(RusherStrategy)),
+        "Gambler" => Ok(Box::new(GamblerStrategy)),
+        "Survivor" => Ok(Box::new(SurvivorStrategy)),
+        "Mimic" => Ok(Box::new(MimicStrategy)),
+        "Saboteur" => Ok(Box::new(SaboteurStrategy)),
+        "Genetic" => {
+            let genome = genetic_genome
+                .ok_or("Genetic strategy requires a trained model")?
+                .clone();
+            Ok(Box::new(GeneticStrategy::new(genome, genetic_games_trained)))
+        }
+        s if s.starts_with("Genetic:") => {
+            // Specific saved generation: "Genetic:Gen 50"
+            // Genome is provided via genetic_genome (resolved by caller)
+            let genome = genetic_genome
+                .ok_or("Saved genetic generation not found")?
+                .clone();
+            Ok(Box::new(GeneticStrategy::new(genome, genetic_games_trained)))
+        }
         _ => Err(format!("Unknown strategy: {name}")),
     }
 }
@@ -646,12 +689,19 @@ fn make_rules(name: &str) -> Result<Box<dyn Rules>, String> {
 }
 
 pub fn available_strategies() -> Vec<String> {
+    // Ordered by complexity: Trivial → Low → Medium → High
     vec![
         "Random".to_string(),
         "Greedy".to_string(),
+        "Gambler".to_string(),
+        "Rusher".to_string(),
         "Defensive".to_string(),
         "Clearer".to_string(),
+        "Mimic".to_string(),
+        "Saboteur".to_string(),
+        "Survivor".to_string(),
         "Statistician".to_string(),
+        "Genetic".to_string(),
     ]
 }
 

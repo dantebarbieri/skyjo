@@ -18,6 +18,7 @@ const sections = [
   { id: 'columns', label: 'Column Clearing' },
   { id: 'going-out', label: 'Going Out' },
   { id: 'scoring', label: 'Scoring' },
+  { id: 'strategy-guide', label: 'Strategy Guide' },
 ];
 
 function TableOfContents() {
@@ -69,7 +70,7 @@ function TableOfContents() {
   }, []);
 
   return (
-    <nav className="sticky top-8 z-10 bg-background py-2 lg:py-0 shrink-0 border-b lg:border-b-0 -mx-3 px-3 sm:-mx-4 sm:px-4 lg:mx-0 lg:px-0 self-start">
+    <nav className="sticky top-0 lg:top-8 z-10 bg-background py-2 lg:py-0 shrink-0 border-b lg:border-b-0 -mx-3 px-3 sm:-mx-4 sm:px-4 lg:mx-0 lg:px-0 self-start">
       {/* Horizontal scrollable nav on small/medium screens, vertical sidebar on large */}
       <ul className="flex lg:flex-col gap-1 text-sm overflow-x-auto pb-1 lg:pb-0 lg:w-48">
         {sections.map(({ id, label }) => (
@@ -96,7 +97,7 @@ function TableOfContents() {
 
 function OverviewSection() {
   return (
-    <section id="overview" className="scroll-mt-20">
+    <section id="overview" className="scroll-mt-12 lg:scroll-mt-20">
       <h2 className="text-2xl font-bold mb-4">Overview</h2>
       <Card>
         <CardContent className="pt-6 space-y-3 text-sm leading-relaxed">
@@ -133,7 +134,7 @@ const DECK_COMPOSITION: { value: number; count: number }[] = [
 
 function CardsSection() {
   return (
-    <section id="cards" className="scroll-mt-20">
+    <section id="cards" className="scroll-mt-12 lg:scroll-mt-20">
       <h2 className="text-2xl font-bold mb-4">Cards & Deck</h2>
       <Card>
         <CardContent className="pt-6 space-y-4">
@@ -183,7 +184,7 @@ function SetupSection() {
   const handleReset = useCallback(() => setFlipped(new Set()), []);
 
   return (
-    <section id="setup" className="scroll-mt-20">
+    <section id="setup" className="scroll-mt-12 lg:scroll-mt-20">
       <h2 className="text-2xl font-bold mb-4">Setup</h2>
       <Card>
         <CardContent className="pt-6 space-y-4">
@@ -383,7 +384,7 @@ function TurnFlowSection() {
   const isDone = phase === 'placed' || phase === 'discarded_and_flipped';
 
   return (
-    <section id="turns" className="scroll-mt-20">
+    <section id="turns" className="scroll-mt-12 lg:scroll-mt-20">
       <h2 className="text-2xl font-bold mb-4">Turn Flow</h2>
       <Card>
         <CardContent className="pt-6 space-y-4">
@@ -564,7 +565,7 @@ function ColumnClearSection() {
       : null;
 
   return (
-    <section id="columns" className="scroll-mt-20">
+    <section id="columns" className="scroll-mt-12 lg:scroll-mt-20">
       <h2 className="text-2xl font-bold mb-4">Column Clearing</h2>
       <Card>
         <CardContent className="pt-6 space-y-4">
@@ -630,7 +631,7 @@ function ColumnClearSection() {
 
 function GoingOutSection() {
   return (
-    <section id="going-out" className="scroll-mt-20">
+    <section id="going-out" className="scroll-mt-12 lg:scroll-mt-20">
       <h2 className="text-2xl font-bold mb-4">Going Out & Penalties</h2>
       <Card>
         <CardContent className="pt-6 space-y-4">
@@ -730,7 +731,7 @@ function ScoringSection() {
   }, [loadSampleGame]);
 
   return (
-    <section id="scoring" className="scroll-mt-20">
+    <section id="scoring" className="scroll-mt-12 lg:scroll-mt-20">
       <h2 className="text-2xl font-bold mb-4">Scoring</h2>
       <Card>
         <CardContent className="pt-6 space-y-4">
@@ -765,6 +766,64 @@ function ScoringSection() {
 
 // --- Main Rules Route ---
 
+// --- Section: Strategy Guide ---
+
+function StrategyGuideSection() {
+  return (
+    <section id="strategy-guide" className="scroll-mt-12 lg:scroll-mt-20">
+      <h2 className="text-2xl font-bold mb-4">Strategy Guide</h2>
+      <Card>
+        <CardContent className="pt-6 space-y-4 text-sm leading-relaxed">
+          <p>
+            Skyjo rewards a balance of <strong>risk management</strong> and{' '}
+            <strong>information advantage</strong>. Here are the key principles that strong players
+            follow:
+          </p>
+          <ul className="space-y-2 ml-4 list-disc">
+            <li>
+              <strong>Keep low, discard high.</strong> Always swap in cards valued 0 or below when
+              possible. Replace your highest revealed cards first.
+            </li>
+            <li>
+              <strong>Flip strategically.</strong> When you discard a drawn card, choose which hidden
+              card to flip carefully — columns with partial matches are good candidates.
+            </li>
+            <li>
+              <strong>Aim for column clears.</strong> Three matching cards in a column are discarded
+              entirely, removing up to 36 points (three 12s). Building toward column clears is one of
+              the strongest plays.
+            </li>
+            <li>
+              <strong>Count cards.</strong> Track which cards are visible on all boards and in the
+              discard pile. If all copies of a value you need are gone, abandon that column clear.
+            </li>
+            <li>
+              <strong>Go out at the right time.</strong> Only reveal your last cards when you are
+              confident you have the lowest score — the penalty for going out wrong is severe (score
+              doubled).
+            </li>
+          </ul>
+          <p>
+            This project includes {' '}
+            <strong>11 AI strategies</strong> ranging from Random (pure chance) to Statistician
+            (expected-value calculations with card counting) and a neural network Genetic bot that
+            learns through evolution.
+          </p>
+          <div className="pt-2">
+            <Link
+              to="/rules/strategies"
+              className="inline-flex items-center gap-1 text-primary hover:underline font-medium"
+            >
+              Explore the full Strategy Guide
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+            </Link>
+          </div>
+        </CardContent>
+      </Card>
+    </section>
+  );
+}
+
 export default function RulesRoute() {
   useDocumentTitle('Rules');
   return (
@@ -780,6 +839,7 @@ export default function RulesRoute() {
           <ColumnClearSection />
           <GoingOutSection />
           <ScoringSection />
+          <StrategyGuideSection />
         </div>
       </div>
     </>

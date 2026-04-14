@@ -132,7 +132,8 @@ export type WorkerRequest =
   | { type: 'pause' }
   | { type: 'resume' }
   | { type: 'stop' }
-  | { type: 'requestRealtimeGame' };
+  | { type: 'requestRealtimeGame' }
+  | { type: 'setGeneticGenome'; genome: number[]; gamesTrained: number };
 
 export interface ProgressStats {
   num_games: number;
@@ -278,4 +279,38 @@ export interface CommonConcept {
 export interface StrategyDescriptionsData {
   strategies: StrategyDescription[];
   common_concepts: CommonConcept[];
+}
+
+// Genetic model types
+
+export interface GeneticModelData {
+  best_genome: number[];
+  input_size: number;
+  hidden_size: number;
+  output_size: number;
+  generation: number;
+  total_games_trained: number;
+  input_labels: string[];
+  output_labels: string[];
+  input_groups: [string, number, number][];
+  output_groups: [string, number, number][];
+}
+
+export interface SavedGenerationInfo {
+  name: string;
+  generation: number;
+  total_games_trained: number;
+  best_fitness: number;
+  saved_at: string;
+}
+
+export interface GeneticTrainingStatus {
+  is_training: boolean;
+  generation: number;
+  total_games_trained: number;
+  best_fitness: number;
+  training_start_generation: number;
+  training_target_generation: number;
+  training_elapsed_ms: number;
+  training_last_gen_elapsed_ms: number;
 }

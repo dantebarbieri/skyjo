@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -116,6 +116,16 @@ function GameSetup({
     () => lastConfig?.rules ?? 'Standard'
   );
   const [seed, setSeed] = useState(() => Math.floor(Math.random() * 1000000));
+  const [savedGens, setSavedGens] = useState<{ name: string; generation: number }[]>([]);
+
+  // Fetch saved genetic generations for the generation picker
+  useEffect(() => {
+    if (!strategies.includes('Genetic')) return;
+    fetch('/api/genetic/saved')
+      .then(res => res.ok ? res.json() : [])
+      .then(data => setSavedGens(data.map((sg: { name: string; generation: number }) => ({ name: sg.name, generation: sg.generation }))))
+      .catch(() => {});
+  }, [strategies]);
 
   // Build dropdown options: "Human" + "Bot - <Strategy>" for each strategy
   const typeOptions: { value: PlayerType; label: string }[] = [
@@ -239,6 +249,25 @@ function GameSetup({
                     ))}
                   </SelectContent>
                 </Select>
+                {/* Generation picker for Genetic bots */}
+                {playerTypes[i]?.startsWith('Bot:Genetic') && (
+                  <Select
+                    value={playerTypes[i] === 'Bot:Genetic' ? '__latest__' : playerTypes[i]?.slice(12) || '__latest__'}
+                    onValueChange={(v) => handleTypeChange(i, v === '__latest__' ? 'Bot:Genetic' : `Bot:Genetic:${v}` as PlayerType)}
+                  >
+                    <SelectTrigger className="w-24 sm:w-32 shrink-0 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__latest__">Latest</SelectItem>
+                      {savedGens.map((sg) => (
+                        <SelectItem key={sg.name} value={sg.name}>
+                          {sg.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
                 <Input
                   placeholder={
                     playerTypes[i] === 'Human'

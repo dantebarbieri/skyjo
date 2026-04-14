@@ -13,6 +13,8 @@ export interface RoomLobbyState {
   available_rules: string[];
   idle_timeout_secs: number | null;
   last_winners: number[];
+  genetic_games_trained: number;
+  genetic_generation: number;
 }
 
 export interface LobbyPlayer {

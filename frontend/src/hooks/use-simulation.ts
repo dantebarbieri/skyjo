@@ -56,9 +56,35 @@ export function useSimulation() {
     worker.onmessage = (e: MessageEvent<WorkerResponse>) => {
       const msg = e.data;
       switch (msg.type) {
-        case 'ready':
-          worker.postMessage({ type: 'start', config: cfg });
+        case 'ready': {
+          const geneticStrategy = cfg.strategies.find(s => s.startsWith('Genetic'));
+          if (geneticStrategy) {
+            const savedName = geneticStrategy.startsWith('Genetic:') ? geneticStrategy.slice(8) : null;
+            const url = savedName
+              ? `/api/genetic/saved/${encodeURIComponent(savedName)}/model`
+              : '/api/genetic/model';
+            fetch(url)
+              .then(res => {
+                if (!res.ok) throw new Error('Server unavailable');
+                return res.json();
+              })
+              .then(modelData => {
+                worker.postMessage({
+                  type: 'setGeneticGenome',
+                  genome: modelData.best_genome,
+                  gamesTrained: modelData.total_games_trained,
+                });
+                worker.postMessage({ type: 'start', config: cfg });
+              })
+              .catch(() => {
+                setError('Could not download genetic model. Make sure the game server is running.');
+                setStatus('idle');
+              });
+          } else {
+            worker.postMessage({ type: 'start', config: cfg });
+          }
           break;
+        }
         case 'progress':
           setStats(msg.stats);
           setGamesCompleted(msg.gamesCompleted);

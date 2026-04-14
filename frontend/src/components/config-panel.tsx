@@ -44,6 +44,16 @@ export default function ConfigPanel({
   const [playerCount, setPlayerCount] = useState(DEFAULTS.playerCount);
   const [playerStrategies, setPlayerStrategies] = useState<string[]>([]);
   const [bulkStrategy, setBulkStrategy] = useState(strategies[0] ?? '');
+  const [savedGens, setSavedGens] = useState<{ name: string; generation: number }[]>([]);
+
+  // Fetch saved genetic generations
+  useEffect(() => {
+    if (!strategies.includes('Genetic')) return;
+    fetch('/api/genetic/saved')
+      .then(res => res.ok ? res.json() : [])
+      .then(data => setSavedGens(data.map((sg: { name: string; generation: number }) => ({ name: sg.name, generation: sg.generation }))))
+      .catch(() => {});
+  }, [strategies]);
 
   useEffect(() => {
     const strats: string[] = [];
@@ -203,10 +213,29 @@ export default function ConfigPanel({
                     ))}
                   </SelectContent>
                 </Select>
+                {/* Generation picker for Genetic */}
+                {strat.startsWith('Genetic') && (
+                  <Select
+                    value={strat === 'Genetic' ? '__latest__' : strat.slice(8)}
+                    onValueChange={(v) => updateStrategy(i, v === '__latest__' ? 'Genetic' : `Genetic:${v}`)}
+                  >
+                    <SelectTrigger className="w-24 shrink-0 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__latest__">Latest</SelectItem>
+                      {savedGens.map((sg) => (
+                        <SelectItem key={sg.name} value={sg.name}>
+                          {sg.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
                 <Link
-                  to={`/rules/strategies/${strat}`}
+                  to={`/rules/strategies/${strat.startsWith('Genetic:') ? 'Genetic' : strat}`}
                   className="text-muted-foreground hover:text-primary transition-colors shrink-0"
-                  title={`View ${strat} strategy guide`}
+                  title={`View ${strat.startsWith('Genetic:') ? 'Genetic' : strat} strategy guide`}
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
                 </Link>

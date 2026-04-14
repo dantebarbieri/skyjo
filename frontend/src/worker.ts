@@ -1,4 +1,4 @@
-import init, { simulate_one, simulate_one_with_history } from '../pkg/skyjo_wasm.js';
+import init, { simulate_one, simulate_one_with_history, set_genetic_genome } from '../pkg/skyjo_wasm.js';
 import type { GameHistory, GameStats, ProgressStats, SimConfig, WorkerRequest, WorkerResponse } from './types';
 
 let paused = false;
@@ -195,6 +195,16 @@ self.addEventListener('message', (e: MessageEvent<WorkerRequest>) => {
       break;
     case 'requestRealtimeGame':
       realtimeRequested = true;
+      break;
+    case 'setGeneticGenome':
+      try {
+        set_genetic_genome(JSON.stringify({
+          genome: msg.genome,
+          games_trained: msg.gamesTrained,
+        }));
+      } catch (err) {
+        post({ type: 'error', message: `Failed to set genetic genome: ${err}` });
+      }
       break;
   }
 });

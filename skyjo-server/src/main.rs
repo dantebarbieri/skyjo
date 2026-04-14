@@ -1,3 +1,4 @@
+mod genetic;
 mod lobby;
 mod messages;
 mod room;
@@ -16,9 +17,11 @@ use axum::routing::{get, post};
 use axum::Router;
 use clap::Parser;
 use serde::Deserialize;
+use tokio::sync::Mutex;
 use tower_http::compression::CompressionLayer;
 use tower_http::services::{ServeDir, ServeFile};
 
+use genetic::GeneticTrainingState;
 use lobby::{
     CreateRoomRequest, CreateRoomResponse, JoinRoomRequest, JoinRoomResponse, Lobby,
     RoomInfoResponse,
@@ -34,9 +37,18 @@ struct Args {
     /// Directory containing static frontend files.
     #[arg(long, default_value = "./static")]
     static_dir: PathBuf,
+
+    /// Path to the genetic model file.
+    #[arg(long, default_value = "./genetic_model.json")]
+    genetic_model_path: PathBuf,
 }
 
-type AppState = Arc<Lobby>;
+pub struct AppStateInner {
+    pub lobby: Lobby,
+    pub genetic: Arc<Mutex<GeneticTrainingState>>,
+}
+
+type AppState = Arc<AppStateInner>;
 
 #[tokio::main]
 async fn main() {
@@ -50,15 +62,22 @@ async fn main() {
 
     let args = Args::parse();
 
-    let lobby = Arc::new(Lobby::new(100));
+    let genetic_state = Arc::new(Mutex::new(GeneticTrainingState::load_or_new(
+        args.genetic_model_path,
+    )));
+
+    let app_state = Arc::new(AppStateInner {
+        lobby: Lobby::new(100),
+        genetic: genetic_state,
+    });
 
     // Spawn room cleanup task
-    let lobby_cleanup = lobby.clone();
+    let cleanup_state = app_state.clone();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(60));
         loop {
             interval.tick().await;
-            lobby_cleanup.cleanup_stale_rooms(
+            cleanup_state.lobby.cleanup_stale_rooms(
                 Duration::from_secs(300),  // 5 min after game over
                 Duration::from_secs(600),  // 10 min after all disconnect
             );
@@ -70,7 +89,14 @@ async fn main() {
         .route("/rooms", post(create_room))
         .route("/rooms/{code}", get(room_info))
         .route("/rooms/{code}/join", post(join_room))
-        .route("/rooms/{code}/ws", get(ws_upgrade));
+        .route("/rooms/{code}/ws", get(ws_upgrade))
+        .route("/genetic/model", get(genetic_model))
+        .route("/genetic/train", post(genetic_train))
+        .route("/genetic/status", get(genetic_status))
+        .route("/genetic/saved", get(genetic_saved_list).post(genetic_save))
+        .route("/genetic/saved/import", post(genetic_import))
+        .route("/genetic/saved/{name}", axum::routing::delete(genetic_saved_delete))
+        .route("/genetic/saved/{name}/model", get(genetic_saved_model));
 
     // SPA fallback: serve index.html for any non-file route
     let index_path = args.static_dir.join("index.html");
@@ -81,7 +107,7 @@ async fn main() {
         .nest("/api", api_routes)
         .fallback_service(static_service)
         .layer(CompressionLayer::new())
-        .with_state(lobby);
+        .with_state(app_state);
 
     let addr = format!("0.0.0.0:{}", args.port);
     tracing::info!("Starting server on {addr}");
@@ -99,11 +125,16 @@ async fn main() {
 // --- REST Handlers ---
 
 async fn create_room(
-    State(lobby): State<AppState>,
+    State(state): State<AppState>,
     Json(req): Json<CreateRoomRequest>,
 ) -> Result<Json<CreateRoomResponse>, (StatusCode, String)> {
-    let (code, token, player_index) = lobby
-        .create_room(req.player_name, req.num_players, req.rules)
+    let (genetic_games, genetic_gen) = {
+        let g = state.genetic.lock().await;
+        (g.total_games_trained, g.generation)
+    };
+    let (code, token, player_index) = state
+        .lobby
+        .create_room(req.player_name, req.num_players, req.rules, genetic_games, genetic_gen)
         .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
 
     Ok(Json(CreateRoomResponse {
@@ -114,10 +145,11 @@ async fn create_room(
 }
 
 async fn room_info(
-    State(lobby): State<AppState>,
+    State(state): State<AppState>,
     Path(code): Path<String>,
 ) -> Result<Json<RoomInfoResponse>, (StatusCode, String)> {
-    let room_ref = lobby
+    let room_ref = state
+        .lobby
         .get_room(&code)
         .ok_or((StatusCode::NOT_FOUND, "Room not found".to_string()))?;
 
@@ -144,11 +176,12 @@ async fn room_info(
 }
 
 async fn join_room(
-    State(lobby): State<AppState>,
+    State(state): State<AppState>,
     Path(code): Path<String>,
     Json(req): Json<JoinRoomRequest>,
 ) -> Result<Json<JoinRoomResponse>, (StatusCode, String)> {
-    let (token, player_index) = lobby
+    let (token, player_index) = state
+        .lobby
         .join_room(&code, req.player_name)
         .await
         .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
@@ -165,14 +198,15 @@ struct WsQuery {
 }
 
 async fn ws_upgrade(
-    State(lobby): State<AppState>,
+    State(state): State<AppState>,
     Path(code): Path<String>,
     Query(query): Query<WsQuery>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     ws: WebSocketUpgrade,
 ) -> Result<Response, (StatusCode, String)> {
     // Authenticate session token
-    let (room_code, player_index) = lobby
+    let (room_code, player_index) = state
+        .lobby
         .get_session(&query.token)
         .ok_or((StatusCode::UNAUTHORIZED, "Invalid session token".to_string()))?;
 
@@ -183,7 +217,8 @@ async fn ws_upgrade(
         ));
     }
 
-    let room = lobby
+    let room = state
+        .lobby
         .get_room(&code)
         .ok_or((StatusCode::NOT_FOUND, "Room not found".to_string()))?;
 
@@ -200,8 +235,120 @@ async fn ws_upgrade(
     }
 
     let client_ip = addr.ip().to_string();
-
     Ok(ws.on_upgrade(move |socket| async move {
-        ws::handle_ws(socket, lobby, room, room_code, player_index, client_ip).await;
+        ws::handle_ws(socket, state, room, room_code, player_index, client_ip).await;
     }))
+}
+
+// --- Genetic API handlers ---
+
+async fn genetic_model(
+    State(state): State<AppState>,
+) -> Json<genetic::GeneticModelData> {
+    let s = state.genetic.lock().await;
+    Json(s.model_data())
+}
+
+#[derive(Deserialize)]
+struct TrainRequest {
+    generations: usize,
+}
+
+async fn genetic_train(
+    State(state): State<AppState>,
+    Json(req): Json<TrainRequest>,
+) -> Result<Json<genetic::TrainingStatus>, (StatusCode, String)> {
+    let generations = req.generations.min(10000); // cap at 10k
+
+    let mut s = state.genetic.lock().await;
+    if s.is_training {
+        return Ok(Json(s.status()));
+    }
+    s.is_training = true;
+    s.training_start_generation = s.generation;
+    s.training_target_generation = s.generation + generations;
+    s.training_started_at = Some(std::time::Instant::now());
+    let status = s.status();
+    drop(s);
+
+    let genetic = state.genetic.clone();
+    tokio::spawn(async move {
+        genetic::train_generations(genetic, generations).await;
+    });
+
+    Ok(Json(status))
+}
+
+async fn genetic_status(
+    State(state): State<AppState>,
+) -> Json<genetic::TrainingStatus> {
+    let s = state.genetic.lock().await;
+    Json(s.status())
+}
+
+async fn genetic_saved_list(
+    State(state): State<AppState>,
+) -> Json<Vec<genetic::SavedGenerationInfo>> {
+    let s = state.genetic.lock().await;
+    Json(s.list_saved_generations())
+}
+
+#[derive(Deserialize)]
+struct SaveRequest {
+    name: Option<String>,
+}
+
+async fn genetic_save(
+    State(state): State<AppState>,
+    Json(req): Json<SaveRequest>,
+) -> Result<Json<genetic::SavedGenerationInfo>, (StatusCode, String)> {
+    let mut s = state.genetic.lock().await;
+    s.save_generation(req.name)
+        .map(Json)
+        .map_err(|e| (StatusCode::BAD_REQUEST, e))
+}
+
+async fn genetic_saved_delete(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let mut s = state.genetic.lock().await;
+    s.delete_saved_generation(&name)
+        .map(|()| Json(serde_json::json!({ "deleted": name })))
+        .map_err(|e| (StatusCode::NOT_FOUND, e))
+}
+
+#[derive(Deserialize)]
+struct ImportRequest {
+    name: String,
+    genome: Vec<f32>,
+    generation: Option<usize>,
+    total_games_trained: Option<usize>,
+    best_fitness: Option<f64>,
+}
+
+async fn genetic_import(
+    State(state): State<AppState>,
+    Json(req): Json<ImportRequest>,
+) -> Result<Json<genetic::SavedGenerationInfo>, (StatusCode, String)> {
+    let mut s = state.genetic.lock().await;
+    s.import_generation(
+        req.name,
+        req.genome,
+        req.generation.unwrap_or(0),
+        req.total_games_trained.unwrap_or(0),
+        req.best_fitness.unwrap_or(0.0),
+    )
+    .map(Json)
+    .map_err(|e| (StatusCode::BAD_REQUEST, e))
+}
+
+async fn genetic_saved_model(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Result<Json<genetic::GeneticModelData>, (StatusCode, String)> {
+    let s = state.genetic.lock().await;
+    s.get_saved_generation_model(&name)
+        .map(Json)
+        .map_err(|e| (StatusCode::NOT_FOUND, e))
 }

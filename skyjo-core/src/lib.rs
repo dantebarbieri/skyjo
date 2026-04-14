@@ -19,8 +19,13 @@ pub use rules::{Rules, StandardRules};
 pub use simulator::{AggregateStats, GameStats, Simulator, SimulatorConfig};
 pub use strategies::common::common_concepts;
 pub use strategies::{
-    ClearerStrategy, DefensiveStrategy, GamblerStrategy, GreedyStrategy, MimicStrategy,
-    RandomStrategy, RusherStrategy, SaboteurStrategy, StatisticianStrategy, SurvivorStrategy,
+    ClearerStrategy, DefensiveStrategy, GamblerStrategy, GeneticStrategy, GreedyStrategy,
+    MimicStrategy, RandomStrategy, RusherStrategy, SaboteurStrategy, StatisticianStrategy,
+    SurvivorStrategy,
+};
+pub use strategies::genetic::{
+    self as genetic_nn, NeuralNetwork, GENOME_SIZE, HIDDEN_SIZE, INPUT_GROUPS, INPUT_LABELS,
+    INPUT_SIZE, OUTPUT_GROUPS, OUTPUT_LABELS, OUTPUT_SIZE,
 };
 pub use strategy::{
     Complexity, ConceptReference, DecisionLogic, DecisionNode, DeckDrawAction, DrawChoice, Phase,
@@ -44,6 +49,7 @@ mod describe_tests {
             Box::new(SurvivorStrategy),
             Box::new(MimicStrategy),
             Box::new(SaboteurStrategy),
+            Box::new(GeneticStrategy::new(vec![0.0; GENOME_SIZE], 0)),
         ];
         for s in &strategies {
             let desc = s.describe();

@@ -110,6 +110,10 @@ pub struct RoomLobbyState {
     pub idle_timeout_secs: Option<u64>,
     /// Player indices who won the last game (shown as crowns in lobby).
     pub last_winners: Vec<usize>,
+    /// Number of games the genetic bot model has been trained on.
+    pub genetic_games_trained: usize,
+    /// Current generation of the genetic bot model.
+    pub genetic_generation: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]

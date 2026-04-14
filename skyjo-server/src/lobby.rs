@@ -48,6 +48,8 @@ impl Lobby {
         player_name: String,
         num_players: usize,
         rules: Option<String>,
+        genetic_games_trained: usize,
+        genetic_generation: usize,
     ) -> Result<(String, SessionToken, usize), String> {
         if !(2..=8).contains(&num_players) {
             return Err("Player count must be 2-8".to_string());
@@ -60,7 +62,7 @@ impl Lobby {
         let token = SessionToken::new();
         let player_index = 0;
 
-        let mut room = Room::new(code.clone(), player_name, num_players, rules);
+        let mut room = Room::new(code.clone(), player_name, num_players, rules, genetic_games_trained, genetic_generation);
         room.players[player_index].session_token = Some(token.clone());
 
         let shared = Arc::new(Mutex::new(room));

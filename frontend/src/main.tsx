@@ -8,6 +8,7 @@ import PlayRoute from '@/routes/play';
 import PlayOnlineRoute from '@/routes/play-online';
 import RulesRoute from '@/routes/rules';
 import StrategiesRoute from '@/routes/strategies';
+import GeneticManageRoute from '@/routes/genetic-manage';
 import './index.css';
 
 createRoot(document.getElementById('root')!).render(
@@ -23,6 +24,7 @@ createRoot(document.getElementById('root')!).render(
             <Route path="play/online/:roomCode" element={<PlayOnlineRoute />} />
             <Route path="rules" element={<RulesRoute />} />
             <Route path="rules/strategies" element={<StrategiesRoute />} />
+            <Route path="rules/strategies/Genetic/manage" element={<GeneticManageRoute />} />
             <Route path="rules/strategies/:strategyName" element={<StrategiesRoute />} />
           </Route>
         </Routes>
