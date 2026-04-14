@@ -2,6 +2,43 @@ use rusqlite::{Connection, params};
 use std::path::Path;
 use std::sync::Mutex;
 
+#[derive(Debug)]
+pub enum PersistenceError {
+    Sqlite(rusqlite::Error),
+    Io(std::io::Error),
+    Json(serde_json::Error),
+    LockPoisoned,
+}
+
+impl std::fmt::Display for PersistenceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Sqlite(e) => write!(f, "SQLite error: {e}"),
+            Self::Io(e) => write!(f, "IO error: {e}"),
+            Self::Json(e) => write!(f, "JSON error: {e}"),
+            Self::LockPoisoned => write!(f, "database connection mutex poisoned"),
+        }
+    }
+}
+
+impl std::error::Error for PersistenceError {}
+
+impl From<rusqlite::Error> for PersistenceError {
+    fn from(e: rusqlite::Error) -> Self {
+        Self::Sqlite(e)
+    }
+}
+impl From<std::io::Error> for PersistenceError {
+    fn from(e: std::io::Error) -> Self {
+        Self::Io(e)
+    }
+}
+impl From<serde_json::Error> for PersistenceError {
+    fn from(e: serde_json::Error) -> Self {
+        Self::Json(e)
+    }
+}
+
 /// Persistent storage layer backed by SQLite.
 pub struct Persistence {
     conn: Mutex<Connection>,
@@ -9,7 +46,7 @@ pub struct Persistence {
 
 impl Persistence {
     /// Open or create the SQLite database at the given path.
-    pub fn open(path: &Path) -> Result<Self, rusqlite::Error> {
+    pub fn open(path: &Path) -> Result<Self, PersistenceError> {
         let conn = Connection::open(path)?;
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
         let persistence = Self {
@@ -20,8 +57,11 @@ impl Persistence {
     }
 
     /// Run schema migrations.
-    fn migrate(&self) -> Result<(), rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+    fn migrate(&self) -> Result<(), PersistenceError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| PersistenceError::LockPoisoned)?;
         conn.execute_batch(
             "
             CREATE TABLE IF NOT EXISTS game_replays (
@@ -71,14 +111,16 @@ impl Persistence {
         seed: u64,
         history_json: &str,
         winner_indices: &[usize],
-    ) -> Result<(), rusqlite::Error> {
-        let compressed =
-            zstd::encode_all(history_json.as_bytes(), 3).expect("zstd compression failed");
-        let players_json = serde_json::to_string(players).unwrap();
-        let winners_json = serde_json::to_string(winner_indices).unwrap();
+    ) -> Result<(), PersistenceError> {
+        let compressed = zstd::encode_all(history_json.as_bytes(), 3)?;
+        let players_json = serde_json::to_string(players)?;
+        let winners_json = serde_json::to_string(winner_indices)?;
         let now = chrono::Utc::now().to_rfc3339();
 
-        let conn = self.conn.lock().unwrap();
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| PersistenceError::LockPoisoned)?;
         conn.execute(
             "INSERT OR REPLACE INTO game_replays (id, room_code, players, rules, seed, created_at, history, winner_indices)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
@@ -88,8 +130,11 @@ impl Persistence {
     }
 
     /// Load a game replay by ID, decompressing the history.
-    pub fn load_replay(&self, id: &str) -> Result<Option<(String, Vec<u8>)>, rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+    pub fn load_replay(&self, id: &str) -> Result<Option<(String, Vec<u8>)>, PersistenceError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| PersistenceError::LockPoisoned)?;
         let mut stmt = conn.prepare("SELECT players, history FROM game_replays WHERE id = ?1")?;
         let result = stmt.query_row(params![id], |row| {
             let players: String = row.get(0)?;
@@ -98,12 +143,11 @@ impl Persistence {
         });
         match result {
             Ok((players, compressed)) => {
-                let decompressed =
-                    zstd::decode_all(compressed.as_slice()).expect("zstd decompression failed");
+                let decompressed = zstd::decode_all(compressed.as_slice())?;
                 Ok(Some((players, decompressed)))
             }
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(e),
+            Err(e) => Err(e.into()),
         }
     }
 
@@ -114,8 +158,11 @@ impl Persistence {
         rules: &str,
         score: i32,
         won: bool,
-    ) -> Result<(), rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+    ) -> Result<(), PersistenceError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| PersistenceError::LockPoisoned)?;
         conn.execute(
             "INSERT INTO player_stats (player_name, rules, games_played, games_won, total_score, best_score, worst_score)
              VALUES (?1, ?2, 1, ?3, ?4, ?4, ?4)
@@ -134,11 +181,14 @@ impl Persistence {
     pub fn get_player_stats(
         &self,
         player_name: &str,
-    ) -> Result<Vec<PlayerStatsRow>, rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+    ) -> Result<Vec<PlayerStatsRow>, PersistenceError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| PersistenceError::LockPoisoned)?;
         let mut stmt = conn.prepare(
             "SELECT player_name, rules, games_played, games_won, total_score, best_score, worst_score
-             FROM player_stats WHERE player_name = ?1"
+             FROM player_stats WHERE player_name = ?1",
         )?;
         let rows = stmt.query_map(params![player_name], |row| {
             Ok(PlayerStatsRow {
@@ -151,7 +201,7 @@ impl Persistence {
                 worst_score: row.get(6)?,
             })
         })?;
-        rows.collect()
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
     /// Save a room snapshot (compressed).
@@ -159,11 +209,13 @@ impl Persistence {
         &self,
         room_code: &str,
         snapshot_json: &str,
-    ) -> Result<(), rusqlite::Error> {
-        let compressed =
-            zstd::encode_all(snapshot_json.as_bytes(), 3).expect("zstd compression failed");
+    ) -> Result<(), PersistenceError> {
+        let compressed = zstd::encode_all(snapshot_json.as_bytes(), 3)?;
         let now = chrono::Utc::now().to_rfc3339();
-        let conn = self.conn.lock().unwrap();
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| PersistenceError::LockPoisoned)?;
         conn.execute(
             "INSERT OR REPLACE INTO room_snapshots (room_code, snapshot, updated_at)
              VALUES (?1, ?2, ?3)",
@@ -173,8 +225,11 @@ impl Persistence {
     }
 
     /// Load a room snapshot, decompressing.
-    pub fn load_room_snapshot(&self, room_code: &str) -> Result<Option<Vec<u8>>, rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+    pub fn load_room_snapshot(&self, room_code: &str) -> Result<Option<Vec<u8>>, PersistenceError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| PersistenceError::LockPoisoned)?;
         let mut stmt = conn.prepare("SELECT snapshot FROM room_snapshots WHERE room_code = ?1")?;
         let result = stmt.query_row(params![room_code], |row| {
             let compressed: Vec<u8> = row.get(0)?;
@@ -182,32 +237,41 @@ impl Persistence {
         });
         match result {
             Ok(compressed) => {
-                let decompressed =
-                    zstd::decode_all(compressed.as_slice()).expect("zstd decompression failed");
+                let decompressed = zstd::decode_all(compressed.as_slice())?;
                 Ok(Some(decompressed))
             }
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(e),
+            Err(e) => Err(e.into()),
         }
     }
 
     /// Load all room snapshots (for crash recovery on startup).
-    pub fn load_all_room_snapshots(&self) -> Result<Vec<(String, Vec<u8>)>, rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+    pub fn load_all_room_snapshots(&self) -> Result<Vec<(String, Vec<u8>)>, PersistenceError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| PersistenceError::LockPoisoned)?;
         let mut stmt = conn.prepare("SELECT room_code, snapshot FROM room_snapshots")?;
         let rows = stmt.query_map([], |row| {
             let code: String = row.get(0)?;
             let compressed: Vec<u8> = row.get(1)?;
-            let decompressed =
-                zstd::decode_all(compressed.as_slice()).expect("zstd decompression failed");
-            Ok((code, decompressed))
+            Ok((code, compressed))
         })?;
-        rows.collect()
+        let mut results = Vec::new();
+        for row in rows {
+            let (code, compressed) = row?;
+            let decompressed = zstd::decode_all(compressed.as_slice())?;
+            results.push((code, decompressed));
+        }
+        Ok(results)
     }
 
     /// Delete a room snapshot (when room is cleaned up).
-    pub fn delete_room_snapshot(&self, room_code: &str) -> Result<(), rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+    pub fn delete_room_snapshot(&self, room_code: &str) -> Result<(), PersistenceError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| PersistenceError::LockPoisoned)?;
         conn.execute(
             "DELETE FROM room_snapshots WHERE room_code = ?1",
             params![room_code],
