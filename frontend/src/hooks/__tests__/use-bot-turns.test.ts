@@ -64,8 +64,8 @@ interface HookOptions {
   phase?: PlayPhase;
   playerTypes?: PlayerType[];
   botSpeed?: BotSpeed;
-  applyBotTurn?: ReturnType<typeof vi.fn>;
-  continueToNextRound?: ReturnType<typeof vi.fn>;
+  applyBotTurn?: ReturnType<typeof vi.fn<(strategyName: string) => void>>;
+  continueToNextRound?: ReturnType<typeof vi.fn<() => void>>;
   showStartingPlayer?: boolean;
 }
 
@@ -75,8 +75,8 @@ function makeOptions(overrides: HookOptions = {}) {
     phase: overrides.phase ?? 'setup' as PlayPhase,
     playerTypes: overrides.playerTypes ?? ['Human', 'Bot:Random'] as PlayerType[],
     botSpeed: overrides.botSpeed ?? 'instant' as BotSpeed,
-    applyBotTurn: overrides.applyBotTurn ?? vi.fn(),
-    continueToNextRound: overrides.continueToNextRound ?? vi.fn(),
+    applyBotTurn: overrides.applyBotTurn ?? vi.fn<(strategyName: string) => void>(),
+    continueToNextRound: overrides.continueToNextRound ?? vi.fn<() => void>(),
     showStartingPlayer: overrides.showStartingPlayer ?? false,
   };
 }
