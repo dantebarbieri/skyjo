@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
+import { GeneticModelDataSchema } from '@/schemas';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -116,8 +117,11 @@ export default function GeneticManageRoute() {
     try {
       const text = await file.text();
       const data = JSON.parse(text);
-      if (!data.best_genome || !Array.isArray(data.best_genome)) {
-        setError('Invalid generation file: missing best_genome');
+      const parseResult = GeneticModelDataSchema.extend({
+        best_fitness: GeneticModelDataSchema.shape.generation.optional(),
+      }).safeParse(data);
+      if (!parseResult.success) {
+        setError('Invalid generation file: ' + parseResult.error.issues[0]?.message);
         return;
       }
       const name = file.name.replace(/\.json$/, '').replace(/_/g, ' ');

@@ -1,5 +1,6 @@
 import init, { simulate_one, simulate_one_with_history, set_genetic_genome } from '../pkg/skyjo_wasm.js';
 import type { GameHistory, GameStats, ProgressStats, SimConfig, WorkerRequest, WorkerResponse } from './types';
+import { GameStatsWithHistorySchema, GameStatsSchema } from './schemas';
 
 let paused = false;
 let stopped = false;
@@ -74,11 +75,12 @@ async function runSimulation(config: SimConfig) {
     try {
       if (needHistory) {
         const resultJson = simulate_one_with_history(gameConfig);
-        const result = JSON.parse(resultJson);
-        if (result.error) {
-          post({ type: 'error', message: `Game ${i + 1} (seed ${seed}): ${result.error}` });
+        const parsed = JSON.parse(resultJson);
+        if (parsed.error) {
+          post({ type: 'error', message: `Game ${i + 1} (seed ${seed}): ${parsed.error}` });
           return;
         }
+        const result = GameStatsWithHistorySchema.parse(parsed);
         stats = result.stats;
         if (config.withHistories) {
           histories.push(result.history);
@@ -89,12 +91,12 @@ async function runSimulation(config: SimConfig) {
         }
       } else {
         const resultJson = simulate_one(gameConfig);
-        const result = JSON.parse(resultJson);
-        if (result.error) {
-          post({ type: 'error', message: `Game ${i + 1} (seed ${seed}): ${result.error}` });
+        const parsed = JSON.parse(resultJson);
+        if (parsed.error) {
+          post({ type: 'error', message: `Game ${i + 1} (seed ${seed}): ${parsed.error}` });
           return;
         }
-        stats = result;
+        stats = GameStatsSchema.parse(parsed);
       }
     } catch (e) {
       post({ type: 'error', message: `Game ${i + 1} (seed ${seed}) crashed: ${e}` });

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { InteractiveGameState, PlayerAction } from '@/types';
+import { ServerMessageSchema } from '@/schemas';
 
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected';
 
@@ -109,7 +110,7 @@ export function useOnlineGame(
     };
 
     ws.onmessage = (event) => {
-      const msg: ServerMessage = JSON.parse(event.data);
+      const msg: ServerMessage = ServerMessageSchema.parse(JSON.parse(event.data));
 
       switch (msg.type) {
         case 'RoomState':

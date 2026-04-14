@@ -7,6 +7,8 @@ import type {
   PlayerType,
   BotActionResponse,
 } from '@/types';
+import { z } from 'zod';
+import { InteractiveGameStateSchema, PlayerActionSchema, PlayConfigSchema } from '@/schemas';
 
 export type PlayPhase =
   | 'setup'
@@ -143,7 +145,13 @@ function loadSavedGame(): GameSaveData | null {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const data = JSON.parse(raw);
-    if (data && data.config && Array.isArray(data.actions)) return data;
+    const GameSaveDataSchema = z.object({
+      config: PlayConfigSchema,
+      actions: z.array(PlayerActionSchema),
+    });
+    const result = GameSaveDataSchema.safeParse(data);
+    if (!result.success) return null;
+    return result.data;
   } catch { /* ignore corrupt data */ }
   return null;
 }
@@ -465,11 +473,16 @@ export function useInteractiveGame(): UseInteractiveGame {
 
   const importGame = useCallback((json: string) => {
     try {
-      const saveData: GameSaveData = JSON.parse(json);
-      if (!saveData.config || !Array.isArray(saveData.actions)) {
+      const GameSaveDataSchema = z.object({
+        config: PlayConfigSchema,
+        actions: z.array(PlayerActionSchema),
+      });
+      const result = GameSaveDataSchema.safeParse(JSON.parse(json));
+      if (!result.success) {
         setError('Invalid save data');
         return;
       }
+      const saveData = result.data;
       // Save to localStorage too
       saveToStorage(saveData.config, saveData.actions);
       setHasSavedGame(true);
