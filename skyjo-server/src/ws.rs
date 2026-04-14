@@ -35,11 +35,16 @@ pub async fn handle_ws(
     let mut wire_format = WireFormat::Json;
 
     // Mark player as connected and record IP (never exposed to clients)
+    let (player_msg_tx, mut player_msg_rx) =
+        tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
     let broadcast_rx = {
         let mut room_guard = room.lock().await;
         room_guard.players[player_index].connected = true;
         room_guard.players[player_index].ip = Some(client_ip);
         room_guard.players[player_index].disconnected_at = None;
+
+        // Register per-player targeted channel
+        room_guard.set_player_tx(player_index, player_msg_tx);
 
         // If this player was converted to a bot while disconnected, convert back to human
         let was_reconverted = room_guard.reconnect_bot_to_human(player_index);
@@ -174,6 +179,20 @@ pub async fn handle_ws(
                     }
                 }
             }
+            // Per-player targeted message (pre-serialized bytes)
+            msg = player_msg_rx.recv() => {
+                match msg {
+                    Some(data) => {
+                        if ws_tx.send(Message::Binary(data.into())).await.is_err() {
+                            break;
+                        }
+                    }
+                    None => {
+                        // Sender dropped — room is cleaning up
+                        break;
+                    }
+                }
+            }
         }
     }
 
@@ -182,6 +201,7 @@ pub async fn handle_ws(
         let mut room_guard = room.lock().await;
         room_guard.players[player_index].connected = false;
         room_guard.players[player_index].disconnected_at = Some(std::time::Instant::now());
+        room_guard.remove_player_tx(player_index);
         room_guard.touch();
 
         // Notify others
@@ -293,6 +313,20 @@ async fn handle_parsed_message(
 ) -> Option<ServerMessage> {
     match msg {
         ClientMessage::Ping => Some(ServerMessage::Pong),
+
+        ClientMessage::RequestFullState => {
+            let room_guard = room.lock().await;
+            match room_guard.get_player_state(player_index) {
+                Ok(state) => {
+                    let turn_deadline_secs = room_guard.turn_deadline_secs();
+                    Some(ServerMessage::GameState {
+                        state,
+                        turn_deadline_secs,
+                    })
+                }
+                Err(e) => Some(error_msg(e)),
+            }
+        }
 
         ClientMessage::ConfigureSlot { slot, player_type } => {
             let mut room_guard = room.lock().await;
