@@ -285,16 +285,21 @@ export function NeuralNetworkViz({ className }: NeuralNetworkVizProps) {
   // Use the snapshot at last gen completion for stable rate/ETA (avoids drift between polls)
   const stableElapsedSec = isTraining ? (status!.training_last_gen_elapsed_ms / 1000) : 0;
   const gensPerSec = stableElapsedSec > 0 && gensDone > 0 ? gensDone / stableElapsedSec : 0;
-  // For fitness mode, estimate ETA by extrapolating fitness improvement rate
+  // Generation-based ETA (works for all modes — fitness mode has a safety cap)
+  const genEtaSec = gensDone > 0 ? gensRemaining * (stableElapsedSec / gensDone) : 0;
+  // Fitness-based ETA: extrapolate from improvement rate (approximate)
   const fitnessEtaSec = (() => {
     if (!isFitnessMode || !isTraining || stableElapsedSec <= 0) return 0;
     const improvement = status!.best_fitness - status!.training_start_fitness;
-    if (improvement <= 0) return 0; // no improvement yet, can't estimate
+    if (improvement <= 0) return 0; // no improvement yet
     const remaining = status!.training_target_fitness - status!.best_fitness;
     if (remaining <= 0) return 0; // already reached
     return remaining * (stableElapsedSec / improvement);
   })();
-  const etaSec = isFitnessMode ? fitnessEtaSec : (gensDone > 0 ? gensRemaining * (stableElapsedSec / gensDone) : 0);
+  // For fitness mode: show fitness ETA if available, otherwise fall back to gen-based ETA against safety cap
+  const etaSec = isFitnessMode
+    ? (fitnessEtaSec > 0 ? Math.min(fitnessEtaSec, genEtaSec) : genEtaSec)
+    : genEtaSec;
 
   function formatTime(sec: number): string {
     if (sec < 60) return `${Math.round(sec)}s`;
@@ -493,7 +498,11 @@ export function NeuralNetworkViz({ className }: NeuralNetworkVizProps) {
             <div className="flex justify-between items-center text-xs text-muted-foreground">
               <span>Elapsed: {formatTime(elapsedSec)}</span>
               {gensPerSec > 0 && <span>{gensPerSec.toFixed(2)} gen/s</span>}
-              {etaSec > 0 && <span>{isFitnessMode ? '~' : ''}ETA: {formatTime(etaSec)}</span>}
+              {etaSec > 0 && (
+                <span title={isFitnessMode ? (fitnessEtaSec > 0 ? 'Based on fitness improvement rate' : 'Based on generation safety cap') : undefined}>
+                  {isFitnessMode ? '~' : ''}ETA: {formatTime(etaSec)}
+                </span>
+              )}
               <Button size="sm" variant="ghost" className="h-6 px-2 text-xs text-destructive hover:text-destructive" onClick={handleCancel}>
                 Cancel
               </Button>
