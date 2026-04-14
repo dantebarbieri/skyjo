@@ -245,3 +245,154 @@ fn best_replacement_position(view: &StrategyView, drawn_card: CardValue) -> usiz
     // Last resort: replace the highest revealed card
     position_of_highest_revealed(board)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::strategy::StrategyView;
+    use rand::SeedableRng;
+    use rand::rngs::StdRng;
+
+    #[test]
+    fn name_returns_greedy() {
+        assert_eq!(GreedyStrategy.name(), "Greedy");
+    }
+
+    #[test]
+    fn describe_returns_valid_description() {
+        let desc = GreedyStrategy.describe();
+        assert_eq!(desc.name, "Greedy");
+        assert!(!desc.summary.is_empty());
+        assert_eq!(desc.complexity, Complexity::Low);
+        assert!(!desc.strengths.is_empty());
+        assert!(!desc.weaknesses.is_empty());
+        assert_eq!(desc.phases.len(), 4);
+    }
+
+    fn make_view_with_discard(discard_top: CardValue, board: Vec<VisibleSlot>) -> StrategyView {
+        StrategyView {
+            my_index: 0,
+            my_board: board,
+            num_rows: 3,
+            num_cols: 4,
+            opponent_boards: vec![],
+            opponent_indices: vec![],
+            discard_piles: vec![vec![discard_top]],
+            deck_remaining: 100,
+            cumulative_scores: vec![0, 0],
+            is_final_turn: false,
+        }
+    }
+
+    #[test]
+    fn choose_draw_takes_discard_when_negative() {
+        let board = vec![
+            VisibleSlot::Revealed(5),
+            VisibleSlot::Hidden,
+            VisibleSlot::Hidden,
+            VisibleSlot::Hidden,
+            VisibleSlot::Hidden,
+            VisibleSlot::Hidden,
+            VisibleSlot::Hidden,
+            VisibleSlot::Hidden,
+            VisibleSlot::Hidden,
+            VisibleSlot::Hidden,
+            VisibleSlot::Hidden,
+            VisibleSlot::Hidden,
+        ];
+        let view = make_view_with_discard(-2, board);
+        let mut rng = StdRng::seed_from_u64(42);
+        let choice = GreedyStrategy.choose_draw(&view, &mut rng);
+        assert_eq!(choice, DrawChoice::DrawFromDiscard(0));
+    }
+
+    #[test]
+    fn choose_draw_takes_discard_when_lower_than_highest() {
+        let board = vec![
+            VisibleSlot::Revealed(10),
+            VisibleSlot::Revealed(3),
+            VisibleSlot::Hidden,
+            VisibleSlot::Hidden,
+            VisibleSlot::Hidden,
+            VisibleSlot::Hidden,
+            VisibleSlot::Hidden,
+            VisibleSlot::Hidden,
+            VisibleSlot::Hidden,
+            VisibleSlot::Hidden,
+            VisibleSlot::Hidden,
+            VisibleSlot::Hidden,
+        ];
+        let view = make_view_with_discard(5, board);
+        let mut rng = StdRng::seed_from_u64(42);
+        let choice = GreedyStrategy.choose_draw(&view, &mut rng);
+        assert_eq!(choice, DrawChoice::DrawFromDiscard(0));
+    }
+
+    #[test]
+    fn choose_draw_draws_from_deck_when_discard_not_useful() {
+        let board = vec![
+            VisibleSlot::Revealed(2),
+            VisibleSlot::Revealed(3),
+            VisibleSlot::Hidden,
+            VisibleSlot::Hidden,
+            VisibleSlot::Hidden,
+            VisibleSlot::Hidden,
+            VisibleSlot::Hidden,
+            VisibleSlot::Hidden,
+            VisibleSlot::Hidden,
+            VisibleSlot::Hidden,
+            VisibleSlot::Hidden,
+            VisibleSlot::Hidden,
+        ];
+        let view = make_view_with_discard(8, board);
+        let mut rng = StdRng::seed_from_u64(42);
+        let choice = GreedyStrategy.choose_draw(&view, &mut rng);
+        assert_eq!(choice, DrawChoice::DrawFromDeck);
+    }
+
+    #[test]
+    fn choose_deck_draw_action_keeps_when_improves_board() {
+        let board = vec![
+            VisibleSlot::Revealed(12),
+            VisibleSlot::Revealed(3),
+            VisibleSlot::Hidden,
+            VisibleSlot::Hidden,
+            VisibleSlot::Hidden,
+            VisibleSlot::Hidden,
+            VisibleSlot::Hidden,
+            VisibleSlot::Hidden,
+            VisibleSlot::Hidden,
+            VisibleSlot::Hidden,
+            VisibleSlot::Hidden,
+            VisibleSlot::Hidden,
+        ];
+        let view = make_view_with_discard(0, board);
+        let mut rng = StdRng::seed_from_u64(42);
+        let action = GreedyStrategy.choose_deck_draw_action(&view, 2, &mut rng);
+        // Should keep the 2, replacing the 12 at position 0
+        assert!(matches!(action, DeckDrawAction::Keep(0)));
+    }
+
+    #[test]
+    fn choose_deck_draw_action_discards_when_no_improvement() {
+        let board = vec![
+            VisibleSlot::Revealed(1),
+            VisibleSlot::Revealed(2),
+            VisibleSlot::Hidden,
+            VisibleSlot::Hidden,
+            VisibleSlot::Hidden,
+            VisibleSlot::Hidden,
+            VisibleSlot::Hidden,
+            VisibleSlot::Hidden,
+            VisibleSlot::Hidden,
+            VisibleSlot::Hidden,
+            VisibleSlot::Hidden,
+            VisibleSlot::Hidden,
+        ];
+        let view = make_view_with_discard(0, board);
+        let mut rng = StdRng::seed_from_u64(42);
+        let action = GreedyStrategy.choose_deck_draw_action(&view, 5, &mut rng);
+        // 5 is not less than 2, so should discard and flip
+        assert!(matches!(action, DeckDrawAction::DiscardAndFlip(_)));
+    }
+}

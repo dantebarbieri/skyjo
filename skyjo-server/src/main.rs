@@ -1,10 +1,3 @@
-mod genetic;
-mod lobby;
-mod messages;
-mod room;
-mod session;
-mod ws;
-
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -21,11 +14,10 @@ use tokio::sync::Mutex;
 use tower_http::compression::CompressionLayer;
 use tower_http::services::{ServeDir, ServeFile};
 
-use genetic::GeneticTrainingState;
-use lobby::{
-    CreateRoomRequest, CreateRoomResponse, JoinRoomRequest, JoinRoomResponse, Lobby,
-    RoomInfoResponse,
-};
+use skyjo_server::genetic::{self, GeneticTrainingState};
+use skyjo_server::lobby::Lobby;
+use skyjo_server::ws;
+use skyjo_server::{AppState, AppStateInner};
 
 #[derive(Parser)]
 #[command(name = "skyjo-server")]
@@ -42,13 +34,6 @@ struct Args {
     #[arg(long, default_value = "./genetic_model.json")]
     genetic_model_path: PathBuf,
 }
-
-pub struct AppStateInner {
-    pub lobby: Lobby,
-    pub genetic: Arc<Mutex<GeneticTrainingState>>,
-}
-
-type AppState = Arc<AppStateInner>;
 
 #[tokio::main]
 async fn main() {
@@ -86,16 +71,16 @@ async fn main() {
 
     // API routes
     let api_routes = Router::new()
-        .route("/rooms", post(create_room))
-        .route("/rooms/{code}", get(room_info))
-        .route("/rooms/{code}/join", post(join_room))
+        .route("/rooms", post(skyjo_server::create_room))
+        .route("/rooms/{code}", get(skyjo_server::room_info))
+        .route("/rooms/{code}/join", post(skyjo_server::join_room))
         .route("/rooms/{code}/ws", get(ws_upgrade))
         .route("/genetic/model", get(genetic_model))
         .route("/genetic/train", post(genetic_train))
         .route("/genetic/stop", post(genetic_stop))
         .route("/genetic/reset", post(genetic_reset))
         .route("/genetic/load", post(genetic_load))
-        .route("/genetic/status", get(genetic_status))
+        .route("/genetic/status", get(skyjo_server::genetic_status))
         .route("/genetic/saved", get(genetic_saved_list).post(genetic_save))
         .route("/genetic/saved/import", post(genetic_import))
         .route(
@@ -132,80 +117,6 @@ async fn main() {
 }
 
 // --- REST Handlers ---
-
-async fn create_room(
-    State(state): State<AppState>,
-    Json(req): Json<CreateRoomRequest>,
-) -> Result<Json<CreateRoomResponse>, (StatusCode, String)> {
-    let (genetic_games, genetic_gen) = {
-        let g = state.genetic.lock().await;
-        (g.total_games_trained, g.generation)
-    };
-    let (code, token, player_index) = state
-        .lobby
-        .create_room(
-            req.player_name,
-            req.num_players,
-            req.rules,
-            genetic_games,
-            genetic_gen,
-        )
-        .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
-
-    Ok(Json(CreateRoomResponse {
-        room_code: code,
-        session_token: token.to_string(),
-        player_index,
-    }))
-}
-
-async fn room_info(
-    State(state): State<AppState>,
-    Path(code): Path<String>,
-) -> Result<Json<RoomInfoResponse>, (StatusCode, String)> {
-    let room_ref = state
-        .lobby
-        .get_room(&code)
-        .ok_or((StatusCode::NOT_FOUND, "Room not found".to_string()))?;
-
-    let room = room_ref.lock().await;
-    let players_joined = room
-        .players
-        .iter()
-        .filter(|p| p.slot_type != messages::PlayerSlotType::Empty)
-        .count();
-
-    let phase = match room.phase {
-        room::RoomPhase::Lobby => "lobby",
-        room::RoomPhase::InGame => "in_game",
-        room::RoomPhase::GameOver => "game_over",
-    };
-
-    Ok(Json(RoomInfoResponse {
-        room_code: room.code.clone(),
-        num_players: room.num_players,
-        rules: room.rules_name.clone(),
-        players_joined,
-        phase: phase.to_string(),
-    }))
-}
-
-async fn join_room(
-    State(state): State<AppState>,
-    Path(code): Path<String>,
-    Json(req): Json<JoinRoomRequest>,
-) -> Result<Json<JoinRoomResponse>, (StatusCode, String)> {
-    let (token, player_index) = state
-        .lobby
-        .join_room(&code, req.player_name)
-        .await
-        .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
-
-    Ok(Json(JoinRoomResponse {
-        session_token: token.to_string(),
-        player_index,
-    }))
-}
 
 #[derive(Deserialize)]
 struct WsQuery {
@@ -374,11 +285,6 @@ async fn genetic_load(
     s.load_saved(&name)
         .map_err(|e| (StatusCode::NOT_FOUND, e))?;
     Ok(Json(s.status()))
-}
-
-async fn genetic_status(State(state): State<AppState>) -> Json<genetic::TrainingStatus> {
-    let s = state.genetic.lock().await;
-    Json(s.status())
 }
 
 async fn genetic_saved_list(

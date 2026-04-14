@@ -840,3 +840,405 @@ fn auto_save_training_result(state: &mut GeneticTrainingState) {
     save_model(state);
     tracing::info!("Auto-saved training result: {name}");
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::SeedableRng;
+    use rand::rngs::StdRng;
+    use skyjo_core::GENOME_SIZE;
+
+    /// Create a GeneticTrainingState with a unique temp directory model path.
+    fn test_state(name: &str) -> GeneticTrainingState {
+        let dir = std::env::temp_dir().join(format!("skyjo_test_{name}_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let model_path = dir.join("model.json");
+        GeneticTrainingState::new_random(model_path)
+    }
+
+    /// Cleanup helper: remove the parent directory of the model path.
+    fn cleanup(state: &GeneticTrainingState) {
+        if let Some(parent) = state.model_path.parent() {
+            let _ = std::fs::remove_dir_all(parent);
+        }
+    }
+
+    // ---- State Management ----
+
+    #[test]
+    fn new_random_creates_valid_population() {
+        let state = test_state("new_random");
+        assert_eq!(state.population.len(), POPULATION_SIZE);
+        for genome in &state.population {
+            assert_eq!(genome.len(), GENOME_SIZE);
+        }
+        assert_eq!(state.generation, 0);
+        assert_eq!(state.total_games_trained, 0);
+        assert!(!state.is_training);
+        cleanup(&state);
+    }
+
+    #[test]
+    fn status_returns_correct_initial_state() {
+        let state = test_state("status_initial");
+        let status = state.status();
+        assert!(!status.is_training);
+        assert_eq!(status.generation, 0);
+        assert_eq!(status.total_games_trained, 0);
+        assert_eq!(status.best_fitness, 0.0); // NEG_INFINITY maps to 0.0
+        assert_eq!(status.training_mode, "generations");
+        assert!(!status.lineage_hash.is_empty());
+        cleanup(&state);
+    }
+
+    #[test]
+    fn model_data_returns_genome_of_correct_size() {
+        let state = test_state("model_data");
+        let data = state.model_data();
+        assert_eq!(data.best_genome.len(), GENOME_SIZE);
+        assert_eq!(data.input_size, INPUT_SIZE);
+        assert_eq!(data.hidden_size, HIDDEN_SIZE);
+        assert_eq!(data.output_size, OUTPUT_SIZE);
+        assert_eq!(data.generation, 0);
+        assert!(!data.input_labels.is_empty());
+        assert!(!data.output_labels.is_empty());
+        cleanup(&state);
+    }
+
+    #[test]
+    fn reset_creates_new_random_population() {
+        let mut state = test_state("reset");
+        let original_genome = state.best_genome.clone();
+        let original_hash = state.lineage_hash.clone();
+        state.reset();
+        assert_eq!(state.population.len(), POPULATION_SIZE);
+        assert_eq!(state.generation, 0);
+        assert_eq!(state.total_games_trained, 0);
+        // The new best genome should (almost certainly) differ from the original
+        // and the lineage hash should change.
+        let new_genome_differs = state.best_genome != original_genome;
+        let new_hash_differs = state.lineage_hash != original_hash;
+        // At least one should differ (extremely unlikely both are identical)
+        assert!(
+            new_genome_differs || new_hash_differs,
+            "Reset should produce a different population"
+        );
+        cleanup(&state);
+    }
+
+    // ---- Saved Generations ----
+
+    /// Helper: advance state to generation 1 so save_generation works.
+    fn advance_to_gen1(state: &mut GeneticTrainingState) {
+        state.generation = 1;
+        state.total_games_trained = POPULATION_SIZE * GAMES_PER_INDIVIDUAL;
+        state.best_fitness = -50.0;
+    }
+
+    #[test]
+    fn save_generation_stores_and_retrieves() {
+        let mut state = test_state("save_retrieve");
+        advance_to_gen1(&mut state);
+        let info = state
+            .save_generation(Some("test_save".to_string()))
+            .unwrap();
+        assert_eq!(info.name, "test_save");
+        assert_eq!(info.generation, 1);
+
+        let model = state.get_saved_generation_model("test_save").unwrap();
+        assert_eq!(model.best_genome.len(), GENOME_SIZE);
+        assert_eq!(model.generation, 1);
+        cleanup(&state);
+    }
+
+    #[test]
+    fn list_saved_generations_returns_saved_items() {
+        let mut state = test_state("list_saved");
+        advance_to_gen1(&mut state);
+        assert!(state.list_saved_generations().is_empty());
+
+        state.save_generation(Some("save_a".to_string())).unwrap();
+        state.generation = 2; // allow a second save
+        state.save_generation(Some("save_b".to_string())).unwrap();
+
+        let list = state.list_saved_generations();
+        assert_eq!(list.len(), 2);
+        let names: Vec<&str> = list.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"save_a"));
+        assert!(names.contains(&"save_b"));
+        cleanup(&state);
+    }
+
+    #[test]
+    fn delete_saved_generation_removes_correctly() {
+        let mut state = test_state("delete_saved");
+        advance_to_gen1(&mut state);
+        state
+            .save_generation(Some("to_delete".to_string()))
+            .unwrap();
+        assert_eq!(state.list_saved_generations().len(), 1);
+
+        state.delete_saved_generation("to_delete").unwrap();
+        assert!(state.list_saved_generations().is_empty());
+        cleanup(&state);
+    }
+
+    #[test]
+    fn get_saved_generation_model_returns_correct_data() {
+        let mut state = test_state("get_saved_model");
+        advance_to_gen1(&mut state);
+        state
+            .save_generation(Some("model_test".to_string()))
+            .unwrap();
+
+        let model = state.get_saved_generation_model("model_test").unwrap();
+        assert_eq!(model.best_genome, state.best_genome);
+        assert_eq!(model.generation, 1);
+        assert_eq!(model.input_size, INPUT_SIZE);
+
+        // Nonexistent name should fail
+        assert!(state.get_saved_generation_model("nonexistent").is_err());
+        cleanup(&state);
+    }
+
+    #[test]
+    fn save_generation_fails_with_duplicate_name() {
+        let mut state = test_state("dup_name");
+        advance_to_gen1(&mut state);
+        state.save_generation(Some("dup".to_string())).unwrap();
+
+        let result = state.save_generation(Some("dup".to_string()));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("already exists"));
+        cleanup(&state);
+    }
+
+    #[test]
+    fn delete_nonexistent_fails_gracefully() {
+        let mut state = test_state("delete_nonexist");
+        let result = state.delete_saved_generation("nope");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("No saved generation"));
+        cleanup(&state);
+    }
+
+    #[test]
+    fn import_generation_works_with_valid_genome() {
+        let mut state = test_state("import");
+        let genome = vec![0.5_f32; GENOME_SIZE];
+        let info = state
+            .import_generation(
+                "imported".to_string(),
+                genome.clone(),
+                42,
+                10000,
+                -30.0,
+                Some("abcd1234".to_string()),
+            )
+            .unwrap();
+        assert_eq!(info.name, "imported");
+        assert_eq!(info.generation, 42);
+        assert_eq!(info.total_games_trained, 10000);
+        assert_eq!(info.lineage_hash, "abcd1234");
+
+        let model = state.get_saved_generation_model("imported").unwrap();
+        assert_eq!(model.best_genome, genome);
+        cleanup(&state);
+    }
+
+    #[test]
+    fn import_generation_rejects_wrong_genome_size() {
+        let mut state = test_state("import_bad_size");
+        let bad_genome = vec![0.0_f32; 10]; // Wrong size
+        let result = state.import_generation("bad".to_string(), bad_genome, 0, 0, 0.0, None);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Invalid genome size"));
+        cleanup(&state);
+    }
+
+    #[test]
+    fn import_generation_rejects_duplicate_name() {
+        let mut state = test_state("import_dup");
+        let genome = vec![0.5_f32; GENOME_SIZE];
+        state
+            .import_generation("dup".to_string(), genome.clone(), 1, 100, -20.0, None)
+            .unwrap();
+        let result = state.import_generation("dup".to_string(), genome, 2, 200, -10.0, None);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("already exists"));
+        cleanup(&state);
+    }
+
+    #[test]
+    fn get_saved_genome_returns_genome_and_games() {
+        let mut state = test_state("get_saved_genome");
+        let genome = vec![0.3_f32; GENOME_SIZE];
+        state
+            .import_generation("sg_test".to_string(), genome.clone(), 5, 5000, -25.0, None)
+            .unwrap();
+
+        let (g, games) = state.get_saved_genome("sg_test").unwrap();
+        assert_eq!(g, genome);
+        assert_eq!(games, 5000);
+
+        assert!(state.get_saved_genome("nonexistent").is_none());
+        cleanup(&state);
+    }
+
+    // ---- GA Operators (accessible from within the module) ----
+
+    #[test]
+    fn crossover_produces_genome_of_correct_size() {
+        let mut rng = StdRng::seed_from_u64(42);
+        let parent_a: Vec<f32> = (0..GENOME_SIZE).map(|i| i as f32).collect();
+        let parent_b: Vec<f32> = (0..GENOME_SIZE).map(|i| -(i as f32)).collect();
+        let child = crossover(&parent_a, &parent_b, &mut rng);
+        assert_eq!(child.len(), GENOME_SIZE);
+        // Each gene should come from one of the parents
+        for (i, &gene) in child.iter().enumerate() {
+            assert!(
+                gene == parent_a[i] || gene == parent_b[i],
+                "Gene {i} should come from a parent"
+            );
+        }
+    }
+
+    #[test]
+    fn mutate_does_not_change_genome_size() {
+        let mut rng = StdRng::seed_from_u64(99);
+        let mut genome = vec![0.0_f32; GENOME_SIZE];
+        let original = genome.clone();
+        mutate(&mut genome, &mut rng);
+        assert_eq!(genome.len(), GENOME_SIZE);
+        // At least some genes should have mutated (statistically near-certain)
+        let changed = genome
+            .iter()
+            .zip(original.iter())
+            .filter(|(a, b)| a != b)
+            .count();
+        // With MUTATION_RATE=0.05 + RESET_RATE=0.005, about 5.5% should change
+        assert!(changed > 0, "Some genes should have been mutated");
+    }
+
+    #[test]
+    fn tournament_select_returns_genome_from_population() {
+        let mut rng = StdRng::seed_from_u64(123);
+        let population: Vec<Vec<f32>> = (0..10).map(|i| vec![i as f32; GENOME_SIZE]).collect();
+        let fitnesses: Vec<f64> = (0..10).map(|i| i as f64).collect();
+
+        let selected = tournament_select(&population, &fitnesses, &mut rng);
+        assert_eq!(selected.len(), GENOME_SIZE);
+        // The selected genome should be one of the population members
+        assert!(
+            population.contains(&selected),
+            "Selected genome must come from the population"
+        );
+    }
+
+    #[test]
+    fn compute_lineage_hash_is_deterministic() {
+        let genome = vec![1.0_f32; GENOME_SIZE];
+        let hash1 = compute_lineage_hash(&genome);
+        let hash2 = compute_lineage_hash(&genome);
+        assert_eq!(hash1, hash2);
+        assert_eq!(hash1.len(), 8); // 8 hex chars
+    }
+
+    #[test]
+    fn compute_lineage_hash_differs_for_different_genomes() {
+        let genome_a = vec![1.0_f32; GENOME_SIZE];
+        let genome_b = vec![2.0_f32; GENOME_SIZE];
+        let hash_a = compute_lineage_hash(&genome_a);
+        let hash_b = compute_lineage_hash(&genome_b);
+        assert_ne!(hash_a, hash_b);
+    }
+
+    #[test]
+    fn random_genome_has_correct_size() {
+        let mut rng = StdRng::seed_from_u64(0);
+        let genome = random_genome(&mut rng);
+        assert_eq!(genome.len(), GENOME_SIZE);
+        // Values should be in [-1, 1]
+        for &val in &genome {
+            assert!(
+                (-1.0..=1.0).contains(&val),
+                "Genome values should be in [-1, 1], got {val}"
+            );
+        }
+    }
+
+    // ---- Load/Save to Disk ----
+
+    #[test]
+    fn load_or_new_with_nonexistent_path_creates_new_state() {
+        let dir = std::env::temp_dir().join(format!("skyjo_test_load_new_{}", std::process::id()));
+        let model_path = dir.join("nonexistent_subdir").join("model.json");
+        let state = GeneticTrainingState::load_or_new(model_path);
+        assert_eq!(state.population.len(), POPULATION_SIZE);
+        assert_eq!(state.generation, 0);
+        cleanup(&state);
+    }
+
+    #[test]
+    fn save_and_load_round_trips_correctly() {
+        let mut state = test_state("round_trip");
+        advance_to_gen1(&mut state);
+        state
+            .save_generation(Some("round_trip_save".to_string()))
+            .unwrap();
+        let original_genome = state.best_genome.clone();
+        let original_gen = state.generation;
+
+        // Load the saved generation
+        state.load_saved("round_trip_save").unwrap();
+        assert_eq!(state.best_genome, original_genome);
+        assert_eq!(state.generation, original_gen);
+        assert_eq!(state.population.len(), POPULATION_SIZE);
+        // First individual should be the saved genome
+        assert_eq!(state.population[0], original_genome);
+        cleanup(&state);
+    }
+
+    #[test]
+    fn load_or_new_loads_existing_model_from_disk() {
+        let mut state = test_state("load_existing");
+        advance_to_gen1(&mut state);
+        state.best_genome = vec![0.42_f32; GENOME_SIZE];
+        save_model(&state);
+        let model_path = state.model_path.clone();
+
+        // Load from the same path
+        let loaded = GeneticTrainingState::load_or_new(model_path);
+        assert_eq!(loaded.generation, 1);
+        assert_eq!(loaded.best_genome, vec![0.42_f32; GENOME_SIZE]);
+        assert_eq!(loaded.population.len(), POPULATION_SIZE);
+        cleanup(&state);
+    }
+
+    #[test]
+    fn save_generation_at_gen0_fails() {
+        let mut state = test_state("gen0_fail");
+        let result = state.save_generation(Some("fail".to_string()));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("generation 0"));
+        cleanup(&state);
+    }
+
+    #[test]
+    fn load_saved_nonexistent_fails() {
+        let mut state = test_state("load_nonexist");
+        let result = state.load_saved("ghost");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("No saved generation"));
+        cleanup(&state);
+    }
+
+    #[test]
+    fn save_generation_default_name() {
+        let mut state = test_state("default_name");
+        advance_to_gen1(&mut state);
+        let info = state.save_generation(None).unwrap();
+        assert_eq!(info.name, "Gen 1");
+        cleanup(&state);
+    }
+}

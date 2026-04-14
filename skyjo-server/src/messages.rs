@@ -129,3 +129,289 @@ pub enum PlayerSlotType {
     Bot { strategy: String },
     Empty,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- PlayerSlotType serde round-trips ---
+
+    #[test]
+    fn player_slot_type_human_round_trip() {
+        let slot = PlayerSlotType::Human;
+        let json = serde_json::to_string(&slot).unwrap();
+        let parsed: PlayerSlotType = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, PlayerSlotType::Human);
+    }
+
+    #[test]
+    fn player_slot_type_bot_round_trip() {
+        let slot = PlayerSlotType::Bot {
+            strategy: "SmartBot".to_string(),
+        };
+        let json = serde_json::to_string(&slot).unwrap();
+        let parsed: PlayerSlotType = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            parsed,
+            PlayerSlotType::Bot {
+                strategy: "SmartBot".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn player_slot_type_empty_round_trip() {
+        let slot = PlayerSlotType::Empty;
+        let json = serde_json::to_string(&slot).unwrap();
+        let parsed: PlayerSlotType = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, PlayerSlotType::Empty);
+    }
+
+    #[test]
+    fn player_slot_type_serializes_with_kind_tag() {
+        let human: serde_json::Value = serde_json::to_value(PlayerSlotType::Human).unwrap();
+        assert_eq!(human["kind"], "Human");
+
+        let bot: serde_json::Value = serde_json::to_value(PlayerSlotType::Bot {
+            strategy: "X".to_string(),
+        })
+        .unwrap();
+        assert_eq!(bot["kind"], "Bot");
+        assert_eq!(bot["strategy"], "X");
+
+        let empty: serde_json::Value = serde_json::to_value(PlayerSlotType::Empty).unwrap();
+        assert_eq!(empty["kind"], "Empty");
+    }
+
+    // --- ClientMessage deserialization ---
+
+    #[test]
+    fn client_message_configure_slot() {
+        let json = r#"{"type":"ConfigureSlot","slot":1,"player_type":"Human"}"#;
+        let msg: ClientMessage = serde_json::from_str(json).unwrap();
+        assert!(matches!(msg, ClientMessage::ConfigureSlot { slot: 1, .. }));
+    }
+
+    #[test]
+    fn client_message_set_num_players() {
+        let json = r#"{"type":"SetNumPlayers","num_players":4}"#;
+        let msg: ClientMessage = serde_json::from_str(json).unwrap();
+        assert!(matches!(
+            msg,
+            ClientMessage::SetNumPlayers { num_players: 4 }
+        ));
+    }
+
+    #[test]
+    fn client_message_set_rules() {
+        let json = r#"{"type":"SetRules","rules":"Standard"}"#;
+        let msg: ClientMessage = serde_json::from_str(json).unwrap();
+        assert!(matches!(msg, ClientMessage::SetRules { .. }));
+    }
+
+    #[test]
+    fn client_message_kick_player() {
+        let json = r#"{"type":"KickPlayer","slot":2}"#;
+        let msg: ClientMessage = serde_json::from_str(json).unwrap();
+        assert!(matches!(msg, ClientMessage::KickPlayer { slot: 2 }));
+    }
+
+    #[test]
+    fn client_message_ban_player() {
+        let json = r#"{"type":"BanPlayer","slot":3}"#;
+        let msg: ClientMessage = serde_json::from_str(json).unwrap();
+        assert!(matches!(msg, ClientMessage::BanPlayer { slot: 3 }));
+    }
+
+    #[test]
+    fn client_message_promote_host() {
+        let json = r#"{"type":"PromoteHost","slot":0}"#;
+        let msg: ClientMessage = serde_json::from_str(json).unwrap();
+        assert!(matches!(msg, ClientMessage::PromoteHost { slot: 0 }));
+    }
+
+    #[test]
+    fn client_message_return_to_lobby() {
+        let json = r#"{"type":"ReturnToLobby"}"#;
+        let msg: ClientMessage = serde_json::from_str(json).unwrap();
+        assert!(matches!(msg, ClientMessage::ReturnToLobby));
+    }
+
+    #[test]
+    fn client_message_start_game() {
+        let json = r#"{"type":"StartGame"}"#;
+        let msg: ClientMessage = serde_json::from_str(json).unwrap();
+        assert!(matches!(msg, ClientMessage::StartGame));
+    }
+
+    #[test]
+    fn client_message_action() {
+        let json = r#"{"type":"Action","action":{"type":"DrawFromDeck"}}"#;
+        let msg: ClientMessage = serde_json::from_str(json).unwrap();
+        assert!(matches!(msg, ClientMessage::Action { .. }));
+    }
+
+    #[test]
+    fn client_message_continue_round() {
+        let json = r#"{"type":"ContinueRound"}"#;
+        let msg: ClientMessage = serde_json::from_str(json).unwrap();
+        assert!(matches!(msg, ClientMessage::ContinueRound));
+    }
+
+    #[test]
+    fn client_message_play_again() {
+        let json = r#"{"type":"PlayAgain"}"#;
+        let msg: ClientMessage = serde_json::from_str(json).unwrap();
+        assert!(matches!(msg, ClientMessage::PlayAgain));
+    }
+
+    #[test]
+    fn client_message_set_turn_timer_with_value() {
+        let json = r#"{"type":"SetTurnTimer","secs":30}"#;
+        let msg: ClientMessage = serde_json::from_str(json).unwrap();
+        assert!(matches!(
+            msg,
+            ClientMessage::SetTurnTimer { secs: Some(30) }
+        ));
+    }
+
+    #[test]
+    fn client_message_set_turn_timer_null() {
+        let json = r#"{"type":"SetTurnTimer","secs":null}"#;
+        let msg: ClientMessage = serde_json::from_str(json).unwrap();
+        assert!(matches!(msg, ClientMessage::SetTurnTimer { secs: None }));
+    }
+
+    #[test]
+    fn client_message_ping() {
+        let json = r#"{"type":"Ping"}"#;
+        let msg: ClientMessage = serde_json::from_str(json).unwrap();
+        assert!(matches!(msg, ClientMessage::Ping));
+    }
+
+    #[test]
+    fn client_message_rejects_unknown_type() {
+        let json = r#"{"type":"Unknown"}"#;
+        assert!(serde_json::from_str::<ClientMessage>(json).is_err());
+    }
+
+    #[test]
+    fn client_message_rejects_missing_required_fields() {
+        let json = r#"{"type":"ConfigureSlot","slot":1}"#;
+        assert!(serde_json::from_str::<ClientMessage>(json).is_err());
+    }
+
+    // --- ServerMessage serialization ---
+
+    #[test]
+    fn server_message_error_serializes() {
+        let msg = ServerMessage::Error {
+            code: "NOT_FOUND".to_string(),
+            message: "Room not found".to_string(),
+        };
+        let val: serde_json::Value = serde_json::to_value(&msg).unwrap();
+        assert_eq!(val["type"], "Error");
+        assert_eq!(val["code"], "NOT_FOUND");
+        assert_eq!(val["message"], "Room not found");
+    }
+
+    #[test]
+    fn server_message_pong_serializes() {
+        let msg = ServerMessage::Pong;
+        let val: serde_json::Value = serde_json::to_value(&msg).unwrap();
+        assert_eq!(val["type"], "Pong");
+    }
+
+    #[test]
+    fn server_message_kicked_serializes() {
+        let msg = ServerMessage::Kicked {
+            reason: "Bad behavior".to_string(),
+        };
+        let val: serde_json::Value = serde_json::to_value(&msg).unwrap();
+        assert_eq!(val["type"], "Kicked");
+        assert_eq!(val["reason"], "Bad behavior");
+    }
+
+    #[test]
+    fn server_message_player_joined_serializes() {
+        let msg = ServerMessage::PlayerJoined {
+            player_index: 2,
+            name: "Alice".to_string(),
+        };
+        let val: serde_json::Value = serde_json::to_value(&msg).unwrap();
+        assert_eq!(val["type"], "PlayerJoined");
+        assert_eq!(val["player_index"], 2);
+        assert_eq!(val["name"], "Alice");
+    }
+
+    #[test]
+    fn server_message_player_left_serializes() {
+        let msg = ServerMessage::PlayerLeft { player_index: 1 };
+        let val: serde_json::Value = serde_json::to_value(&msg).unwrap();
+        assert_eq!(val["type"], "PlayerLeft");
+        assert_eq!(val["player_index"], 1);
+    }
+
+    #[test]
+    fn server_message_player_reconnected_serializes() {
+        let msg = ServerMessage::PlayerReconnected { player_index: 0 };
+        let val: serde_json::Value = serde_json::to_value(&msg).unwrap();
+        assert_eq!(val["type"], "PlayerReconnected");
+        assert_eq!(val["player_index"], 0);
+    }
+
+    #[test]
+    fn server_message_room_state_serializes() {
+        let state = RoomLobbyState {
+            room_code: "ABCD".to_string(),
+            players: vec![],
+            num_players: 2,
+            rules: "Standard".to_string(),
+            creator: 0,
+            available_strategies: vec!["Random".to_string()],
+            available_rules: vec!["Standard".to_string()],
+            idle_timeout_secs: Some(300),
+            turn_timer_secs: None,
+            last_winners: vec![],
+            genetic_games_trained: 0,
+            genetic_generation: 0,
+        };
+        let msg = ServerMessage::RoomState { state };
+        let val: serde_json::Value = serde_json::to_value(&msg).unwrap();
+        assert_eq!(val["type"], "RoomState");
+        assert_eq!(val["state"]["room_code"], "ABCD");
+        assert_eq!(val["state"]["num_players"], 2);
+    }
+
+    #[test]
+    fn lobby_player_skips_none_optional_fields() {
+        let player = LobbyPlayer {
+            slot: 0,
+            name: "Bob".to_string(),
+            player_type: PlayerSlotType::Human,
+            connected: true,
+            shares_ip_with_host: None,
+            disconnect_secs: None,
+        };
+        let val: serde_json::Value = serde_json::to_value(&player).unwrap();
+        assert!(val.get("shares_ip_with_host").is_none());
+        assert!(val.get("disconnect_secs").is_none());
+    }
+
+    #[test]
+    fn lobby_player_includes_some_optional_fields() {
+        let player = LobbyPlayer {
+            slot: 1,
+            name: "Eve".to_string(),
+            player_type: PlayerSlotType::Bot {
+                strategy: "Smart".to_string(),
+            },
+            connected: false,
+            shares_ip_with_host: Some(true),
+            disconnect_secs: Some(45),
+        };
+        let val: serde_json::Value = serde_json::to_value(&player).unwrap();
+        assert_eq!(val["shares_ip_with_host"], true);
+        assert_eq!(val["disconnect_secs"], 45);
+    }
+}

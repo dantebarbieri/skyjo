@@ -1,19 +1,23 @@
-name: Rust CI
+name: Server CI
 
 on:
   push:
     branches: [main]
     paths:
-      - "skyjo-core/**"
-      - "skyjo-wasm/**"
       - "skyjo-server/**"
+      - "skyjo-core/**"
       - "Cargo.toml"
       - "Cargo.lock"
   pull_request:
     branches: [main]
+    paths:
+      - "skyjo-server/**"
+      - "skyjo-core/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
 
 concurrency:
-  group: rust-${{ github.ref }}
+  group: server-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -44,9 +48,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: cargo-clippy-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cargo-clippy-
-      - run: cargo clippy --workspace --locked -- -D warnings
+          key: cargo-server-clippy-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-server-clippy-
+      - run: cargo clippy --manifest-path skyjo-server/Cargo.toml --locked -- -D warnings
 
   test:
     name: Tests
@@ -60,7 +64,6 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: cargo-test-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cargo-test-
-      - run: cargo test --locked --manifest-path skyjo-core/Cargo.toml
+          key: cargo-server-test-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-server-test-
       - run: cargo test --locked --manifest-path skyjo-server/Cargo.toml

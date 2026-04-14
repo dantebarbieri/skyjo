@@ -439,3 +439,93 @@ impl Game {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::rules::StandardRules;
+    use crate::strategies::RandomStrategy;
+
+    fn make_strategies(n: usize) -> Vec<Box<dyn Strategy>> {
+        (0..n)
+            .map(|_| Box::new(RandomStrategy) as Box<dyn Strategy>)
+            .collect()
+    }
+
+    #[test]
+    fn new_fails_with_too_few_players() {
+        let result = Game::new(Box::new(StandardRules), make_strategies(1), 42);
+        assert!(matches!(result, Err(SkyjoError::NotEnoughPlayers)));
+    }
+
+    #[test]
+    fn new_fails_with_zero_players() {
+        let result = Game::new(Box::new(StandardRules), make_strategies(0), 42);
+        assert!(matches!(result, Err(SkyjoError::NotEnoughPlayers)));
+    }
+
+    #[test]
+    fn new_fails_with_too_many_players() {
+        let result = Game::new(Box::new(StandardRules), make_strategies(9), 42);
+        assert!(matches!(result, Err(SkyjoError::TooManyPlayers)));
+    }
+
+    #[test]
+    fn new_succeeds_with_two_players() {
+        let result = Game::new(Box::new(StandardRules), make_strategies(2), 42);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn new_succeeds_with_eight_players() {
+        let result = Game::new(Box::new(StandardRules), make_strategies(8), 42);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn new_succeeds_with_all_valid_counts() {
+        for n in 2..=8 {
+            let result = Game::new(Box::new(StandardRules), make_strategies(n), 42);
+            assert!(result.is_ok(), "Game::new should succeed with {n} players");
+        }
+    }
+
+    #[test]
+    fn seeded_rng_produces_deterministic_results() {
+        let history1 = Game::new(Box::new(StandardRules), make_strategies(3), 99)
+            .unwrap()
+            .play()
+            .unwrap();
+        let history2 = Game::new(Box::new(StandardRules), make_strategies(3), 99)
+            .unwrap()
+            .play()
+            .unwrap();
+
+        assert_eq!(history1.final_scores, history2.final_scores);
+        assert_eq!(history1.winners, history2.winners);
+        assert_eq!(history1.rounds.len(), history2.rounds.len());
+        for (r1, r2) in history1.rounds.iter().zip(history2.rounds.iter()) {
+            assert_eq!(r1.initial_deck_order, r2.initial_deck_order);
+            assert_eq!(r1.round_scores, r2.round_scores);
+            assert_eq!(r1.turns.len(), r2.turns.len());
+        }
+    }
+
+    #[test]
+    fn different_seeds_produce_different_results() {
+        let history1 = Game::new(Box::new(StandardRules), make_strategies(2), 1)
+            .unwrap()
+            .play()
+            .unwrap();
+        let history2 = Game::new(Box::new(StandardRules), make_strategies(2), 2)
+            .unwrap()
+            .play()
+            .unwrap();
+
+        // Different seeds should produce different deck orders
+        assert_ne!(
+            history1.rounds[0].initial_deck_order,
+            history2.rounds[0].initial_deck_order
+        );
+    }
+}

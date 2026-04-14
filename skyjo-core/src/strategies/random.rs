@@ -150,3 +150,102 @@ impl Strategy for RandomStrategy {
 fn random_bool(rng: &mut dyn RngCore) -> bool {
     rng.next_u32() & 1 == 0
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::strategy::StrategyView;
+    use rand::SeedableRng;
+    use rand::rngs::StdRng;
+
+    #[test]
+    fn name_returns_random() {
+        assert_eq!(RandomStrategy.name(), "Random");
+    }
+
+    #[test]
+    fn describe_returns_valid_description() {
+        let desc = RandomStrategy.describe();
+        assert_eq!(desc.name, "Random");
+        assert!(!desc.summary.is_empty());
+        assert_eq!(desc.complexity, Complexity::Trivial);
+        assert!(!desc.strengths.is_empty());
+        assert!(!desc.weaknesses.is_empty());
+        assert_eq!(desc.phases.len(), 4);
+    }
+
+    fn make_view() -> StrategyView {
+        StrategyView {
+            my_index: 0,
+            my_board: vec![
+                VisibleSlot::Hidden,
+                VisibleSlot::Revealed(5),
+                VisibleSlot::Hidden,
+                VisibleSlot::Revealed(10),
+                VisibleSlot::Hidden,
+                VisibleSlot::Hidden,
+                VisibleSlot::Hidden,
+                VisibleSlot::Hidden,
+                VisibleSlot::Hidden,
+                VisibleSlot::Hidden,
+                VisibleSlot::Hidden,
+                VisibleSlot::Hidden,
+            ],
+            num_rows: 3,
+            num_cols: 4,
+            opponent_boards: vec![],
+            opponent_indices: vec![],
+            discard_piles: vec![vec![3]],
+            deck_remaining: 100,
+            cumulative_scores: vec![0, 0],
+            is_final_turn: false,
+        }
+    }
+
+    #[test]
+    fn choose_initial_flips_returns_correct_count() {
+        let view = make_view();
+        let mut rng = StdRng::seed_from_u64(42);
+        let flips = RandomStrategy.choose_initial_flips(&view, 2, &mut rng);
+        assert_eq!(flips.len(), 2);
+        assert_ne!(flips[0], flips[1]);
+        // All flips should be at hidden positions
+        for &pos in &flips {
+            assert!(matches!(view.my_board[pos], VisibleSlot::Hidden));
+        }
+    }
+
+    #[test]
+    fn choose_draw_returns_valid_choice() {
+        let view = make_view();
+        let mut rng = StdRng::seed_from_u64(42);
+        // Run multiple times to exercise both branches
+        for seed in 0..20u64 {
+            let mut r = StdRng::seed_from_u64(seed);
+            let choice = RandomStrategy.choose_draw(&view, &mut r);
+            match choice {
+                DrawChoice::DrawFromDeck => {}
+                DrawChoice::DrawFromDiscard(pile) => {
+                    assert!(!view.discard_piles[pile].is_empty());
+                }
+            }
+        }
+        // Suppress unused warning
+        let _ = rng.next_u32();
+    }
+
+    #[test]
+    fn choose_deck_draw_action_returns_valid_action() {
+        let view = make_view();
+        let mut rng = StdRng::seed_from_u64(42);
+        let action = RandomStrategy.choose_deck_draw_action(&view, 5, &mut rng);
+        match action {
+            DeckDrawAction::Keep(pos) => {
+                assert!(!matches!(view.my_board[pos], VisibleSlot::Cleared));
+            }
+            DeckDrawAction::DiscardAndFlip(pos) => {
+                assert!(matches!(view.my_board[pos], VisibleSlot::Hidden));
+            }
+        }
+    }
+}
