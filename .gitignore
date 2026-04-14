@@ -13,3 +13,4 @@ pkg/
 
 # OS
 .DS_Store
+data/

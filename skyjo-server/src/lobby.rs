@@ -6,6 +6,7 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
+use crate::error::ServerError;
 use crate::room::{Room, SharedRoom};
 use crate::session::SessionToken;
 
@@ -50,12 +51,13 @@ impl Lobby {
         rules: Option<String>,
         genetic_games_trained: usize,
         genetic_generation: usize,
-    ) -> Result<(String, SessionToken, usize), String> {
+    ) -> Result<(String, SessionToken, usize), ServerError> {
+        let player_name = crate::room::validate_player_name(&player_name)?;
         if !(2..=8).contains(&num_players) {
-            return Err("Player count must be 2-8".to_string());
+            return Err(ServerError::InvalidNumPlayers);
         }
         if self.rooms.len() >= self.max_rooms {
-            return Err("Server is at maximum room capacity".to_string());
+            return Err(ServerError::MaxRoomsReached);
         }
 
         let code = self.generate_code();
@@ -85,18 +87,23 @@ impl Lobby {
         &self,
         code: &str,
         player_name: String,
-    ) -> Result<(SessionToken, usize), String> {
-        let room_ref = self.rooms.get(code).ok_or("Room not found")?.clone();
+    ) -> Result<(SessionToken, usize), ServerError> {
+        crate::room::validate_room_code(code)?;
+        let player_name = crate::room::validate_player_name(&player_name)?;
+
+        let room_ref = self
+            .rooms
+            .get(code)
+            .ok_or(ServerError::RoomNotFound)?
+            .clone();
 
         let mut room = room_ref.lock().await;
 
         if room.phase != crate::room::RoomPhase::Lobby {
-            return Err("Game already started".to_string());
+            return Err(ServerError::GameAlreadyStarted);
         }
 
-        let slot = room
-            .next_available_slot()
-            .ok_or("Room is full (all slots are taken by human players)")?;
+        let slot = room.next_available_slot().ok_or(ServerError::RoomFull)?;
 
         let token = SessionToken::new();
         room.players[slot].name = player_name.clone();
@@ -217,6 +224,7 @@ pub struct RoomInfoResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::ServerError;
     use std::collections::HashSet;
 
     fn make_lobby(max_rooms: usize) -> Lobby {
@@ -275,7 +283,7 @@ mod tests {
 
         let result = lobby.create_room("Charlie".into(), 2, None, 0, 0);
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "Server is at maximum room capacity");
+        assert_eq!(result.unwrap_err(), ServerError::MaxRoomsReached);
     }
 
     #[test]
@@ -340,11 +348,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn join_room_fails_with_invalid_code() {
+    async fn join_room_fails_with_nonexistent_room() {
         let lobby = make_lobby(5);
-        let result = lobby.join_room("BADCODE", "Bob".into()).await;
+        let result = lobby.join_room("BADCDE", "Bob".into()).await;
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "Room not found");
+        assert_eq!(result.unwrap_err(), ServerError::RoomNotFound);
     }
 
     #[tokio::test]
@@ -403,5 +411,89 @@ mod tests {
             assert_eq!(code.len(), 6);
             assert!(code.chars().all(|c| valid.contains(&c)));
         }
+    }
+
+    // ========================================================================
+    // Player Name Validation (via lobby)
+    // ========================================================================
+
+    #[test]
+    fn create_room_trims_player_name() {
+        let lobby = make_lobby(5);
+        let (code, _, _) = lobby
+            .create_room("  Alice  ".into(), 2, None, 0, 0)
+            .unwrap();
+        let room_ref = lobby.rooms.get(&code).unwrap().clone();
+        let room = room_ref.blocking_lock();
+        assert_eq!(room.players[0].name, "Alice");
+    }
+
+    #[test]
+    fn create_room_rejects_empty_name() {
+        let lobby = make_lobby(5);
+        let err = lobby.create_room("".into(), 2, None, 0, 0).unwrap_err();
+        assert_eq!(err, ServerError::PlayerNameEmpty);
+    }
+
+    #[test]
+    fn create_room_rejects_whitespace_only_name() {
+        let lobby = make_lobby(5);
+        let err = lobby.create_room("   ".into(), 2, None, 0, 0).unwrap_err();
+        assert_eq!(err, ServerError::PlayerNameEmpty);
+    }
+
+    #[test]
+    fn create_room_rejects_long_name() {
+        let lobby = make_lobby(5);
+        let long = "A".repeat(33);
+        let err = lobby.create_room(long, 2, None, 0, 0).unwrap_err();
+        assert_eq!(err, ServerError::PlayerNameTooLong);
+    }
+
+    #[tokio::test]
+    async fn join_room_trims_player_name() {
+        let lobby = make_lobby(5);
+        let (code, _, _) = create_default_room(&lobby);
+
+        let (_token, idx) = lobby.join_room(&code, "  Bob  ".into()).await.unwrap();
+        let room_ref = lobby.rooms.get(&code).unwrap().clone();
+        let room = room_ref.lock().await;
+        assert_eq!(room.players[idx].name, "Bob");
+    }
+
+    #[tokio::test]
+    async fn join_room_rejects_empty_name() {
+        let lobby = make_lobby(5);
+        let (code, _, _) = create_default_room(&lobby);
+        let err = lobby.join_room(&code, "".into()).await.unwrap_err();
+        assert_eq!(err, ServerError::PlayerNameEmpty);
+    }
+
+    #[tokio::test]
+    async fn join_room_rejects_long_name() {
+        let lobby = make_lobby(5);
+        let (code, _, _) = create_default_room(&lobby);
+        let long = "A".repeat(33);
+        let err = lobby.join_room(&code, long).await.unwrap_err();
+        assert_eq!(err, ServerError::PlayerNameTooLong);
+    }
+
+    // ========================================================================
+    // Room Code Validation (via lobby)
+    // ========================================================================
+
+    #[tokio::test]
+    async fn join_room_rejects_invalid_room_code_format() {
+        let lobby = make_lobby(5);
+        create_default_room(&lobby);
+        // lowercase
+        let err = lobby.join_room("abcdef", "Bob".into()).await.unwrap_err();
+        assert_eq!(err, ServerError::RoomCodeInvalid);
+        // wrong length
+        let err = lobby.join_room("ABC", "Bob".into()).await.unwrap_err();
+        assert_eq!(err, ServerError::RoomCodeInvalid);
+        // excluded chars (I, O, L)
+        let err = lobby.join_room("ABCDEI", "Bob".into()).await.unwrap_err();
+        assert_eq!(err, ServerError::RoomCodeInvalid);
     }
 }

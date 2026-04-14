@@ -4,3 +4,10 @@ services:
     ports:
       - "${PORT:-8080}:8080"
     restart: unless-stopped
+    volumes:
+      - skyjo-data:/var/lib/skyjo
+    environment:
+      - SKYJO_DATA_DIR=/var/lib/skyjo
+
+volumes:
+  skyjo-data:

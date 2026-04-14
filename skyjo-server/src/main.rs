@@ -14,8 +14,12 @@ use tokio::sync::Mutex;
 use tower_http::compression::CompressionLayer;
 use tower_http::services::{ServeDir, ServeFile};
 
+use skyjo_server::error::ServerError;
 use skyjo_server::genetic::{self, GeneticTrainingState};
 use skyjo_server::lobby::Lobby;
+use skyjo_server::messages::ServerMessage;
+use skyjo_server::persistence::Persistence;
+use skyjo_server::room::{RoomPhase, RoomSnapshot};
 use skyjo_server::ws;
 use skyjo_server::{AppState, AppStateInner};
 
@@ -31,8 +35,16 @@ struct Args {
     static_dir: PathBuf,
 
     /// Path to the genetic model file.
-    #[arg(long, default_value = "./genetic_model.json")]
-    genetic_model_path: PathBuf,
+    #[arg(long)]
+    genetic_model_path: Option<PathBuf>,
+
+    /// Directory for persistent data (SQLite DB, genetic model)
+    #[arg(long, env = "SKYJO_DATA_DIR", default_value = "./data")]
+    data_dir: PathBuf,
+
+    /// API key for genetic endpoints (env: SKYJO_GENETIC_API_KEY). If not set, mutation endpoints return 403.
+    #[arg(long, env = "SKYJO_GENETIC_API_KEY")]
+    genetic_api_key: Option<String>,
 }
 
 #[tokio::main]
@@ -47,17 +59,93 @@ async fn main() {
 
     let args = Args::parse();
 
+    // Ensure data directory exists
+    std::fs::create_dir_all(&args.data_dir).expect("Failed to create data directory");
+
+    let genetic_model_path = args
+        .genetic_model_path
+        .unwrap_or_else(|| args.data_dir.join("genetic_model.json"));
+
     let genetic_state = Arc::new(Mutex::new(GeneticTrainingState::load_or_new(
-        args.genetic_model_path,
+        genetic_model_path,
     )));
+
+    // Initialize persistence (SQLite)
+    let db_path = args.data_dir.join("skyjo.db");
+    let persistence = match Persistence::open(&db_path) {
+        Ok(p) => {
+            tracing::info!("Opened persistence database at {db_path:?}");
+            Some(Arc::new(p))
+        }
+        Err(e) => {
+            tracing::warn!("Failed to open persistence database: {e}. Snapshots disabled.");
+            None
+        }
+    };
+
+    let rate_limiter = Arc::new(skyjo_server::rate_limit::RateLimiter::new());
 
     let app_state = Arc::new(AppStateInner {
         lobby: Lobby::new(100),
         genetic: genetic_state,
+        genetic_api_key: args.genetic_api_key.clone(),
+        persistence: persistence.clone(),
+        rate_limiter,
     });
 
-    // Spawn room cleanup task
+    // Restore rooms from snapshots (best-effort crash recovery)
+    if let Some(ref db) = persistence {
+        let db_clone = db.clone();
+        let snapshots = tokio::task::spawn_blocking(move || db_clone.load_all_room_snapshots())
+            .await
+            .expect("spawn_blocking panicked");
+        match snapshots {
+            Ok(snapshots) => {
+                let count = snapshots.len();
+                for (code, data) in snapshots {
+                    match String::from_utf8(data) {
+                        Ok(json) => match serde_json::from_str::<RoomSnapshot>(&json) {
+                            Ok(snapshot) => {
+                                let room = skyjo_server::room::Room::from_snapshot(snapshot);
+                                let shared = Arc::new(tokio::sync::Mutex::new(room));
+                                app_state.lobby.rooms.insert(code.clone(), shared);
+                                tracing::info!(room = %code, "Restored room from snapshot");
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    room = %code,
+                                    "Failed to deserialize room snapshot: {e}"
+                                );
+                            }
+                        },
+                        Err(e) => {
+                            tracing::warn!(
+                                room = %code,
+                                "Failed to decode room snapshot as UTF-8: {e}"
+                            );
+                        }
+                    }
+                    // Clean up snapshot after restoration attempt
+                    let db_clone = db.clone();
+                    let code_clone = code.clone();
+                    let _ = tokio::task::spawn_blocking(move || {
+                        db_clone.delete_room_snapshot(&code_clone)
+                    })
+                    .await;
+                }
+                if count > 0 {
+                    tracing::info!("Processed {count} room snapshot(s) from previous session");
+                }
+            }
+            Err(e) => {
+                tracing::warn!("Failed to load room snapshots: {e}");
+            }
+        }
+    }
+
+    // Spawn room cleanup + periodic snapshot task
     let cleanup_state = app_state.clone();
+    let cleanup_persistence = persistence.clone();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(60));
         loop {
@@ -66,8 +154,49 @@ async fn main() {
                 Duration::from_secs(300), // 5 min after game over
                 Duration::from_secs(600), // 10 min after all disconnect
             );
+
+            // Clean up stale rate limiter entries
+            cleanup_state.rate_limiter.cleanup(Duration::from_secs(300));
+
+            // Periodic snapshot of active in-game rooms
+            if let Some(ref db) = cleanup_persistence {
+                for entry in cleanup_state.lobby.rooms.iter() {
+                    let code = entry.key().clone();
+                    if let Ok(room) = entry.value().try_lock()
+                        && room.phase == skyjo_server::room::RoomPhase::InGame
+                    {
+                        let snapshot = room.to_snapshot();
+                        if let Ok(json) = serde_json::to_string(&snapshot) {
+                            let db = db.clone();
+                            let code_clone = code.clone();
+                            tokio::task::spawn_blocking(move || {
+                                if let Err(e) = db.save_room_snapshot(&code_clone, &json) {
+                                    tracing::warn!(room = %code_clone, "Failed to save snapshot: {e}");
+                                }
+                            });
+                        }
+                    }
+                }
+            }
         }
     });
+
+    // Genetic mutation routes (require auth)
+    let genetic_mutation_routes = Router::new()
+        .route("/genetic/train", post(genetic_train))
+        .route("/genetic/stop", post(genetic_stop))
+        .route("/genetic/reset", post(genetic_reset))
+        .route("/genetic/load", post(genetic_load))
+        .route("/genetic/saved", post(genetic_save))
+        .route("/genetic/saved/import", post(genetic_import))
+        .route(
+            "/genetic/saved/{name}",
+            axum::routing::delete(genetic_saved_delete),
+        )
+        .layer(axum::middleware::from_fn_with_state(
+            app_state.clone(),
+            skyjo_server::genetic_auth_middleware,
+        ));
 
     // API routes
     let api_routes = Router::new()
@@ -76,18 +205,10 @@ async fn main() {
         .route("/rooms/{code}/join", post(skyjo_server::join_room))
         .route("/rooms/{code}/ws", get(ws_upgrade))
         .route("/genetic/model", get(genetic_model))
-        .route("/genetic/train", post(genetic_train))
-        .route("/genetic/stop", post(genetic_stop))
-        .route("/genetic/reset", post(genetic_reset))
-        .route("/genetic/load", post(genetic_load))
         .route("/genetic/status", get(skyjo_server::genetic_status))
-        .route("/genetic/saved", get(genetic_saved_list).post(genetic_save))
-        .route("/genetic/saved/import", post(genetic_import))
-        .route(
-            "/genetic/saved/{name}",
-            axum::routing::delete(genetic_saved_delete),
-        )
-        .route("/genetic/saved/{name}/model", get(genetic_saved_model));
+        .route("/genetic/saved", get(genetic_saved_list))
+        .route("/genetic/saved/{name}/model", get(genetic_saved_model))
+        .merge(genetic_mutation_routes);
 
     // SPA fallback: serve index.html for any non-file route
     let index_path = args.static_dir.join("index.html");
@@ -97,8 +218,12 @@ async fn main() {
     let app = Router::new()
         .nest("/api", api_routes)
         .fallback_service(static_service)
+        .layer(axum::middleware::from_fn_with_state(
+            app_state.clone(),
+            skyjo_server::rate_limit_middleware,
+        ))
         .layer(CompressionLayer::new())
-        .with_state(app_state);
+        .with_state(app_state.clone());
 
     let addr = format!("0.0.0.0:{}", args.port);
     tracing::info!("Starting server on {addr}");
@@ -108,10 +233,95 @@ async fn main() {
         .await
         .expect("Failed to bind");
 
+    // Graceful shutdown: listen for SIGINT (and SIGTERM on Unix)
+    let shutdown_lobby = app_state.clone();
+    let shutdown_persistence = persistence.clone();
+    let shutdown_signal = async move {
+        #[cfg(unix)]
+        {
+            let mut sigterm =
+                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                    .expect("Failed to install SIGTERM handler");
+
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {
+                    tracing::info!("Received SIGINT");
+                }
+                _ = sigterm.recv() => {
+                    tracing::info!("Received SIGTERM");
+                }
+            }
+        }
+
+        #[cfg(not(unix))]
+        {
+            tokio::signal::ctrl_c()
+                .await
+                .expect("Failed to install Ctrl+C handler");
+            tracing::info!("Received SIGINT");
+        }
+
+        tracing::info!("Shutdown signal received, notifying clients and snapshotting rooms...");
+
+        // Broadcast ServerShutdown to all connected clients & snapshot rooms
+        let mut snapshot_count = 0u32;
+        for entry in shutdown_lobby.lobby.rooms.iter() {
+            let code = entry.key().clone();
+            let room = entry.value().lock().await;
+
+            // Notify all connected players
+            for (i, slot) in room.players.iter().enumerate() {
+                if slot.connected {
+                    let _ = room.broadcast_tx.send((i, ServerMessage::ServerShutdown));
+                }
+            }
+
+            // Snapshot rooms that have active players or are in-game
+            let has_connected = room.players.iter().any(|p| p.connected);
+            let snapshot_json = if (room.phase != RoomPhase::Lobby || has_connected)
+                && shutdown_persistence.is_some()
+            {
+                serde_json::to_string(&room.to_snapshot()).ok()
+            } else {
+                None
+            };
+
+            drop(room);
+
+            if let (Some(db), Some(json)) = (shutdown_persistence.as_ref(), snapshot_json) {
+                let db = db.clone();
+                let code_clone = code.clone();
+                match tokio::task::spawn_blocking(move || db.save_room_snapshot(&code_clone, &json))
+                    .await
+                {
+                    Ok(Ok(())) => {
+                        snapshot_count += 1;
+                    }
+                    Ok(Err(err)) => {
+                        tracing::warn!(
+                            "Failed to persist snapshot for room {} during shutdown: {}",
+                            code,
+                            err
+                        );
+                    }
+                    Err(err) => {
+                        tracing::warn!(
+                            "Snapshot task failed for room {} during shutdown: {}",
+                            code,
+                            err
+                        );
+                    }
+                }
+            }
+        }
+        tracing::info!("Snapshotted {snapshot_count} room(s). Shutdown complete.");
+    };
+
     axum::serve(
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),
     )
+    .with_graceful_shutdown(shutdown_signal)
     .await
     .expect("Server error");
 }
@@ -121,6 +331,9 @@ async fn main() {
 #[derive(Deserialize)]
 struct WsQuery {
     token: String,
+    /// Wire format preference: "json" (default) or "msgpack"
+    #[serde(default)]
+    format: Option<String>,
 }
 
 async fn ws_upgrade(
@@ -129,40 +342,47 @@ async fn ws_upgrade(
     Query(query): Query<WsQuery>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     ws: WebSocketUpgrade,
-) -> Result<Response, (StatusCode, String)> {
+) -> Result<Response, ServerError> {
     // Authenticate session token
-    let (room_code, player_index) = state.lobby.get_session(&query.token).ok_or((
-        StatusCode::UNAUTHORIZED,
-        "Invalid session token".to_string(),
-    ))?;
+    let (room_code, player_index) = state
+        .lobby
+        .get_session(&query.token)
+        .ok_or(ServerError::Unauthorized)?;
 
     if room_code != code {
-        return Err((
-            StatusCode::FORBIDDEN,
-            "Token does not match this room".to_string(),
-        ));
+        return Err(ServerError::Unauthorized);
     }
 
     let room = state
         .lobby
         .get_room(&code)
-        .ok_or((StatusCode::NOT_FOUND, "Room not found".to_string()))?;
+        .ok_or(ServerError::RoomNotFound)?;
 
     // Check IP ban
     {
         let room_guard = room.lock().await;
         let ip = addr.ip().to_string();
         if room_guard.is_ip_banned(&ip) {
-            return Err((
-                StatusCode::FORBIDDEN,
-                "You are banned from this room".to_string(),
-            ));
+            return Err(ServerError::Banned);
         }
     }
 
     let client_ip = addr.ip().to_string();
+    let initial_format = match query.format.as_deref() {
+        Some("msgpack" | "messagepack") => skyjo_server::messages::WireFormat::MessagePack,
+        _ => skyjo_server::messages::WireFormat::Json,
+    };
     Ok(ws.on_upgrade(move |socket| async move {
-        ws::handle_ws(socket, state, room, room_code, player_index, client_ip).await;
+        ws::handle_ws(
+            socket,
+            state,
+            room,
+            room_code,
+            player_index,
+            client_ip,
+            initial_format,
+        )
+        .await;
     }))
 }
 

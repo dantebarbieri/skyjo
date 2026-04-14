@@ -33,6 +33,16 @@ pub const CHECKPOINT_INTERVAL: usize = 1000;
 /// Maximum number of periodic checkpoints to retain (older ones are pruned).
 pub const MAX_PERIODIC_CHECKPOINTS: usize = 10;
 
+/// Adaptive evaluation count based on generation number.
+/// Early generations use fewer games for faster exploration.
+fn games_per_individual(generation: usize) -> usize {
+    match generation {
+        0..=50 => 10,
+        51..=200 => 20,
+        _ => GAMES_PER_INDIVIDUAL,
+    }
+}
+
 // --- Types ---
 
 /// A saved snapshot of a generation's best genome.
@@ -161,6 +171,8 @@ pub struct TrainingStatus {
     pub current_mutation_rate: f64,
     /// Current adaptive mutation sigma.
     pub current_mutation_sigma: f32,
+    /// Number of games per individual in the current generation's evaluation.
+    pub games_per_eval: usize,
 }
 
 /// Mutable training state, shared behind Arc<Mutex<>>.
@@ -339,6 +351,7 @@ impl GeneticTrainingState {
             lineage_hash: self.lineage_hash.clone(),
             current_mutation_rate: self.current_mutation_rate,
             current_mutation_sigma: self.current_mutation_sigma,
+            games_per_eval: games_per_individual(self.generation),
         }
     }
 
@@ -663,13 +676,14 @@ fn evaluate_individual(
     population: &[Vec<f32>],
     base_seed: u64,
     games_trained: usize,
+    num_games: usize,
 ) -> f64 {
     let mut total_score: f64 = 0.0;
     let mut total_wins: usize = 0;
     let mut total_score_diff: f64 = 0.0;
     let mut rng = StdRng::seed_from_u64(base_seed);
 
-    for game_idx in 0..GAMES_PER_INDIVIDUAL {
+    for game_idx in 0..num_games {
         let seed = base_seed.wrapping_add(game_idx as u64);
 
         let mut strategies: Vec<Box<dyn Strategy>> = Vec::with_capacity(1 + NUM_OPPONENTS);
@@ -726,7 +740,7 @@ fn evaluate_individual(
         }
     }
 
-    let n = GAMES_PER_INDIVIDUAL as f64;
+    let n = num_games as f64;
     // Fitness = -(avg score) + win bonus + score differential bonus
     let avg_score = total_score / n;
     let win_rate = total_wins as f64 / n;
@@ -744,8 +758,11 @@ fn run_generation(
     mutation_rate: f64,
     mutation_sigma: f32,
     reset_rate: f64,
+    generation: usize,
 ) -> (Vec<Vec<f32>>, Vec<f64>, usize, usize) {
     let mut rng = StdRng::seed_from_u64(generation_seed);
+
+    let num_games = games_per_individual(generation);
 
     // Evaluate fitness for each individual in parallel
     let fitnesses: Vec<f64> = population
@@ -753,7 +770,7 @@ fn run_generation(
         .enumerate()
         .map(|(idx, genome)| {
             let seed = generation_seed.wrapping_add((idx * 1000) as u64);
-            evaluate_individual(genome, idx, population, seed, games_trained)
+            evaluate_individual(genome, idx, population, seed, games_trained, num_games)
         })
         .collect();
 
@@ -792,7 +809,7 @@ fn run_generation(
         next_population.push(child);
     }
 
-    let games_played = population.len() * GAMES_PER_INDIVIDUAL;
+    let games_played = population.len() * num_games;
     (next_population, fitnesses, best_idx, games_played)
 }
 
@@ -895,6 +912,7 @@ pub async fn train_generations(state: Arc<Mutex<GeneticTrainingState>>, num_gene
                     mutation_rate,
                     mutation_sigma,
                     reset_rate,
+                    generation_num,
                 )
             })
             .await
@@ -1180,7 +1198,7 @@ mod tests {
     /// Helper: advance state to generation 1 so save_generation works.
     fn advance_to_gen1(state: &mut GeneticTrainingState) {
         state.generation = 1;
-        state.total_games_trained = POPULATION_SIZE * GAMES_PER_INDIVIDUAL;
+        state.total_games_trained = POPULATION_SIZE * games_per_individual(1);
         state.best_fitness = -50.0;
     }
 

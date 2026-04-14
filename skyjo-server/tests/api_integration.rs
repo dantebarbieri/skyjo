@@ -19,9 +19,12 @@ fn test_app() -> Router {
     let state: AppState = Arc::new(AppStateInner {
         lobby: skyjo_server::lobby::Lobby::new(100),
         genetic: genetic_state,
+        genetic_api_key: None,
+        persistence: None,
+        rate_limiter: Arc::new(skyjo_server::rate_limit::RateLimiter::new()),
     });
 
-    // Mirror the routes from main.rs
+    // Mirror the routes from main.rs (no API key = no auth required for existing tests)
     let api_routes = Router::new()
         .route("/rooms", post(skyjo_server::create_room))
         .route("/rooms/{code}", get(skyjo_server::room_info))
@@ -208,14 +211,14 @@ async fn join_room_succeeds_with_valid_code() {
 }
 
 #[tokio::test]
-async fn join_room_fails_with_invalid_code() {
+async fn join_room_fails_with_nonexistent_room() {
     let app = test_app();
 
     let response = app
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/api/rooms/BADCOD/join")
+                .uri("/api/rooms/ZZZZZZ/join")
                 .header("content-type", "application/json")
                 .body(Body::from(r#"{"player_name":"Bob"}"#))
                 .unwrap(),
@@ -223,7 +226,7 @@ async fn join_room_fails_with_invalid_code() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
 // --- Genetic status test ---
@@ -247,4 +250,118 @@ async fn genetic_status_returns_valid_response() {
     let json = body_json(response).await;
     assert_eq!(json["is_training"], false);
     assert!(json["generation"].is_number());
+}
+
+// --- Genetic auth tests ---
+
+fn test_app_with_api_key(api_key: Option<String>) -> Router {
+    use axum::routing::post;
+
+    let model_path =
+        std::env::temp_dir().join(format!("skyjo_test_model_auth_{}.json", std::process::id()));
+    let genetic_state = Arc::new(Mutex::new(
+        skyjo_server::genetic::GeneticTrainingState::load_or_new(model_path),
+    ));
+    let state: AppState = Arc::new(AppStateInner {
+        lobby: skyjo_server::lobby::Lobby::new(100),
+        genetic: genetic_state,
+        genetic_api_key: api_key,
+        persistence: None,
+        rate_limiter: Arc::new(skyjo_server::rate_limit::RateLimiter::new()),
+    });
+
+    // Protected mutation routes behind genetic auth middleware
+    let genetic_mutation_routes = Router::new()
+        .route(
+            "/genetic/train",
+            post(skyjo_server::genetic_status), // reuse status handler as a simple POST responder
+        )
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            skyjo_server::genetic_auth_middleware,
+        ));
+
+    // Read-only routes (no auth)
+    let api_routes = Router::new()
+        .route("/genetic/status", get(skyjo_server::genetic_status))
+        .merge(genetic_mutation_routes);
+
+    Router::new().nest("/api", api_routes).with_state(state)
+}
+
+#[tokio::test]
+async fn genetic_train_without_key_returns_403() {
+    let app = test_app_with_api_key(None);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/genetic/train")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"mode":"generations","generations":1}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn genetic_train_with_wrong_key_returns_403() {
+    let app = test_app_with_api_key(Some("secret123".to_string()));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/genetic/train")
+                .header("content-type", "application/json")
+                .header("authorization", "Bearer wrong")
+                .body(Body::from(r#"{"mode":"generations","generations":1}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn genetic_train_with_correct_key_succeeds() {
+    let app = test_app_with_api_key(Some("secret123".to_string()));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/genetic/train")
+                .header("content-type", "application/json")
+                .header("authorization", "Bearer secret123")
+                .body(Body::from(r#"{"mode":"generations","generations":1}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn genetic_status_no_auth_required() {
+    let app = test_app_with_api_key(Some("secret123".to_string()));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/genetic/status")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
 }

@@ -260,8 +260,9 @@ export default function GeneticManageRoute() {
                       </Badge>
                     )}
                     <Badge variant="outline" className="text-[10px] shrink-0">
-                      fitness: {sg.best_fitness.toFixed(1)}
+                      fitness: {sg.best_fitness.toFixed(1)} {sg.best_fitness >= 0 ? '✓' : ''}
                     </Badge>
+                    <span className="text-muted-foreground text-[9px]">(less negative = better)</span>
                     <Badge variant="outline" className="text-[10px] shrink-0">
                       {sg.total_games_trained.toLocaleString()} games
                     </Badge>

@@ -1,50 +1,81 @@
+pub mod error;
 pub mod genetic;
 pub mod lobby;
 pub mod messages;
+pub mod persistence;
+pub mod rate_limit;
 pub mod room;
 pub mod session;
 pub mod ws;
 
+use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use axum::extract::{Path, State};
-use axum::http::StatusCode;
-use axum::response::Json;
+use axum::extract::{ConnectInfo, Path, State};
+use axum::middleware::Next;
+use axum::response::{IntoResponse, Json, Response};
 
+use error::ServerError;
 use genetic::GeneticTrainingState;
 use lobby::{
     CreateRoomRequest, CreateRoomResponse, JoinRoomRequest, JoinRoomResponse, Lobby,
     RoomInfoResponse,
 };
+use persistence::Persistence;
 
 pub struct AppStateInner {
     pub lobby: Lobby,
     pub genetic: Arc<Mutex<GeneticTrainingState>>,
+    pub genetic_api_key: Option<String>,
+    pub persistence: Option<Arc<Persistence>>,
+    pub rate_limiter: Arc<crate::rate_limit::RateLimiter>,
 }
 
 pub type AppState = Arc<AppStateInner>;
+
+// --- Genetic Auth Middleware ---
+
+/// Middleware that checks `Authorization: Bearer <token>` against the configured genetic API key.
+/// If no key is configured, all requests are rejected (403).
+/// If the key doesn't match, the request is rejected (403).
+pub async fn genetic_auth_middleware(
+    State(state): State<AppState>,
+    req: axum::extract::Request,
+    next: Next,
+) -> Response {
+    match &state.genetic_api_key {
+        None => ServerError::Unauthorized.into_response(),
+        Some(key) => {
+            let auth_header = req
+                .headers()
+                .get("authorization")
+                .and_then(|v| v.to_str().ok());
+            match auth_header {
+                Some(h) if h.strip_prefix("Bearer ") == Some(key.as_str()) => next.run(req).await,
+                _ => ServerError::Unauthorized.into_response(),
+            }
+        }
+    }
+}
 
 // --- REST Handlers (public for integration tests) ---
 
 pub async fn create_room(
     State(state): State<AppState>,
     Json(req): Json<CreateRoomRequest>,
-) -> Result<Json<CreateRoomResponse>, (StatusCode, String)> {
+) -> Result<Json<CreateRoomResponse>, ServerError> {
     let (genetic_games, genetic_gen) = {
         let g = state.genetic.lock().await;
         (g.total_games_trained, g.generation)
     };
-    let (code, token, player_index) = state
-        .lobby
-        .create_room(
-            req.player_name,
-            req.num_players,
-            req.rules,
-            genetic_games,
-            genetic_gen,
-        )
-        .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+    let (code, token, player_index) = state.lobby.create_room(
+        req.player_name,
+        req.num_players,
+        req.rules,
+        genetic_games,
+        genetic_gen,
+    )?;
 
     Ok(Json(CreateRoomResponse {
         room_code: code,
@@ -56,11 +87,11 @@ pub async fn create_room(
 pub async fn room_info(
     State(state): State<AppState>,
     Path(code): Path<String>,
-) -> Result<Json<RoomInfoResponse>, (StatusCode, String)> {
+) -> Result<Json<RoomInfoResponse>, ServerError> {
     let room_ref = state
         .lobby
         .get_room(&code)
-        .ok_or((StatusCode::NOT_FOUND, "Room not found".to_string()))?;
+        .ok_or(ServerError::RoomNotFound)?;
 
     let room = room_ref.lock().await;
     let players_joined = room
@@ -88,12 +119,8 @@ pub async fn join_room(
     State(state): State<AppState>,
     Path(code): Path<String>,
     Json(req): Json<JoinRoomRequest>,
-) -> Result<Json<JoinRoomResponse>, (StatusCode, String)> {
-    let (token, player_index) = state
-        .lobby
-        .join_room(&code, req.player_name)
-        .await
-        .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+) -> Result<Json<JoinRoomResponse>, ServerError> {
+    let (token, player_index) = state.lobby.join_room(&code, req.player_name).await?;
 
     Ok(Json(JoinRoomResponse {
         session_token: token.to_string(),
@@ -104,4 +131,32 @@ pub async fn join_room(
 pub async fn genetic_status(State(state): State<AppState>) -> Json<genetic::TrainingStatus> {
     let s = state.genetic.lock().await;
     Json(s.status())
+}
+
+// --- Rate Limit Middleware ---
+
+pub async fn rate_limit_middleware(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    req: axum::extract::Request,
+    next: Next,
+) -> Response {
+    let (resource, config) = match (req.uri().path(), req.method()) {
+        (p, &axum::http::Method::POST) if p.starts_with("/api/rooms") && !p.contains("/join") => {
+            ("room_create", &rate_limit::limits::ROOM_CREATION)
+        }
+        (p, &axum::http::Method::POST) if p.contains("/join") => {
+            ("room_join", &rate_limit::limits::ROOM_JOIN)
+        }
+        (p, &axum::http::Method::POST) if p.starts_with("/api/genetic/") => {
+            ("genetic", &rate_limit::limits::GENETIC_API)
+        }
+        _ => return next.run(req).await,
+    };
+
+    if !state.rate_limiter.check(addr.ip(), resource, config) {
+        return error::ServerError::RateLimited.into_response();
+    }
+
+    next.run(req).await
 }

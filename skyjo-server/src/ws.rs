@@ -8,8 +8,26 @@ use tokio::sync::broadcast;
 use std::sync::Arc;
 
 use crate::AppStateInner;
-use crate::messages::{ClientMessage, ServerMessage};
+use crate::error::ServerError;
+use crate::messages::{ClientMessage, ServerMessage, WireFormat};
 use crate::room::SharedRoom;
+
+/// Stable machine-readable error code from variant name (strips data payloads).
+fn error_code(err: &ServerError) -> String {
+    let debug = format!("{:?}", err);
+    debug
+        .chars()
+        .take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '_')
+        .collect()
+}
+
+/// Convert a ServerError into a ServerMessage::Error.
+fn error_msg(err: ServerError) -> ServerMessage {
+    ServerMessage::Error {
+        code: error_code(&err),
+        message: err.message(),
+    }
+}
 
 /// Handle a WebSocket connection for a player in a room.
 pub async fn handle_ws(
@@ -19,15 +37,33 @@ pub async fn handle_ws(
     room_code: String,
     player_index: usize,
     client_ip: String,
+    initial_format: WireFormat,
 ) {
     let (mut ws_tx, mut ws_rx) = ws.split();
 
+    // Parse IP for rate limiting
+    let client_ip_addr: std::net::IpAddr = client_ip
+        .parse()
+        .unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED));
+
+    // Wire format: use client's requested format, or default to JSON.
+    // Auto-updates if client sends a different frame type later.
+    let mut wire_format = initial_format;
+
     // Mark player as connected and record IP (never exposed to clients)
+    let (player_msg_tx, mut player_msg_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
     let broadcast_rx = {
         let mut room_guard = room.lock().await;
         room_guard.players[player_index].connected = true;
         room_guard.players[player_index].ip = Some(client_ip);
         room_guard.players[player_index].disconnected_at = None;
+
+        // Register per-player targeted channel
+        room_guard.set_player_tx(player_index, player_msg_tx);
+
+        // If this player was converted to a bot while disconnected, convert back to human
+        let was_reconverted = room_guard.reconnect_bot_to_human(player_index);
+
         room_guard.touch();
 
         // Send initial state
@@ -50,7 +86,7 @@ pub async fn handle_ws(
                 },
             },
         };
-        send_msg(&mut ws_tx, &msg).await;
+        send_msg(&mut ws_tx, &msg, wire_format).await;
 
         // Notify others of reconnection
         for (i, slot) in room_guard.players.iter().enumerate() {
@@ -58,6 +94,18 @@ pub async fn handle_ws(
                 let _ = room_guard
                     .broadcast_tx
                     .send((i, ServerMessage::PlayerReconnected { player_index }));
+            }
+        }
+
+        // If reconverted from bot, broadcast updated lobby/game state so others see the name change
+        if was_reconverted {
+            match room_guard.phase {
+                crate::room::RoomPhase::InGame => {
+                    room_guard.broadcast_game_state();
+                }
+                _ => {
+                    room_guard.broadcast_lobby_state();
+                }
             }
         }
 
@@ -74,15 +122,74 @@ pub async fn handle_ws(
             msg = ws_rx.next() => {
                 match msg {
                     Some(Ok(Message::Text(text))) => {
+                        wire_format = WireFormat::Json;
+                        if !state.rate_limiter.check(
+                            client_ip_addr,
+                            "ws_message",
+                            &crate::rate_limit::limits::WS_MESSAGE,
+                        ) {
+                            let _ = send_msg(
+                                &mut ws_tx,
+                                &ServerMessage::Error {
+                                    code: "RateLimited".into(),
+                                    message: "Too many messages".into(),
+                                },
+                                wire_format,
+                            )
+                            .await;
+                            continue;
+                        }
                         let response = handle_client_message(
                             &text,
                             &state,
                             &room,
+                            &room_code,
                             player_index,
                         ).await;
 
                         if let Some(msg) = response {
-                            send_msg(&mut ws_tx, &msg).await;
+                            send_msg(&mut ws_tx, &msg, wire_format).await;
+                        }
+                    }
+                    Some(Ok(Message::Binary(data))) => {
+                        wire_format = WireFormat::MessagePack;
+                        if !state.rate_limiter.check(
+                            client_ip_addr,
+                            "ws_message",
+                            &crate::rate_limit::limits::WS_MESSAGE,
+                        ) {
+                            let _ = send_msg(
+                                &mut ws_tx,
+                                &ServerMessage::Error {
+                                    code: "RateLimited".into(),
+                                    message: "Too many messages".into(),
+                                },
+                                wire_format,
+                            )
+                            .await;
+                            continue;
+                        }
+                        let client_msg: ClientMessage = match rmp_serde::from_slice(&data) {
+                            Ok(m) => m,
+                            Err(e) => {
+                                let err = ServerMessage::Error {
+                                    code: "invalid_message".to_string(),
+                                    message: format!("Failed to parse MessagePack message: {e}"),
+                                };
+                                send_msg(&mut ws_tx, &err, wire_format).await;
+                                continue;
+                            }
+                        };
+                        let response = handle_parsed_message(
+                            client_msg,
+                            &state,
+                            &room,
+                            &room_code,
+                            player_index,
+                        ).await;
+
+                        if let Some(msg) = response {
+                            send_msg(&mut ws_tx, &msg, wire_format).await;
                         }
                     }
                     Some(Ok(Message::Close(_))) | None => {
@@ -96,20 +203,55 @@ pub async fn handle_ws(
                 match msg {
                     Ok((target_player, server_msg)) => {
                         if target_player == player_index {
-                            send_msg(&mut ws_tx, &server_msg).await;
+                            send_msg(&mut ws_tx, &server_msg, wire_format).await;
                         }
                     }
                     Err(broadcast::error::RecvError::Lagged(n)) => {
                         tracing::warn!("Player {player_index} lagged {n} messages");
+                        // Update lag count in room
+                        {
+                            let mut room_guard = room.lock().await;
+                            room_guard.increment_broadcast_lag(player_index);
+                        }
                         // Send fresh state to catch up
                         let room_guard = room.lock().await;
                         if let Ok(state) = room_guard.get_player_state(player_index) {
                             let turn_deadline_secs = room_guard.turn_deadline_secs();
                             drop(room_guard);
-                            send_msg(&mut ws_tx, &ServerMessage::GameState { state, turn_deadline_secs }).await;
+                            send_msg(&mut ws_tx, &ServerMessage::GameState { state, turn_deadline_secs }, wire_format).await;
                         }
                     }
                     Err(broadcast::error::RecvError::Closed) => {
+                        break;
+                    }
+                }
+            }
+            // Per-player targeted message (pre-serialized bytes)
+            msg = player_msg_rx.recv() => {
+                match msg {
+                    Some(data) => {
+                        let send_result = match wire_format {
+                            WireFormat::Json => {
+                                match String::from_utf8(data) {
+                                    Ok(text) => ws_tx.send(Message::Text(text.into())).await,
+                                    Err(e) => {
+                                        tracing::warn!(
+                                            "Failed to send targeted JSON message to player {player_index}: invalid UTF-8: {e}"
+                                        );
+                                        continue;
+                                    }
+                                }
+                            }
+                            WireFormat::MessagePack => {
+                                ws_tx.send(Message::Binary(data.into())).await
+                            }
+                        };
+                        if send_result.is_err() {
+                            break;
+                        }
+                    }
+                    None => {
+                        // Sender dropped — room is cleaning up
                         break;
                     }
                 }
@@ -122,6 +264,7 @@ pub async fn handle_ws(
         let mut room_guard = room.lock().await;
         room_guard.players[player_index].connected = false;
         room_guard.players[player_index].disconnected_at = Some(std::time::Instant::now());
+        room_guard.remove_player_tx(player_index);
         room_guard.touch();
 
         // Notify others
@@ -145,21 +288,57 @@ pub async fn handle_ws(
             });
         }
 
-        // Schedule auto-kick check for this player
+        // Schedule auto-kick or bot-conversion check for this player
         {
             let room_clone = room.clone();
             let state_ref = state.clone();
+            let timeout = room_guard.effective_disconnect_bot_timeout();
             tokio::spawn(async move {
-                tokio::time::sleep(Duration::from_secs(60)).await;
+                tokio::time::sleep(timeout).await;
                 let mut room_guard = room_clone.lock().await;
-                let kicked = room_guard.auto_kick_disconnected(Duration::from_secs(60));
-                for (_, token) in &kicked {
-                    if let Some(t) = token {
-                        state_ref.lobby.sessions.remove(t);
+                match room_guard.phase {
+                    crate::room::RoomPhase::InGame => {
+                        // Convert disconnected players to bots instead of kicking
+                        let converted = room_guard.convert_disconnected_to_bots(timeout);
+                        for &slot in &converted {
+                            let name = room_guard.players[slot].name.clone();
+                            // Broadcast conversion notification to all connected players
+                            for (i, p) in room_guard.players.iter().enumerate() {
+                                if p.connected {
+                                    let _ = room_guard.broadcast_tx.send((
+                                        i,
+                                        ServerMessage::PlayerConvertedToBot {
+                                            slot,
+                                            name: name.clone(),
+                                        },
+                                    ));
+                                }
+                            }
+                        }
+                        if !converted.is_empty() {
+                            room_guard.broadcast_game_state();
+                            // If it's now a bot's turn, run bot turns
+                            if room_guard.is_current_player_bot() {
+                                drop(room_guard);
+                                let room_clone2 = room_clone.clone();
+                                tokio::spawn(async move {
+                                    run_bot_turns(room_clone2).await;
+                                });
+                            }
+                        }
                     }
-                }
-                if !kicked.is_empty() {
-                    room_guard.broadcast_lobby_state();
+                    _ => {
+                        // In Lobby or GameOver, kick as before
+                        let kicked = room_guard.auto_kick_disconnected(timeout);
+                        for (_, token) in &kicked {
+                            if let Some(t) = token {
+                                state_ref.lobby.sessions.remove(t);
+                            }
+                        }
+                        if !kicked.is_empty() {
+                            room_guard.broadcast_lobby_state();
+                        }
+                    }
                 }
             });
         }
@@ -172,6 +351,7 @@ async fn handle_client_message(
     text: &str,
     state: &Arc<AppStateInner>,
     room: &SharedRoom,
+    room_code: &str,
     player_index: usize,
 ) -> Option<ServerMessage> {
     let msg: ClientMessage = match serde_json::from_str(text) {
@@ -184,17 +364,38 @@ async fn handle_client_message(
         }
     };
 
+    handle_parsed_message(msg, state, room, room_code, player_index).await
+}
+
+async fn handle_parsed_message(
+    msg: ClientMessage,
+    state: &Arc<AppStateInner>,
+    room: &SharedRoom,
+    room_code: &str,
+    player_index: usize,
+) -> Option<ServerMessage> {
     match msg {
         ClientMessage::Ping => Some(ServerMessage::Pong),
+
+        ClientMessage::RequestFullState => {
+            let room_guard = room.lock().await;
+            match room_guard.get_player_state(player_index) {
+                Ok(state) => {
+                    let turn_deadline_secs = room_guard.turn_deadline_secs();
+                    Some(ServerMessage::GameState {
+                        state,
+                        turn_deadline_secs,
+                    })
+                }
+                Err(e) => Some(error_msg(e)),
+            }
+        }
 
         ClientMessage::ConfigureSlot { slot, player_type } => {
             let mut room_guard = room.lock().await;
 
             if player_index != room_guard.creator {
-                return Some(ServerMessage::Error {
-                    code: "not_creator".to_string(),
-                    message: "Only the room creator can configure slots".to_string(),
-                });
+                return Some(error_msg(ServerError::NotHost));
             }
 
             match room_guard.configure_slot(slot, &player_type) {
@@ -202,10 +403,7 @@ async fn handle_client_message(
                     room_guard.broadcast_lobby_state();
                     None
                 }
-                Err(e) => Some(ServerMessage::Error {
-                    code: "configure_error".to_string(),
-                    message: e,
-                }),
+                Err(e) => Some(error_msg(e)),
             }
         }
 
@@ -213,10 +411,7 @@ async fn handle_client_message(
             let mut room_guard = room.lock().await;
 
             if player_index != room_guard.creator {
-                return Some(ServerMessage::Error {
-                    code: "not_creator".to_string(),
-                    message: "Only the room creator can change rules".to_string(),
-                });
+                return Some(error_msg(ServerError::NotHost));
             }
 
             match room_guard.set_rules(&rules) {
@@ -224,10 +419,7 @@ async fn handle_client_message(
                     room_guard.broadcast_lobby_state();
                     None
                 }
-                Err(e) => Some(ServerMessage::Error {
-                    code: "set_rules_error".to_string(),
-                    message: e,
-                }),
+                Err(e) => Some(error_msg(e)),
             }
         }
 
@@ -235,10 +427,7 @@ async fn handle_client_message(
             let mut room_guard = room.lock().await;
 
             if player_index != room_guard.creator {
-                return Some(ServerMessage::Error {
-                    code: "not_creator".to_string(),
-                    message: "Only the room creator can change player count".to_string(),
-                });
+                return Some(error_msg(ServerError::NotHost));
             }
 
             match room_guard.set_num_players(num_players) {
@@ -246,10 +435,7 @@ async fn handle_client_message(
                     room_guard.broadcast_lobby_state();
                     None
                 }
-                Err(e) => Some(ServerMessage::Error {
-                    code: "set_players_error".to_string(),
-                    message: e,
-                }),
+                Err(e) => Some(error_msg(e)),
             }
         }
 
@@ -257,10 +443,7 @@ async fn handle_client_message(
             let mut room_guard = room.lock().await;
 
             if player_index != room_guard.creator {
-                return Some(ServerMessage::Error {
-                    code: "not_creator".to_string(),
-                    message: "Only the room creator can kick players".to_string(),
-                });
+                return Some(error_msg(ServerError::NotHost));
             }
 
             match room_guard.kick_player(slot) {
@@ -272,10 +455,7 @@ async fn handle_client_message(
                     room_guard.broadcast_lobby_state();
                     None
                 }
-                Err(e) => Some(ServerMessage::Error {
-                    code: "kick_error".to_string(),
-                    message: e,
-                }),
+                Err(e) => Some(error_msg(e)),
             }
         }
 
@@ -283,10 +463,7 @@ async fn handle_client_message(
             let mut room_guard = room.lock().await;
 
             if player_index != room_guard.creator {
-                return Some(ServerMessage::Error {
-                    code: "not_creator".to_string(),
-                    message: "Only the room creator can ban players".to_string(),
-                });
+                return Some(error_msg(ServerError::NotHost));
             }
 
             match room_guard.ban_player(slot) {
@@ -297,10 +474,7 @@ async fn handle_client_message(
                     room_guard.broadcast_lobby_state();
                     None
                 }
-                Err(e) => Some(ServerMessage::Error {
-                    code: "ban_error".to_string(),
-                    message: e,
-                }),
+                Err(e) => Some(error_msg(e)),
             }
         }
 
@@ -308,10 +482,7 @@ async fn handle_client_message(
             let mut room_guard = room.lock().await;
 
             if player_index != room_guard.creator {
-                return Some(ServerMessage::Error {
-                    code: "not_creator".to_string(),
-                    message: "Only the room creator can start the game".to_string(),
-                });
+                return Some(error_msg(ServerError::NotHost));
             }
 
             // Snapshot the genetic genome if any player uses a Genetic strategy
@@ -362,19 +533,38 @@ async fn handle_client_message(
 
                     None
                 }
-                Err(e) => Some(ServerMessage::Error {
-                    code: "start_error".to_string(),
-                    message: e,
-                }),
+                Err(e) => Some(error_msg(e)),
             }
         }
 
         ClientMessage::Action { action } => {
             let mut room_guard = room.lock().await;
 
+            // Capture timing before applying
+            let elapsed_before = room_guard.elapsed_since_turn_start();
+
+            if let Some(elapsed) = elapsed_before
+                && elapsed < Duration::from_millis(100)
+            {
+                tracing::warn!(
+                    room = %room_code,
+                    player = player_index,
+                    elapsed_ms = elapsed.as_millis(),
+                    "suspiciously_fast_action"
+                );
+            }
+
             match room_guard.apply_action(player_index, action.clone()) {
-                Ok(()) => {
-                    room_guard.broadcast_action(player_index, &action, false);
+                Ok(delta) => {
+                    tracing::info!(
+                        room = %room_code,
+                        player = player_index,
+                        action = ?action,
+                        elapsed_since_turn_start_ms = elapsed_before.map(|d| d.as_millis()),
+                        "action_applied"
+                    );
+
+                    room_guard.broadcast_action(player_index, &action, false, &delta);
 
                     // Schedule bot turns if the next player is a bot
                     if room_guard.is_current_player_bot() {
@@ -390,10 +580,7 @@ async fn handle_client_message(
 
                     None
                 }
-                Err(e) => Some(ServerMessage::Error {
-                    code: "action_error".to_string(),
-                    message: e,
-                }),
+                Err(e) => Some(error_msg(e)),
             }
         }
 
@@ -418,10 +605,7 @@ async fn handle_client_message(
 
                     None
                 }
-                Err(e) => Some(ServerMessage::Error {
-                    code: "continue_error".to_string(),
-                    message: e,
-                }),
+                Err(e) => Some(error_msg(e)),
             }
         }
 
@@ -429,10 +613,7 @@ async fn handle_client_message(
             let mut room_guard = room.lock().await;
 
             if player_index != room_guard.creator {
-                return Some(ServerMessage::Error {
-                    code: "not_creator".to_string(),
-                    message: "Only the room creator can restart the game".to_string(),
-                });
+                return Some(error_msg(ServerError::NotHost));
             }
 
             match room_guard.play_again() {
@@ -440,10 +621,7 @@ async fn handle_client_message(
                     room_guard.broadcast_lobby_state();
                     None
                 }
-                Err(e) => Some(ServerMessage::Error {
-                    code: "play_again_error".to_string(),
-                    message: e,
-                }),
+                Err(e) => Some(error_msg(e)),
             }
         }
 
@@ -455,10 +633,7 @@ async fn handle_client_message(
                     room_guard.broadcast_lobby_state();
                     None
                 }
-                Err(e) => Some(ServerMessage::Error {
-                    code: "return_error".to_string(),
-                    message: e,
-                }),
+                Err(e) => Some(error_msg(e)),
             }
         }
 
@@ -466,10 +641,7 @@ async fn handle_client_message(
             let mut room_guard = room.lock().await;
 
             if player_index != room_guard.creator {
-                return Some(ServerMessage::Error {
-                    code: "not_creator".to_string(),
-                    message: "Only the room creator can change the turn timer".to_string(),
-                });
+                return Some(error_msg(ServerError::NotHost));
             }
 
             match room_guard.set_turn_timer(secs) {
@@ -477,10 +649,23 @@ async fn handle_client_message(
                     room_guard.broadcast_lobby_state();
                     None
                 }
-                Err(e) => Some(ServerMessage::Error {
-                    code: "set_timer_error".to_string(),
-                    message: e,
-                }),
+                Err(e) => Some(error_msg(e)),
+            }
+        }
+
+        ClientMessage::SetDisconnectTimeout { secs } => {
+            let mut room_guard = room.lock().await;
+
+            if player_index != room_guard.creator {
+                return Some(error_msg(ServerError::NotHost));
+            }
+
+            match room_guard.set_disconnect_bot_timeout(secs) {
+                Ok(()) => {
+                    room_guard.broadcast_lobby_state();
+                    None
+                }
+                Err(e) => Some(error_msg(e)),
             }
         }
 
@@ -488,10 +673,7 @@ async fn handle_client_message(
             let mut room_guard = room.lock().await;
 
             if player_index != room_guard.creator {
-                return Some(ServerMessage::Error {
-                    code: "not_creator".to_string(),
-                    message: "Only the room creator can promote players".to_string(),
-                });
+                return Some(error_msg(ServerError::NotHost));
             }
 
             match room_guard.promote_host(slot) {
@@ -499,10 +681,7 @@ async fn handle_client_message(
                     room_guard.broadcast_lobby_state();
                     None
                 }
-                Err(e) => Some(ServerMessage::Error {
-                    code: "promote_error".to_string(),
-                    message: e,
-                }),
+                Err(e) => Some(error_msg(e)),
             }
         }
     }
@@ -528,8 +707,8 @@ fn schedule_turn_timeout(room: SharedRoom) {
 
         // Check and apply timeout
         match room_guard.check_turn_timeout() {
-            Ok(Some((player, action))) => {
-                room_guard.broadcast_timeout_action(player, &action);
+            Ok(Some((player, action, delta))) => {
+                room_guard.broadcast_timeout_action(player, &action, &delta);
 
                 // If the next player is a bot, run bot turns
                 if room_guard.is_current_player_bot() {
@@ -570,8 +749,8 @@ async fn run_bot_turns(room: SharedRoom) {
         }
 
         match room_guard.apply_bot_action() {
-            Ok((bot_player, action)) => {
-                room_guard.broadcast_action(bot_player, &action, true);
+            Ok((bot_player, action, delta)) => {
+                room_guard.broadcast_action(bot_player, &action, true, &delta);
             }
             Err(e) => {
                 tracing::error!("Bot action failed: {e}");
@@ -581,8 +760,16 @@ async fn run_bot_turns(room: SharedRoom) {
     }
 }
 
-async fn send_msg(tx: &mut SplitSink<WebSocket, Message>, msg: &ServerMessage) {
-    if let Ok(json) = serde_json::to_string(msg) {
-        let _ = tx.send(Message::Text(json.into())).await;
-    }
+async fn send_msg(tx: &mut SplitSink<WebSocket, Message>, msg: &ServerMessage, format: WireFormat) {
+    let ws_msg = match format {
+        WireFormat::Json => match serde_json::to_string(msg) {
+            Ok(json) => Message::Text(json.into()),
+            Err(_) => return,
+        },
+        WireFormat::MessagePack => match rmp_serde::to_vec_named(msg) {
+            Ok(bytes) => Message::Binary(bytes.into()),
+            Err(_) => return,
+        },
+    };
+    let _ = tx.send(ws_msg).await;
 }

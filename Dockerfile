@@ -51,7 +51,10 @@ COPY --from=frontend-build /app/dist/ /var/www/static/
 
 EXPOSE 8080
 
+VOLUME ["/var/lib/skyjo"]
+ENV SKYJO_DATA_DIR=/var/lib/skyjo
+
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD timeout 3 bash -c 'cat < /dev/null > /dev/tcp/localhost/8080' || exit 1
 
-CMD ["skyjo-server", "--static-dir", "/var/www/static", "--port", "8080"]
+CMD ["skyjo-server", "--static-dir", "/var/www/static", "--port", "8080", "--data-dir", "/var/lib/skyjo"]
