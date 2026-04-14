@@ -206,9 +206,9 @@ pub enum SlotUpdate {
 pub struct StateDelta {
     /// Board slot changes: (player_index, slot_position, new_visible_slot_value)
     pub board_changes: Vec<(usize, usize, SlotUpdate)>,
-    /// New top card of each discard pile (if changed)
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub new_discard_top: Option<i8>,
+    /// Changed discard pile tops: (pile_index, new_top_value_or_none)
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub discard_tops_changed: Vec<(usize, Option<i8>)>,
     /// Updated deck remaining count
     pub deck_remaining: usize,
     /// Who plays next
@@ -254,12 +254,27 @@ pub fn compute_delta(before: &InteractiveGameState, after: &InteractiveGameState
         }
     }
 
-    // Compare discard top
-    let new_discard_top = if before.discard_tops != after.discard_tops {
-        after.discard_tops.first().copied().flatten()
-    } else {
-        None
-    };
+    // Compare discard tops (support multiple piles)
+    let mut discard_tops_changed = Vec::new();
+    for (i, (before_top, after_top)) in before
+        .discard_tops
+        .iter()
+        .zip(after.discard_tops.iter())
+        .enumerate()
+    {
+        if before_top != after_top {
+            discard_tops_changed.push((i, *after_top));
+        }
+    }
+    // Handle case where after has more piles
+    for (i, top) in after
+        .discard_tops
+        .iter()
+        .enumerate()
+        .skip(before.discard_tops.len())
+    {
+        discard_tops_changed.push((i, *top));
+    }
 
     // Column clears
     let column_clears: Vec<(usize, usize)> = after
@@ -270,7 +285,7 @@ pub fn compute_delta(before: &InteractiveGameState, after: &InteractiveGameState
 
     StateDelta {
         board_changes,
-        new_discard_top,
+        discard_tops_changed,
         deck_remaining: after.deck_remaining,
         current_player: after.current_player,
         column_clears,
@@ -754,7 +769,7 @@ mod tests {
         );
         let delta = compute_delta(&state, &state);
         assert!(delta.board_changes.is_empty());
-        assert!(delta.new_discard_top.is_none());
+        assert!(delta.discard_tops_changed.is_empty());
         assert!(delta.column_clears.is_empty());
         assert!(delta.going_out_player.is_none());
     }
@@ -763,7 +778,7 @@ mod tests {
     fn msgpack_round_trip_delta() {
         let delta = StateDelta {
             board_changes: vec![(0, 3, SlotUpdate::Revealed(7))],
-            new_discard_top: Some(5),
+            discard_tops_changed: vec![(0, Some(5))],
             deck_remaining: 99,
             current_player: 1,
             column_clears: vec![],
@@ -777,7 +792,7 @@ mod tests {
         let decoded: StateDelta = rmp_serde::from_slice(&bytes).unwrap();
         assert_eq!(decoded.board_changes.len(), 1);
         assert_eq!(decoded.board_changes[0], (0, 3, SlotUpdate::Revealed(7)));
-        assert_eq!(decoded.new_discard_top, Some(5));
+        assert_eq!(decoded.discard_tops_changed, vec![(0, Some(5))]);
         assert_eq!(decoded.deck_remaining, 99);
         assert_eq!(decoded.current_player, 1);
     }
@@ -792,7 +807,7 @@ mod tests {
     fn action_applied_delta_serializes() {
         let delta = StateDelta {
             board_changes: vec![(1, 5, SlotUpdate::Cleared)],
-            new_discard_top: None,
+            discard_tops_changed: vec![],
             deck_remaining: 80,
             current_player: 0,
             column_clears: vec![(1, 2)],
@@ -832,7 +847,7 @@ mod tests {
         after.discard_tops = vec![Some(9)];
 
         let delta = compute_delta(&before, &after);
-        assert_eq!(delta.new_discard_top, Some(9));
+        assert_eq!(delta.discard_tops_changed, vec![(0, Some(9))]);
     }
 
     #[test]

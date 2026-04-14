@@ -13,7 +13,9 @@ use skyjo_core::{
 };
 
 use crate::error::ServerError;
-use crate::messages::{LobbyPlayer, PlayerSlotType, RoomLobbyState, ServerMessage};
+use crate::messages::{
+    LobbyPlayer, PlayerSlotType, RoomLobbyState, ServerMessage, StateDelta, compute_delta,
+};
 use crate::session::SessionToken;
 
 /// Room lifecycle state.
@@ -374,8 +376,10 @@ impl Room {
     }
 
     /// Check if the current human player's turn has timed out.
-    /// If so, apply a random action and return the (player, action) pair.
-    pub fn check_turn_timeout(&mut self) -> Result<Option<(usize, PlayerAction)>, ServerError> {
+    /// If so, apply a random action and return the (player, action, delta) tuple.
+    pub fn check_turn_timeout(
+        &mut self,
+    ) -> Result<Option<(usize, PlayerAction, StateDelta)>, ServerError> {
         let timer = match self.turn_timer_secs {
             Some(t) => t,
             None => return Ok(None),
@@ -389,22 +393,29 @@ impl Room {
         }
 
         // Timeout! Play a random action for the current player.
-        let (current, action) = {
+        let (current, action, delta) = {
             let game = self.game.as_mut().ok_or(ServerError::NotInGame)?;
             let current = game.current_player_index().ok_or(ServerError::NotInGame)?;
             let strategy = RandomStrategy;
             let action = game
                 .get_bot_action(&strategy)
                 .map_err(|e| ServerError::InvalidAction(e.to_string()))?;
+
+            let before = game.get_player_state(current);
+
             game.apply_action(action.clone())
                 .map_err(|e| ServerError::InvalidAction(e.to_string()))?;
-            (current, action)
+
+            let after = game.get_player_state(current);
+            let delta = compute_delta(&before, &after);
+
+            (current, action, delta)
         };
 
         self.touch();
         self.check_game_over();
         self.reset_turn_start();
-        Ok(Some((current, action)))
+        Ok(Some((current, action, delta)))
     }
 
     /// Change the number of player slots. Can add or remove slots from the end.
@@ -553,13 +564,13 @@ impl Room {
         Ok(())
     }
 
-    /// Apply a player action.
+    /// Apply a player action and return the computed delta.
     pub fn apply_action(
         &mut self,
         player_index: usize,
         action: PlayerAction,
-    ) -> Result<(), ServerError> {
-        {
+    ) -> Result<StateDelta, ServerError> {
+        let delta = {
             let game = self.game.as_mut().ok_or(ServerError::NotInGame)?;
 
             // Turn ownership check
@@ -572,19 +583,24 @@ impl Room {
                 return Err(ServerError::NotInGame);
             }
 
+            let before = game.get_player_state(player_index);
+
             game.apply_action(action)
                 .map_err(|e| ServerError::InvalidAction(e.to_string()))?;
-        }
+
+            let after = game.get_player_state(player_index);
+            compute_delta(&before, &after)
+        };
 
         self.touch();
         self.check_game_over();
         self.reset_turn_start();
-        Ok(())
+        Ok(delta)
     }
 
-    /// Apply a bot action for the current player. Returns (player_index, action).
-    pub fn apply_bot_action(&mut self) -> Result<(usize, PlayerAction), ServerError> {
-        let (current, action) = {
+    /// Apply a bot action for the current player. Returns (player_index, action, delta).
+    pub fn apply_bot_action(&mut self) -> Result<(usize, PlayerAction, StateDelta), ServerError> {
+        let (current, action, delta) = {
             let game = self.game.as_mut().ok_or(ServerError::NotInGame)?;
             let current = game.current_player_index().ok_or(ServerError::NotInGame)?;
 
@@ -605,15 +621,22 @@ impl Room {
             let action = game
                 .get_bot_action(strategy.as_ref())
                 .map_err(|e| ServerError::InvalidAction(e.to_string()))?;
+
+            let before = game.get_player_state(current);
+
             game.apply_action(action.clone())
                 .map_err(|e| ServerError::InvalidAction(e.to_string()))?;
-            (current, action)
+
+            let after = game.get_player_state(current);
+            let delta = compute_delta(&before, &after);
+
+            (current, action, delta)
         };
 
         self.touch();
         self.check_game_over();
         self.reset_turn_start();
-        Ok((current, action))
+        Ok((current, action, delta))
     }
 
     fn check_game_over(&mut self) {
@@ -1017,13 +1040,31 @@ impl Room {
 
     /// Broadcast a message with per-player state to all connected human players.
     /// `make_msg` receives the player index and their filtered game state.
-    pub fn broadcast_action(&self, player: usize, action: &PlayerAction, is_bot: bool) {
+    pub fn broadcast_action(
+        &self,
+        player: usize,
+        action: &PlayerAction,
+        is_bot: bool,
+        delta: &StateDelta,
+    ) {
         let game = match &self.game {
             Some(g) => g,
             None => return,
         };
 
         let deadline = self.turn_deadline_secs();
+
+        // Broadcast delta to all connected human players
+        let mut delta_with_deadline = delta.clone();
+        delta_with_deadline.turn_deadline_secs = deadline.map(|d| d as f64);
+        let _ = self.broadcast_tx.send((
+            usize::MAX,
+            ServerMessage::ActionAppliedDelta {
+                player,
+                action: action.clone(),
+                delta: delta_with_deadline,
+            },
+        ));
 
         for (i, slot) in self.players.iter().enumerate() {
             if slot.connected && matches!(slot.slot_type, PlayerSlotType::Human) {
@@ -1049,11 +1090,26 @@ impl Room {
     }
 
     /// Broadcast a timeout action to all connected human players.
-    pub fn broadcast_timeout_action(&self, player: usize, action: &PlayerAction) {
+    pub fn broadcast_timeout_action(
+        &self,
+        player: usize,
+        action: &PlayerAction,
+        delta: &StateDelta,
+    ) {
         let game = match &self.game {
             Some(g) => g,
             None => return,
         };
+
+        // Broadcast delta to all connected human players
+        let _ = self.broadcast_tx.send((
+            usize::MAX,
+            ServerMessage::ActionAppliedDelta {
+                player,
+                action: action.clone(),
+                delta: delta.clone(),
+            },
+        ));
 
         for (i, slot) in self.players.iter().enumerate() {
             if slot.connected && matches!(slot.slot_type, PlayerSlotType::Human) {
@@ -1571,7 +1627,7 @@ mod tests {
         let mut room = ingame_room();
         // If current player isn't a bot, configure so slot 1 is bot and wait for its turn
         if room.is_current_player_bot() {
-            let (player_idx, _action) = room.apply_bot_action().unwrap();
+            let (player_idx, _action, _delta) = room.apply_bot_action().unwrap();
             assert!(player_idx < room.num_players);
         }
         // At minimum we've verified bot action doesn't error

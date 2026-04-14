@@ -335,7 +335,7 @@ fn slot_update_variants_msgpack_round_trip() {
 fn sample_delta() -> StateDelta {
     StateDelta {
         board_changes: vec![(0, 3, SlotUpdate::Revealed(5))],
-        new_discard_top: Some(7),
+        discard_tops_changed: vec![(0, Some(7))],
         deck_remaining: 80,
         current_player: 1,
         column_clears: vec![],
@@ -355,7 +355,7 @@ fn state_delta_json_round_trip() {
     assert_eq!(decoded.current_player, 1);
     assert_eq!(decoded.board_changes.len(), 1);
     assert_eq!(decoded.board_changes[0], (0, 3, SlotUpdate::Revealed(5)));
-    assert_eq!(decoded.new_discard_top, Some(7));
+    assert_eq!(decoded.discard_tops_changed, vec![(0, Some(7))]);
     assert!(!decoded.is_final_turn);
 }
 
@@ -374,7 +374,7 @@ fn state_delta_msgpack_round_trip() {
 fn state_delta_optional_fields_omitted_when_empty() {
     let delta = StateDelta {
         board_changes: vec![],
-        new_discard_top: None,
+        discard_tops_changed: vec![],
         deck_remaining: 100,
         current_player: 0,
         column_clears: vec![],
@@ -385,7 +385,7 @@ fn state_delta_optional_fields_omitted_when_empty() {
     };
     let json = serde_json::to_string(&delta).unwrap();
     // Fields with skip_serializing_if should be absent
-    assert!(!json.contains("new_discard_top"));
+    assert!(!json.contains("discard_tops_changed"));
     assert!(!json.contains("column_clears"));
     assert!(!json.contains("turn_deadline_secs"));
     assert!(!json.contains("going_out_player"));
@@ -475,7 +475,7 @@ fn msgpack_consistently_smaller_or_equal() {
 fn delta_smaller_than_500_bytes() {
     let delta = StateDelta {
         board_changes: vec![(0, 3, SlotUpdate::Revealed(5))],
-        new_discard_top: Some(7),
+        discard_tops_changed: vec![(0, Some(7))],
         deck_remaining: 80,
         current_player: 1,
         column_clears: vec![],
