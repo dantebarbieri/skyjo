@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
-use skyjo_core::interactive::{InteractiveGameState, PlayerAction};
+use skyjo_core::interactive::{ActionNeeded, InteractiveGameState, PlayerAction};
+use skyjo_core::VisibleSlot;
 
 /// Wire format for WebSocket messages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,6 +47,8 @@ pub enum ClientMessage {
     },
     /// Keepalive ping.
     Ping,
+    /// Request a full game state resync.
+    RequestFullState,
 }
 
 /// Messages sent from the server to the client over WebSocket.
@@ -97,6 +100,14 @@ pub enum ServerMessage {
     Error { code: String, message: String },
     /// Keepalive pong.
     Pong,
+    /// A delta update for a player action (compact alternative to ActionApplied).
+    ActionAppliedDelta {
+        player: usize,
+        action: PlayerAction,
+        delta: StateDelta,
+    },
+    /// Server is shutting down. Clients should reconnect after a brief delay.
+    ServerShutdown,
 }
 
 impl ServerMessage {
@@ -180,6 +191,115 @@ pub enum PlayerSlotType {
     Human,
     Bot { strategy: String },
     Empty,
+}
+
+/// Compact slot update for delta messages.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum SlotUpdate {
+    Hidden,
+    Revealed(i8),
+    Cleared,
+}
+
+/// Compact representation of changes from a single action.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StateDelta {
+    /// Board slot changes: (player_index, slot_position, new_visible_slot_value)
+    pub board_changes: Vec<(usize, usize, SlotUpdate)>,
+    /// New top card of each discard pile (if changed)
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub new_discard_top: Option<i8>,
+    /// Updated deck remaining count
+    pub deck_remaining: usize,
+    /// Who plays next
+    pub current_player: usize,
+    /// Columns cleared: (player_index, column_index)
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub column_clears: Vec<(usize, usize)>,
+    /// What the current player needs to do next
+    pub action_needed: String,
+    /// Turn deadline (if applicable)
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub turn_deadline_secs: Option<f64>,
+    /// Is this the final turn (someone went out)?
+    pub is_final_turn: bool,
+    /// Going out player index (if changed)
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub going_out_player: Option<usize>,
+}
+
+/// Convert a `VisibleSlot` to a `SlotUpdate`.
+pub fn slot_to_update(slot: &VisibleSlot) -> SlotUpdate {
+    match slot {
+        VisibleSlot::Hidden => SlotUpdate::Hidden,
+        VisibleSlot::Revealed(v) => SlotUpdate::Revealed(*v),
+        VisibleSlot::Cleared => SlotUpdate::Cleared,
+    }
+}
+
+/// Compute the delta between before and after game states.
+pub fn compute_delta(
+    before: &InteractiveGameState,
+    after: &InteractiveGameState,
+) -> StateDelta {
+    let mut board_changes = Vec::new();
+
+    // Compare boards
+    for (player_idx, (before_board, after_board)) in
+        before.boards.iter().zip(after.boards.iter()).enumerate()
+    {
+        for (slot_idx, (before_slot, after_slot)) in
+            before_board.iter().zip(after_board.iter()).enumerate()
+        {
+            if before_slot != after_slot {
+                board_changes.push((player_idx, slot_idx, slot_to_update(after_slot)));
+            }
+        }
+    }
+
+    // Compare discard top
+    let new_discard_top = if before.discard_tops != after.discard_tops {
+        after.discard_tops.first().copied().flatten()
+    } else {
+        None
+    };
+
+    // Column clears
+    let column_clears: Vec<(usize, usize)> = after
+        .last_column_clears
+        .iter()
+        .map(|e| (e.player_index, e.column))
+        .collect();
+
+    StateDelta {
+        board_changes,
+        new_discard_top,
+        deck_remaining: after.deck_remaining,
+        current_player: after.current_player,
+        column_clears,
+        action_needed: action_needed_name(&after.action_needed),
+        turn_deadline_secs: None, // Set by caller
+        is_final_turn: after.is_final_turn,
+        going_out_player: if before.going_out_player != after.going_out_player {
+            after.going_out_player
+        } else {
+            None
+        },
+    }
+}
+
+/// Return a short phase name for an `ActionNeeded` variant.
+fn action_needed_name(action: &ActionNeeded) -> String {
+    match action {
+        ActionNeeded::ChooseInitialFlips { .. } => "ChooseInitialFlips".to_string(),
+        ActionNeeded::ChooseDraw { .. } => "ChooseDraw".to_string(),
+        ActionNeeded::ChooseDeckDrawAction { .. } => "ChooseDeckDrawAction".to_string(),
+        ActionNeeded::ChooseDiscardDrawPlacement { .. } => {
+            "ChooseDiscardDrawPlacement".to_string()
+        }
+        ActionNeeded::RoundOver { .. } => "RoundOver".to_string(),
+        ActionNeeded::GameOver { .. } => "GameOver".to_string(),
+    }
 }
 
 #[cfg(test)]
@@ -586,5 +706,177 @@ mod tests {
         let bytes = msg.to_bytes(WireFormat::MessagePack);
         let decoded: ServerMessage = rmp_serde::from_slice(&bytes).unwrap();
         assert!(matches!(decoded, ServerMessage::Pong));
+    }
+
+    // --- Delta state update tests ---
+
+    fn make_test_state(boards: Vec<Vec<VisibleSlot>>, discard_top: Option<i8>) -> InteractiveGameState {
+        use skyjo_core::interactive::ActionNeeded;
+        InteractiveGameState {
+            num_players: boards.len(),
+            player_names: (0..boards.len()).map(|i| format!("P{i}")).collect(),
+            num_rows: 3,
+            num_cols: 4,
+            round_number: 1,
+            current_player: 0,
+            action_needed: ActionNeeded::ChooseDraw {
+                player: 0,
+                drawable_piles: vec![0],
+            },
+            boards,
+            discard_tops: vec![discard_top],
+            discard_sizes: vec![1],
+            deck_remaining: 100,
+            cumulative_scores: vec![0, 0],
+            going_out_player: None,
+            is_final_turn: false,
+            last_column_clears: vec![],
+        }
+    }
+
+    #[test]
+    fn delta_detects_board_changes() {
+        let before = make_test_state(
+            vec![
+                vec![VisibleSlot::Hidden; 12],
+                vec![VisibleSlot::Hidden; 12],
+            ],
+            Some(5),
+        );
+        let mut after = before.clone();
+        after.boards[0][3] = VisibleSlot::Revealed(7);
+
+        let delta = compute_delta(&before, &after);
+        assert_eq!(delta.board_changes.len(), 1);
+        assert_eq!(delta.board_changes[0], (0, 3, SlotUpdate::Revealed(7)));
+    }
+
+    #[test]
+    fn delta_empty_when_no_changes() {
+        let state = make_test_state(
+            vec![
+                vec![VisibleSlot::Hidden; 12],
+                vec![VisibleSlot::Hidden; 12],
+            ],
+            Some(5),
+        );
+        let delta = compute_delta(&state, &state);
+        assert!(delta.board_changes.is_empty());
+        assert!(delta.new_discard_top.is_none());
+        assert!(delta.column_clears.is_empty());
+        assert!(delta.going_out_player.is_none());
+    }
+
+    #[test]
+    fn msgpack_round_trip_delta() {
+        let delta = StateDelta {
+            board_changes: vec![(0, 3, SlotUpdate::Revealed(7))],
+            new_discard_top: Some(5),
+            deck_remaining: 99,
+            current_player: 1,
+            column_clears: vec![],
+            action_needed: "ChooseDraw".to_string(),
+            turn_deadline_secs: None,
+            is_final_turn: false,
+            going_out_player: None,
+        };
+        // Use named serialization for reliable round-trip with skip_serializing_if
+        let bytes = rmp_serde::to_vec_named(&delta).unwrap();
+        let decoded: StateDelta = rmp_serde::from_slice(&bytes).unwrap();
+        assert_eq!(decoded.board_changes.len(), 1);
+        assert_eq!(decoded.board_changes[0], (0, 3, SlotUpdate::Revealed(7)));
+        assert_eq!(decoded.new_discard_top, Some(5));
+        assert_eq!(decoded.deck_remaining, 99);
+        assert_eq!(decoded.current_player, 1);
+    }
+
+    #[test]
+    fn request_full_state_message_parses() {
+        let msg: ClientMessage = serde_json::from_str(r#"{"type":"RequestFullState"}"#).unwrap();
+        assert!(matches!(msg, ClientMessage::RequestFullState));
+    }
+
+    #[test]
+    fn action_applied_delta_serializes() {
+        let delta = StateDelta {
+            board_changes: vec![(1, 5, SlotUpdate::Cleared)],
+            new_discard_top: None,
+            deck_remaining: 80,
+            current_player: 0,
+            column_clears: vec![(1, 2)],
+            action_needed: "ChooseDraw".to_string(),
+            turn_deadline_secs: Some(25.5),
+            is_final_turn: true,
+            going_out_player: Some(1),
+        };
+        let msg = ServerMessage::ActionAppliedDelta {
+            player: 1,
+            action: PlayerAction::DrawFromDeck,
+            delta,
+        };
+        let val: serde_json::Value = serde_json::to_value(&msg).unwrap();
+        assert_eq!(val["type"], "ActionAppliedDelta");
+        assert_eq!(val["player"], 1);
+        assert_eq!(val["delta"]["deck_remaining"], 80);
+        assert_eq!(val["delta"]["is_final_turn"], true);
+    }
+
+    #[test]
+    fn slot_update_serde_round_trip() {
+        let updates = vec![SlotUpdate::Hidden, SlotUpdate::Revealed(-2), SlotUpdate::Cleared];
+        let json = serde_json::to_string(&updates).unwrap();
+        let decoded: Vec<SlotUpdate> = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded, updates);
+    }
+
+    #[test]
+    fn delta_detects_discard_change() {
+        let before = make_test_state(
+            vec![vec![VisibleSlot::Hidden; 12]; 2],
+            Some(3),
+        );
+        let mut after = before.clone();
+        after.discard_tops = vec![Some(9)];
+
+        let delta = compute_delta(&before, &after);
+        assert_eq!(delta.new_discard_top, Some(9));
+    }
+
+    #[test]
+    fn delta_detects_going_out_player_change() {
+        let before = make_test_state(
+            vec![vec![VisibleSlot::Hidden; 12]; 2],
+            Some(3),
+        );
+        let mut after = before.clone();
+        after.going_out_player = Some(0);
+        after.is_final_turn = true;
+
+        let delta = compute_delta(&before, &after);
+        assert_eq!(delta.going_out_player, Some(0));
+        assert!(delta.is_final_turn);
+    }
+
+    #[test]
+    fn server_shutdown_message_serializes() {
+        let msg = ServerMessage::ServerShutdown;
+        let val: serde_json::Value = serde_json::to_value(&msg).unwrap();
+        assert_eq!(val["type"], "ServerShutdown");
+    }
+
+    #[test]
+    fn server_shutdown_message_round_trip_json() {
+        let msg = ServerMessage::ServerShutdown;
+        let json = serde_json::to_string(&msg).unwrap();
+        let decoded: ServerMessage = serde_json::from_str(&json).unwrap();
+        assert!(matches!(decoded, ServerMessage::ServerShutdown));
+    }
+
+    #[test]
+    fn server_shutdown_message_round_trip_msgpack() {
+        let msg = ServerMessage::ServerShutdown;
+        let bytes = rmp_serde::to_vec(&msg).unwrap();
+        let decoded: ServerMessage = rmp_serde::from_slice(&bytes).unwrap();
+        assert!(matches!(decoded, ServerMessage::ServerShutdown));
     }
 }

@@ -21,11 +21,13 @@ use lobby::{
     CreateRoomRequest, CreateRoomResponse, JoinRoomRequest, JoinRoomResponse, Lobby,
     RoomInfoResponse,
 };
+use persistence::Persistence;
 
 pub struct AppStateInner {
     pub lobby: Lobby,
     pub genetic: Arc<Mutex<GeneticTrainingState>>,
     pub genetic_api_key: Option<String>,
+    pub persistence: Option<Arc<Persistence>>,
 }
 
 pub type AppState = Arc<AppStateInner>;

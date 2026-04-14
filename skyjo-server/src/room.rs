@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use rand::Rng;
+use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, broadcast};
 
 use skyjo_core::{
@@ -16,11 +17,36 @@ use crate::messages::{LobbyPlayer, PlayerSlotType, RoomLobbyState, ServerMessage
 use crate::session::SessionToken;
 
 /// Room lifecycle state.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum RoomPhase {
     Lobby,
     InGame,
     GameOver,
+}
+
+/// Serializable room snapshot for persistence (crash recovery).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RoomSnapshot {
+    pub code: String,
+    pub phase: RoomPhase,
+    pub num_players: usize,
+    pub creator: usize,
+    pub players: Vec<PlayerSlotSnapshot>,
+    pub rules_name: String,
+    pub turn_timer_secs: Option<u64>,
+    pub disconnect_bot_timeout_secs: Option<u32>,
+    /// Full game state (via `get_full_state()`) if a game is active.
+    pub game_state_json: Option<String>,
+    pub banned_ips: Vec<String>,
+    pub last_winners: Vec<usize>,
+}
+
+/// Serializable snapshot of a player slot.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlayerSlotSnapshot {
+    pub name: String,
+    pub slot_type: PlayerSlotType,
+    pub was_human: bool,
 }
 
 /// A player slot in the room.
@@ -54,6 +80,9 @@ pub struct Room {
     pub last_activity: Instant,
     /// Broadcast channel for sending messages to all connected WebSocket handlers.
     pub broadcast_tx: broadcast::Sender<(usize, ServerMessage)>,
+    /// Per-player message senders for targeted messages.
+    /// None if the player is not connected.
+    pub(crate) player_txs: Vec<Option<tokio::sync::mpsc::UnboundedSender<Vec<u8>>>>,
     /// Banned IP addresses (never exposed to clients).
     pub banned_ips: Vec<String>,
     /// Winners from the last completed game (for crown display in lobby).
@@ -147,6 +176,7 @@ impl Room {
             game: None,
             last_activity: Instant::now(),
             broadcast_tx,
+            player_txs: vec![None; num_players],
             banned_ips: Vec::new(),
             last_winners: Vec::new(),
             turn_timer_secs: Some(60),
@@ -839,6 +869,123 @@ impl Room {
             last_winners: self.last_winners.clone(),
             genetic_games_trained: self.genetic_games_trained,
             genetic_generation: self.genetic_generation,
+        }
+    }
+
+    /// Create a serializable snapshot of this room for crash recovery.
+    pub fn to_snapshot(&self) -> RoomSnapshot {
+        let players = self
+            .players
+            .iter()
+            .map(|p| PlayerSlotSnapshot {
+                name: p.name.clone(),
+                slot_type: p.slot_type.clone(),
+                was_human: p.was_human,
+            })
+            .collect();
+
+        // Serialize the full game state if a game is active
+        let game_state_json = self.game.as_ref().map(|g| {
+            let state = g.get_full_state();
+            serde_json::to_string(&state).expect("InteractiveGameState serialization failed")
+        });
+
+        RoomSnapshot {
+            code: self.code.clone(),
+            phase: self.phase.clone(),
+            num_players: self.num_players,
+            creator: self.creator,
+            players,
+            rules_name: self.rules_name.clone(),
+            turn_timer_secs: self.turn_timer_secs,
+            disconnect_bot_timeout_secs: self.disconnect_bot_timeout_secs,
+            game_state_json,
+            banned_ips: self.banned_ips.clone(),
+            last_winners: self.last_winners.clone(),
+        }
+    }
+
+    /// Restore a room from a snapshot. Game state is NOT restored (too complex
+    /// to reconstruct `InteractiveGame` from a state snapshot). The room is
+    /// placed back in Lobby phase so players can start a new game.
+    pub fn from_snapshot(snapshot: RoomSnapshot) -> Self {
+        let (broadcast_tx, _) = broadcast::channel(256);
+
+        let players = snapshot
+            .players
+            .iter()
+            .map(|ps| PlayerSlot {
+                name: ps.name.clone(),
+                slot_type: ps.slot_type.clone(),
+                session_token: None,
+                connected: false,
+                ip: None,
+                disconnected_at: None,
+                was_human: ps.was_human,
+                latency_ms: None,
+                broadcast_lag_count: 0,
+            })
+            .collect();
+
+        Room {
+            code: snapshot.code,
+            // Always restore to Lobby — game state isn't fully restorable
+            phase: RoomPhase::Lobby,
+            num_players: snapshot.num_players,
+            rules_name: snapshot.rules_name,
+            creator: snapshot.creator,
+            players,
+            game: None,
+            last_activity: Instant::now(),
+            broadcast_tx,
+            banned_ips: snapshot.banned_ips,
+            last_winners: snapshot.last_winners,
+            turn_timer_secs: snapshot.turn_timer_secs,
+            turn_start: None,
+            genetic_genome: None,
+            genetic_games_trained: 0,
+            genetic_generation: 0,
+            disconnect_bot_timeout_secs: snapshot.disconnect_bot_timeout_secs,
+            player_txs: vec![None; snapshot.num_players],
+        }
+    }
+
+    // -- Per-player targeted channel methods --
+
+    /// Register a player's message channel (called on connect/reconnect).
+    pub fn set_player_tx(
+        &mut self,
+        slot: usize,
+        tx: tokio::sync::mpsc::UnboundedSender<Vec<u8>>,
+    ) {
+        if slot < self.player_txs.len() {
+            self.player_txs[slot] = Some(tx);
+        }
+    }
+
+    /// Remove a player's message channel (called on disconnect).
+    pub fn remove_player_tx(&mut self, slot: usize) {
+        if slot < self.player_txs.len() {
+            self.player_txs[slot] = None;
+        }
+    }
+
+    /// Send a pre-serialized message to a specific player.
+    pub fn send_to_player(&self, slot: usize, data: Vec<u8>) -> bool {
+        if let Some(Some(tx)) = self.player_txs.get(slot) {
+            tx.send(data).is_ok()
+        } else {
+            false
+        }
+    }
+
+    /// Send a pre-serialized message to all connected players.
+    /// `data_fn` receives the player slot index and returns the bytes to send.
+    pub fn send_to_all(&self, data_fn: impl Fn(usize) -> Vec<u8>) {
+        for (i, tx_opt) in self.player_txs.iter().enumerate() {
+            if let Some(tx) = tx_opt {
+                let _ = tx.send(data_fn(i));
+            }
         }
     }
 
@@ -2249,5 +2396,177 @@ mod tests {
     fn out_of_bounds_latency_update_no_panic() {
         let mut room = test_room();
         room.update_player_latency(99, 100); // Should not panic
+    }
+
+    // ========================================================================
+    // Per-player channel infrastructure
+    // ========================================================================
+
+    #[test]
+    fn per_player_channel_setup() {
+        let mut room = test_room();
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        room.set_player_tx(0, tx);
+        assert!(room.player_txs[0].is_some());
+        assert!(room.player_txs[1].is_none());
+    }
+
+    #[test]
+    fn per_player_channel_send() {
+        let mut room = test_room();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        room.set_player_tx(0, tx);
+        assert!(room.send_to_player(0, b"hello".to_vec()));
+        assert_eq!(rx.try_recv().unwrap(), b"hello");
+    }
+
+    #[test]
+    fn per_player_channel_disconnect() {
+        let mut room = test_room();
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        room.set_player_tx(0, tx);
+        room.remove_player_tx(0);
+        assert!(room.player_txs[0].is_none());
+    }
+
+    #[test]
+    fn send_to_disconnected_player_returns_false() {
+        let room = test_room();
+        assert!(!room.send_to_player(0, b"hello".to_vec()));
+    }
+
+    #[test]
+    fn send_to_all_delivers_per_player_data() {
+        let mut room = test_room();
+        let (tx0, mut rx0) = tokio::sync::mpsc::unbounded_channel();
+        let (tx1, mut rx1) = tokio::sync::mpsc::unbounded_channel();
+        room.set_player_tx(0, tx0);
+        room.set_player_tx(1, tx1);
+        room.send_to_all(|i| format!("msg-{i}").into_bytes());
+        assert_eq!(rx0.try_recv().unwrap(), b"msg-0");
+        assert_eq!(rx1.try_recv().unwrap(), b"msg-1");
+    }
+
+    #[test]
+    fn set_player_tx_out_of_bounds_no_panic() {
+        let mut room = test_room();
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        room.set_player_tx(99, tx); // Should not panic
+    }
+
+    #[test]
+    fn send_to_player_out_of_bounds_returns_false() {
+        let room = test_room();
+        assert!(!room.send_to_player(99, b"hello".to_vec()));
+    }
+
+    #[test]
+    fn player_txs_initialized_correctly() {
+        let room = test_room();
+        assert_eq!(room.player_txs.len(), 2);
+        assert!(room.player_txs.iter().all(|tx| tx.is_none()));
+    }
+
+    // ========================================================================
+    // Room Snapshot
+    // ========================================================================
+
+    #[test]
+    fn room_snapshot_round_trip() {
+        let room = test_room();
+        let snapshot = room.to_snapshot();
+        let json = serde_json::to_string(&snapshot).unwrap();
+        let restored: RoomSnapshot = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.code, "TEST1");
+        assert_eq!(restored.num_players, 2);
+        assert_eq!(restored.phase, RoomPhase::Lobby);
+        assert_eq!(restored.creator, 0);
+        assert_eq!(restored.players.len(), 2);
+        assert_eq!(restored.players[0].name, "Alice");
+        assert_eq!(restored.players[0].slot_type, PlayerSlotType::Human);
+        assert_eq!(restored.players[1].slot_type, PlayerSlotType::Empty);
+        assert_eq!(restored.rules_name, "Standard");
+        assert!(restored.game_state_json.is_none());
+    }
+
+    #[test]
+    fn room_snapshot_captures_phase() {
+        let room = ingame_room();
+        let snapshot = room.to_snapshot();
+        assert_eq!(snapshot.phase, RoomPhase::InGame);
+        // Should have game state JSON when in-game
+        assert!(snapshot.game_state_json.is_some());
+    }
+
+    #[test]
+    fn room_snapshot_captures_banned_ips() {
+        let mut room = test_room();
+        room.banned_ips.push("1.2.3.4".to_string());
+        let snapshot = room.to_snapshot();
+        assert_eq!(snapshot.banned_ips, vec!["1.2.3.4".to_string()]);
+    }
+
+    #[test]
+    fn room_snapshot_captures_settings() {
+        let mut room = test_room();
+        room.set_turn_timer(Some(30)).unwrap();
+        room.set_disconnect_bot_timeout(Some(120)).unwrap();
+        let snapshot = room.to_snapshot();
+        assert_eq!(snapshot.turn_timer_secs, Some(30));
+        assert_eq!(snapshot.disconnect_bot_timeout_secs, Some(120));
+    }
+
+    #[test]
+    fn room_from_snapshot_restores_to_lobby() {
+        // Create an in-game room, snapshot it, restore — should be in Lobby
+        let room = ingame_room();
+        let snapshot = room.to_snapshot();
+        assert_eq!(snapshot.phase, RoomPhase::InGame);
+
+        let restored = Room::from_snapshot(snapshot);
+        assert_eq!(restored.phase, RoomPhase::Lobby);
+        assert!(restored.game.is_none());
+        assert_eq!(restored.code, room.code);
+        assert_eq!(restored.num_players, room.num_players);
+        assert_eq!(restored.rules_name, room.rules_name);
+    }
+
+    #[test]
+    fn room_from_snapshot_restores_players() {
+        let mut room = test_room();
+        room.configure_slot(1, "Bot:Random").unwrap();
+        let snapshot = room.to_snapshot();
+        let restored = Room::from_snapshot(snapshot);
+        assert_eq!(restored.players[0].name, "Alice");
+        assert_eq!(restored.players[0].slot_type, PlayerSlotType::Human);
+        assert_eq!(
+            restored.players[1].slot_type,
+            PlayerSlotType::Bot {
+                strategy: "Random".to_string()
+            }
+        );
+        // Connection state is NOT restored
+        assert!(!restored.players[0].connected);
+        assert!(restored.players[0].session_token.is_none());
+    }
+
+    #[test]
+    fn room_from_snapshot_preserves_banned_ips() {
+        let mut room = test_room();
+        room.banned_ips.push("10.0.0.1".to_string());
+        let snapshot = room.to_snapshot();
+        let restored = Room::from_snapshot(snapshot);
+        assert_eq!(restored.banned_ips, vec!["10.0.0.1".to_string()]);
+    }
+
+    #[test]
+    fn room_snapshot_game_state_json_is_valid() {
+        let room = ingame_room();
+        let snapshot = room.to_snapshot();
+        let json = snapshot.game_state_json.unwrap();
+        // Should be valid InteractiveGameState JSON
+        let state: skyjo_core::InteractiveGameState =
+            serde_json::from_str(&json).unwrap();
+        assert_eq!(state.num_players, 2);
     }
 }

@@ -20,6 +20,7 @@ fn test_app() -> Router {
         lobby: skyjo_server::lobby::Lobby::new(100),
         genetic: genetic_state,
         genetic_api_key: None,
+        persistence: None,
     });
 
     // Mirror the routes from main.rs (no API key = no auth required for existing tests)
@@ -216,7 +217,7 @@ async fn join_room_fails_with_invalid_code() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/api/rooms/BADCOD/join")
+                .uri("/api/rooms/ZZZZZZ/join")
                 .header("content-type", "application/json")
                 .body(Body::from(r#"{"player_name":"Bob"}"#))
                 .unwrap(),
@@ -264,6 +265,7 @@ fn test_app_with_api_key(api_key: Option<String>) -> Router {
         lobby: skyjo_server::lobby::Lobby::new(100),
         genetic: genetic_state,
         genetic_api_key: api_key,
+        persistence: None,
     });
 
     // Protected mutation routes behind genetic auth middleware
