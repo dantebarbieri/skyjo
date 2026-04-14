@@ -403,8 +403,8 @@ export const GeneticModelDataSchema = z.object({
   best_genome: z.array(z.number()),
   input_size: z.number().int().nonnegative(),
   hidden_size: z.number().int().nonnegative(),
-  hidden1_size: z.number().int().nonnegative(),
-  hidden2_size: z.number().int().nonnegative(),
+  hidden1_size: z.number().int().nonnegative().default(0),
+  hidden2_size: z.number().int().nonnegative().default(0),
   output_size: z.number().int().nonnegative(),
   generation: z.number().int().nonnegative(),
   total_games_trained: z.number().int().nonnegative(),
@@ -439,8 +439,8 @@ export const GeneticTrainingStatusSchema = z.object({
   training_target_fitness: z.number(),
   training_start_fitness: z.number(),
   lineage_hash: z.string(),
-  current_mutation_rate: z.number().nonnegative(),
-  current_mutation_sigma: z.number().nonnegative(),
+  current_mutation_rate: z.number().nonnegative().default(0),
+  current_mutation_sigma: z.number().nonnegative().default(0),
 });
 
 // ─── WASM Response Wrapper Schemas ──────────────────────────────────

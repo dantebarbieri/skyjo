@@ -638,6 +638,8 @@ describe('Genetic model schemas', () => {
       best_genome: [0.1, 0.2, 0.3],
       input_size: 10,
       hidden_size: 5,
+      hidden1_size: 5,
+      hidden2_size: 3,
       output_size: 3,
       generation: 50,
       total_games_trained: 10000,
@@ -646,6 +648,7 @@ describe('Genetic model schemas', () => {
       input_groups: [['group1', 0, 5]],
       output_groups: [['out1', 0, 3]],
       lineage_hash: 'abc123',
+      architecture_version: 2,
     };
     expect(GeneticModelDataSchema.parse(model)).toEqual(model);
   });
@@ -664,6 +667,8 @@ describe('Genetic model schemas', () => {
       training_target_fitness: 0.95,
       training_start_fitness: 0.5,
       lineage_hash: 'def456',
+      current_mutation_rate: 0.05,
+      current_mutation_sigma: 0.3,
     };
     expect(GeneticTrainingStatusSchema.parse(status)).toEqual(status);
   });
