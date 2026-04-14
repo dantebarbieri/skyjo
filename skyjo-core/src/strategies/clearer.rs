@@ -438,6 +438,22 @@ fn find_clear_target(view: &StrategyView, value: CardValue) -> Option<usize> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn name_returns_clearer() {
+        assert_eq!(ClearerStrategy.name(), "Clearer");
+    }
+
+    #[test]
+    fn describe_returns_valid_description() {
+        let desc = ClearerStrategy.describe();
+        assert_eq!(desc.name, "Clearer");
+        assert!(!desc.summary.is_empty());
+        assert_eq!(desc.complexity, Complexity::Medium);
+        assert!(!desc.strengths.is_empty());
+        assert!(!desc.weaknesses.is_empty());
+        assert_eq!(desc.phases.len(), 4);
+    }
+
     fn make_view(board: Vec<VisibleSlot>) -> StrategyView {
         StrategyView {
             my_index: 0,
