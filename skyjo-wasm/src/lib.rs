@@ -4,9 +4,10 @@ use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
 
 use skyjo_core::{
-    AggregateStats, ClearerStrategy, DefensiveStrategy, Game, GameHistory, GameStats,
-    GreedyStrategy, InteractiveGame, PlayerAction, RandomStrategy, Rules, Simulator,
-    SimulatorConfig, StandardRules, StatisticianStrategy, Strategy, common_concepts,
+    AggregateStats, ClearerStrategy, DefensiveStrategy, GamblerStrategy, Game, GameHistory,
+    GameStats, GreedyStrategy, InteractiveGame, MimicStrategy, PlayerAction, RandomStrategy, Rules,
+    RusherStrategy, SaboteurStrategy, Simulator, SimulatorConfig, StandardRules,
+    StatisticianStrategy, Strategy, SurvivorStrategy, common_concepts,
 };
 
 #[derive(Deserialize)]
@@ -44,6 +45,11 @@ fn make_strategy_factory(name: &str) -> Result<Box<dyn Fn() -> Box<dyn Strategy>
         "Defensive" => Ok(Box::new(|| Box::new(DefensiveStrategy))),
         "Clearer" => Ok(Box::new(|| Box::new(ClearerStrategy))),
         "Statistician" => Ok(Box::new(|| Box::new(StatisticianStrategy))),
+        "Rusher" => Ok(Box::new(|| Box::new(RusherStrategy))),
+        "Gambler" => Ok(Box::new(|| Box::new(GamblerStrategy))),
+        "Survivor" => Ok(Box::new(|| Box::new(SurvivorStrategy))),
+        "Mimic" => Ok(Box::new(|| Box::new(MimicStrategy))),
+        "Saboteur" => Ok(Box::new(|| Box::new(SaboteurStrategy))),
         _ => Err(format!("Unknown strategy: {name}")),
     }
 }
@@ -66,6 +72,11 @@ fn make_strategy(name: &str) -> Result<Box<dyn Strategy>, String> {
         "Defensive" => Ok(Box::new(DefensiveStrategy)),
         "Clearer" => Ok(Box::new(ClearerStrategy)),
         "Statistician" => Ok(Box::new(StatisticianStrategy)),
+        "Rusher" => Ok(Box::new(RusherStrategy)),
+        "Gambler" => Ok(Box::new(GamblerStrategy)),
+        "Survivor" => Ok(Box::new(SurvivorStrategy)),
+        "Mimic" => Ok(Box::new(MimicStrategy)),
+        "Saboteur" => Ok(Box::new(SaboteurStrategy)),
         _ => Err(format!("Unknown strategy: {name}")),
     }
 }
@@ -204,7 +215,7 @@ pub fn simulate_one_with_history(config_json: &str) -> String {
 
 #[wasm_bindgen]
 pub fn get_available_strategies() -> String {
-    serde_json::to_string(&["Random", "Greedy", "Defensive", "Clearer", "Statistician"]).unwrap()
+    serde_json::to_string(&["Random", "Greedy", "Defensive", "Clearer", "Statistician", "Rusher", "Gambler", "Survivor", "Mimic", "Saboteur"]).unwrap()
 }
 
 #[wasm_bindgen]
@@ -217,7 +228,7 @@ pub fn get_available_rules() -> String {
 #[wasm_bindgen]
 pub fn get_strategy_descriptions() -> String {
     to_json_or_error(|| {
-        let names = ["Random", "Greedy", "Defensive", "Clearer", "Statistician"];
+        let names = ["Random", "Greedy", "Defensive", "Clearer", "Statistician", "Rusher", "Gambler", "Survivor", "Mimic", "Saboteur"];
         let descriptions: Vec<_> = names
             .iter()
             .map(|n| make_strategy(n).map(|s| s.describe()))

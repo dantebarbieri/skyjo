@@ -18,7 +18,10 @@ pub use interactive::{ActionNeeded, InteractiveGame, InteractiveGameState, Playe
 pub use rules::{Rules, StandardRules};
 pub use simulator::{AggregateStats, GameStats, Simulator, SimulatorConfig};
 pub use strategies::common::common_concepts;
-pub use strategies::{ClearerStrategy, DefensiveStrategy, GreedyStrategy, RandomStrategy, StatisticianStrategy};
+pub use strategies::{
+    ClearerStrategy, DefensiveStrategy, GamblerStrategy, GreedyStrategy, MimicStrategy,
+    RandomStrategy, RusherStrategy, SaboteurStrategy, StatisticianStrategy, SurvivorStrategy,
+};
 pub use strategy::{
     Complexity, ConceptReference, DecisionLogic, DecisionNode, DeckDrawAction, DrawChoice, Phase,
     PhaseDescription, PriorityRule, Strategy, StrategyDescription, StrategyView,
@@ -36,6 +39,11 @@ mod describe_tests {
             Box::new(DefensiveStrategy),
             Box::new(ClearerStrategy),
             Box::new(StatisticianStrategy),
+            Box::new(RusherStrategy),
+            Box::new(GamblerStrategy),
+            Box::new(SurvivorStrategy),
+            Box::new(MimicStrategy),
+            Box::new(SaboteurStrategy),
         ];
         for s in &strategies {
             let desc = s.describe();

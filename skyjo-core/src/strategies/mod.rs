@@ -1,12 +1,22 @@
 pub mod clearer;
 pub mod common;
 pub mod defensive;
+pub mod gambler;
 pub mod greedy;
+pub mod mimic;
 pub mod random;
+pub mod rusher;
 pub mod statistician;
+pub mod saboteur;
+pub mod survivor;
 
 pub use clearer::ClearerStrategy;
 pub use defensive::DefensiveStrategy;
+pub use gambler::GamblerStrategy;
 pub use greedy::GreedyStrategy;
+pub use mimic::MimicStrategy;
 pub use random::RandomStrategy;
+pub use rusher::RusherStrategy;
+pub use saboteur::SaboteurStrategy;
 pub use statistician::StatisticianStrategy;
+pub use survivor::SurvivorStrategy;
