@@ -39,7 +39,10 @@ pub async fn handle_ws(
             }
             crate::room::RoomPhase::InGame => {
                 match room_guard.get_player_state(player_index) {
-                    Ok(state) => ServerMessage::GameState { state },
+                    Ok(state) => {
+                        let turn_deadline_secs = room_guard.turn_deadline_secs();
+                        ServerMessage::GameState { state, turn_deadline_secs }
+                    }
                     Err(_) => ServerMessage::RoomState {
                         state: room_guard.lobby_state(),
                     },
@@ -101,8 +104,9 @@ pub async fn handle_ws(
                         // Send fresh state to catch up
                         let room_guard = room.lock().await;
                         if let Ok(state) = room_guard.get_player_state(player_index) {
+                            let turn_deadline_secs = room_guard.turn_deadline_secs();
                             drop(room_guard);
-                            send_msg(&mut ws_tx, &ServerMessage::GameState { state }).await;
+                            send_msg(&mut ws_tx, &ServerMessage::GameState { state, turn_deadline_secs }).await;
                         }
                     }
                     Err(broadcast::error::RecvError::Closed) => {
@@ -352,6 +356,9 @@ async fn handle_client_message(
                         tokio::spawn(async move {
                             run_bot_turns(room_clone).await;
                         });
+                    } else {
+                        drop(room_guard);
+                        schedule_turn_timeout(room.clone());
                     }
 
                     None
@@ -377,6 +384,9 @@ async fn handle_client_message(
                         tokio::spawn(async move {
                             run_bot_turns(room_clone).await;
                         });
+                    } else {
+                        drop(room_guard);
+                        schedule_turn_timeout(room.clone());
                     }
 
                     None
@@ -402,6 +412,9 @@ async fn handle_client_message(
                         tokio::spawn(async move {
                             run_bot_turns(room_clone).await;
                         });
+                    } else {
+                        drop(room_guard);
+                        schedule_turn_timeout(room.clone());
                     }
 
                     None
@@ -450,6 +463,28 @@ async fn handle_client_message(
             }
         }
 
+        ClientMessage::SetTurnTimer { secs } => {
+            let mut room_guard = room.lock().await;
+
+            if player_index != room_guard.creator {
+                return Some(ServerMessage::Error {
+                    code: "not_creator".to_string(),
+                    message: "Only the room creator can change the turn timer".to_string(),
+                });
+            }
+
+            match room_guard.set_turn_timer(secs) {
+                Ok(()) => {
+                    room_guard.broadcast_lobby_state();
+                    None
+                }
+                Err(e) => Some(ServerMessage::Error {
+                    code: "set_timer_error".to_string(),
+                    message: e,
+                }),
+            }
+        }
+
         ClientMessage::PromoteHost { slot } => {
             let mut room_guard = room.lock().await;
 
@@ -474,6 +509,52 @@ async fn handle_client_message(
     }
 }
 
+/// Schedule a turn timeout check if the turn timer is active.
+/// Spawns a task that sleeps for the timer duration, then checks and applies timeout.
+fn schedule_turn_timeout(room: SharedRoom) {
+    tokio::spawn(async move {
+        // Read the timer duration
+        let timer_secs = {
+            let room_guard = room.lock().await;
+            match room_guard.turn_timer_secs {
+                Some(s) => s,
+                None => return,
+            }
+        };
+
+        // Sleep for the full timer duration + 1s buffer for timing jitter
+        tokio::time::sleep(Duration::from_secs(timer_secs + 1)).await;
+
+        let mut room_guard = room.lock().await;
+
+        // Check and apply timeout
+        match room_guard.check_turn_timeout() {
+            Ok(Some((player, action))) => {
+                room_guard.broadcast_timeout_action(player, &action);
+
+                // If the next player is a bot, run bot turns
+                if room_guard.is_current_player_bot() {
+                    drop(room_guard);
+                    let room_clone = room.clone();
+                    tokio::spawn(async move {
+                        run_bot_turns(room_clone).await;
+                    });
+                } else {
+                    // Schedule next timeout for the next human player
+                    drop(room_guard);
+                    schedule_turn_timeout(room.clone());
+                }
+            }
+            Ok(None) => {
+                // No timeout — turn was already completed or timer not active
+            }
+            Err(e) => {
+                tracing::error!("Turn timeout check failed: {e}");
+            }
+        }
+    });
+}
+
 /// Run consecutive bot turns with delays until a human player's turn or game end.
 async fn run_bot_turns(room: SharedRoom) {
     loop {
@@ -483,6 +564,9 @@ async fn run_bot_turns(room: SharedRoom) {
         let mut room_guard = room.lock().await;
 
         if !room_guard.is_current_player_bot() {
+            // Human player's turn — schedule timeout
+            drop(room_guard);
+            schedule_turn_timeout(room.clone());
             break;
         }
 

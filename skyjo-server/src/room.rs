@@ -53,6 +53,10 @@ pub struct Room {
     pub banned_ips: Vec<String>,
     /// Winners from the last completed game (for crown display in lobby).
     pub last_winners: Vec<usize>,
+    /// Turn timer: seconds per human turn, or None for unlimited.
+    pub turn_timer_secs: Option<u64>,
+    /// When the current human player's turn started (for timeout tracking).
+    pub turn_start: Option<Instant>,
     /// Cached best genetic genome for constructing GeneticStrategy bots.
     pub genetic_genome: Option<Vec<f32>>,
     /// Number of games the genetic model has been trained on.
@@ -101,6 +105,8 @@ impl Room {
             broadcast_tx,
             banned_ips: Vec::new(),
             last_winners: Vec::new(),
+            turn_timer_secs: Some(60),
+            turn_start: None,
             genetic_genome: None,
             genetic_games_trained,
             genetic_generation,
@@ -193,6 +199,86 @@ impl Room {
         self.rules_name = rules.to_string();
         self.touch();
         Ok(())
+    }
+
+    /// Set the turn timer (lobby only, creator only).
+    pub fn set_turn_timer(&mut self, secs: Option<u64>) -> Result<(), String> {
+        if self.phase != RoomPhase::Lobby {
+            return Err("Cannot change turn timer during game".to_string());
+        }
+        // Validate: must be None (unlimited) or a positive value
+        if let Some(0) = secs {
+            return Err("Turn timer must be positive".to_string());
+        }
+        self.turn_timer_secs = secs;
+        self.touch();
+        Ok(())
+    }
+
+    /// Reset the turn start timer. Call after each action.
+    /// Sets `turn_start` if the current player is human and timer is enabled.
+    pub fn reset_turn_start(&mut self) {
+        if self.turn_timer_secs.is_none() {
+            self.turn_start = None;
+            return;
+        }
+        let game = match &self.game {
+            Some(g) => g,
+            None => {
+                self.turn_start = None;
+                return;
+            }
+        };
+        match game.current_player_index() {
+            Some(idx) if matches!(self.players[idx].slot_type, PlayerSlotType::Human) => {
+                self.turn_start = Some(Instant::now());
+            }
+            _ => {
+                self.turn_start = None;
+            }
+        }
+    }
+
+    /// Get seconds remaining for the current turn, or None if unlimited / not applicable.
+    pub fn turn_deadline_secs(&self) -> Option<u64> {
+        let timer = self.turn_timer_secs?;
+        let start = self.turn_start?;
+        let elapsed = start.elapsed().as_secs();
+        Some(timer.saturating_sub(elapsed))
+    }
+
+    /// Check if the current human player's turn has timed out.
+    /// If so, apply a random action and return the (player, action) pair.
+    pub fn check_turn_timeout(&mut self) -> Result<Option<(usize, PlayerAction)>, String> {
+        let timer = match self.turn_timer_secs {
+            Some(t) => t,
+            None => return Ok(None),
+        };
+        let start = match self.turn_start {
+            Some(s) => s,
+            None => return Ok(None),
+        };
+        if start.elapsed().as_secs() < timer {
+            return Ok(None);
+        }
+
+        // Timeout! Play a random action for the current player.
+        let (current, action) = {
+            let game = self.game.as_mut().ok_or("No active game")?;
+            let current = game.current_player_index().ok_or("No active player")?;
+            let strategy = RandomStrategy;
+            let action = game
+                .get_bot_action(&strategy)
+                .map_err(|e| e.to_string())?;
+            game.apply_action(action.clone())
+                .map_err(|e| e.to_string())?;
+            (current, action)
+        };
+
+        self.touch();
+        self.check_game_over();
+        self.reset_turn_start();
+        Ok(Some((current, action)))
     }
 
     /// Change the number of player slots. Can add or remove slots from the end.
@@ -334,6 +420,7 @@ impl Room {
         self.game = Some(game);
         self.phase = RoomPhase::InGame;
         self.touch();
+        self.reset_turn_start();
 
         Ok(())
     }
@@ -364,6 +451,7 @@ impl Room {
 
         self.touch();
         self.check_game_over();
+        self.reset_turn_start();
         Ok(())
     }
 
@@ -393,6 +481,7 @@ impl Room {
 
         self.touch();
         self.check_game_over();
+        self.reset_turn_start();
         Ok((current, action))
     }
 
@@ -413,6 +502,7 @@ impl Room {
             .map_err(|e| e.to_string())?;
         self.phase = RoomPhase::InGame;
         self.touch();
+        self.reset_turn_start();
         Ok(())
     }
 
@@ -570,6 +660,7 @@ impl Room {
             available_strategies: available_strategies(),
             available_rules: available_rules(),
             idle_timeout_secs,
+            turn_timer_secs: self.turn_timer_secs,
             last_winners: self.last_winners.clone(),
             genetic_games_trained: self.genetic_games_trained,
             genetic_generation: self.genetic_generation,
@@ -583,12 +674,14 @@ impl Room {
             None => return,
         };
 
+        let deadline = self.turn_deadline_secs();
+
         for (i, player) in self.players.iter().enumerate() {
             if player.connected && matches!(player.slot_type, PlayerSlotType::Human) {
                 let state = game.get_player_state(i);
                 let _ = self.broadcast_tx.send((
                     i,
-                    ServerMessage::GameState { state },
+                    ServerMessage::GameState { state, turn_deadline_secs: deadline },
                 ));
             }
         }
@@ -607,6 +700,8 @@ impl Room {
             None => return,
         };
 
+        let deadline = self.turn_deadline_secs();
+
         for (i, slot) in self.players.iter().enumerate() {
             if slot.connected && matches!(slot.slot_type, PlayerSlotType::Human) {
                 let state = game.get_player_state(i);
@@ -615,13 +710,39 @@ impl Room {
                         player,
                         action: action.clone(),
                         state,
+                        turn_deadline_secs: deadline,
                     }
                 } else {
                     ServerMessage::ActionApplied {
                         player,
                         action: action.clone(),
                         state,
+                        turn_deadline_secs: deadline,
                     }
+                };
+                let _ = self.broadcast_tx.send((i, msg));
+            }
+        }
+    }
+
+    /// Broadcast a timeout action to all connected human players.
+    pub fn broadcast_timeout_action(
+        &self,
+        player: usize,
+        action: &PlayerAction,
+    ) {
+        let game = match &self.game {
+            Some(g) => g,
+            None => return,
+        };
+
+        for (i, slot) in self.players.iter().enumerate() {
+            if slot.connected && matches!(slot.slot_type, PlayerSlotType::Human) {
+                let state = game.get_player_state(i);
+                let msg = ServerMessage::TimeoutAction {
+                    player,
+                    action: action.clone(),
+                    state,
                 };
                 let _ = self.broadcast_tx.send((i, msg));
             }

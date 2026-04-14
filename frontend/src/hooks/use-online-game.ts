@@ -12,6 +12,7 @@ export interface RoomLobbyState {
   available_strategies: string[];
   available_rules: string[];
   idle_timeout_secs: number | null;
+  turn_timer_secs: number | null;
   last_winners: number[];
   genetic_games_trained: number;
   genetic_generation: number;
@@ -33,9 +34,10 @@ export type PlayerSlotType =
 
 type ServerMessage =
   | { type: 'RoomState'; state: RoomLobbyState }
-  | { type: 'GameState'; state: InteractiveGameState }
-  | { type: 'ActionApplied'; player: number; action: PlayerAction; state: InteractiveGameState }
-  | { type: 'BotAction'; player: number; action: PlayerAction; state: InteractiveGameState }
+  | { type: 'GameState'; state: InteractiveGameState; turn_deadline_secs?: number | null }
+  | { type: 'ActionApplied'; player: number; action: PlayerAction; state: InteractiveGameState; turn_deadline_secs?: number | null }
+  | { type: 'BotAction'; player: number; action: PlayerAction; state: InteractiveGameState; turn_deadline_secs?: number | null }
+  | { type: 'TimeoutAction'; player: number; action: PlayerAction; state: InteractiveGameState }
   | { type: 'PlayerJoined'; player_index: number; name: string }
   | { type: 'PlayerLeft'; player_index: number }
   | { type: 'PlayerReconnected'; player_index: number }
@@ -47,6 +49,8 @@ interface UseOnlineGameReturn {
   connectionStatus: ConnectionStatus;
   roomState: RoomLobbyState | null;
   gameState: InteractiveGameState | null;
+  turnDeadlineSecs: number | null;
+  wasTimeout: boolean;
   playerIndex: number | null;
   lastError: string | null;
   kicked: boolean;
@@ -54,6 +58,7 @@ interface UseOnlineGameReturn {
   configureSlot: (slot: number, playerType: string) => void;
   setNumPlayers: (numPlayers: number) => void;
   setRules: (rules: string) => void;
+  setTurnTimer: (secs: number | null) => void;
   kickPlayer: (slot: number) => void;
   banPlayer: (slot: number) => void;
   promoteHost: (slot: number) => void;
@@ -72,6 +77,8 @@ export function useOnlineGame(
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('disconnected');
   const [roomState, setRoomState] = useState<RoomLobbyState | null>(null);
   const [gameState, setGameState] = useState<InteractiveGameState | null>(null);
+  const [turnDeadlineSecs, setTurnDeadlineSecs] = useState<number | null>(null);
+  const [wasTimeout, setWasTimeout] = useState(false);
   const [lastError, setLastError] = useState<string | null>(null);
   const [kicked, setKicked] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
@@ -111,10 +118,19 @@ export function useOnlineGame(
           break;
         case 'GameState':
           setGameState(msg.state);
+          setTurnDeadlineSecs(msg.turn_deadline_secs ?? null);
+          setWasTimeout(false);
           break;
         case 'ActionApplied':
         case 'BotAction':
           setGameState(msg.state);
+          setTurnDeadlineSecs(msg.turn_deadline_secs ?? null);
+          setWasTimeout(false);
+          break;
+        case 'TimeoutAction':
+          setGameState(msg.state);
+          setTurnDeadlineSecs(null);
+          setWasTimeout(true);
           break;
         case 'PlayerJoined':
           setRoomState(prev => {
@@ -228,6 +244,10 @@ export function useOnlineGame(
     send({ type: 'SetRules', rules });
   }, [send]);
 
+  const setTurnTimer = useCallback((secs: number | null) => {
+    send({ type: 'SetTurnTimer', secs });
+  }, [send]);
+
   const kickPlayer = useCallback((slot: number) => {
     send({ type: 'KickPlayer', slot });
   }, [send]);
@@ -276,6 +296,8 @@ export function useOnlineGame(
     connectionStatus,
     roomState,
     gameState,
+    turnDeadlineSecs,
+    wasTimeout,
     playerIndex,
     lastError,
     kicked,
@@ -283,6 +305,7 @@ export function useOnlineGame(
     configureSlot,
     setNumPlayers,
     setRules,
+    setTurnTimer,
     kickPlayer,
     banPlayer,
     promoteHost,

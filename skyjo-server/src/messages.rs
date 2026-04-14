@@ -42,6 +42,11 @@ pub enum ClientMessage {
     ContinueRound,
     /// Start a new game after game over (creator only).
     PlayAgain,
+    /// Set the turn timer (creator only, lobby phase).
+    SetTurnTimer {
+        /// Seconds per turn, or null for unlimited.
+        secs: Option<u64>,
+    },
     /// Keepalive ping.
     Ping,
 }
@@ -57,15 +62,28 @@ pub enum ServerMessage {
     /// Full game state update for this player's perspective.
     GameState {
         state: InteractiveGameState,
+        /// Seconds remaining for the current player's turn (None if unlimited or not their turn).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        turn_deadline_secs: Option<u64>,
     },
     /// A player's action was applied (includes who and what for animation).
     ActionApplied {
         player: usize,
         action: PlayerAction,
         state: InteractiveGameState,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        turn_deadline_secs: Option<u64>,
     },
     /// A bot action was applied.
     BotAction {
+        player: usize,
+        action: PlayerAction,
+        state: InteractiveGameState,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        turn_deadline_secs: Option<u64>,
+    },
+    /// A timeout-triggered random action was applied.
+    TimeoutAction {
         player: usize,
         action: PlayerAction,
         state: InteractiveGameState,
@@ -108,6 +126,8 @@ pub struct RoomLobbyState {
     pub available_rules: Vec<String>,
     /// Seconds remaining before the room is auto-deleted (None if no timeout applies).
     pub idle_timeout_secs: Option<u64>,
+    /// Turn timer setting: seconds per turn, or None for unlimited.
+    pub turn_timer_secs: Option<u64>,
     /// Player indices who won the last game (shown as crowns in lobby).
     pub last_winners: Vec<usize>,
     /// Number of games the genetic bot model has been trained on.

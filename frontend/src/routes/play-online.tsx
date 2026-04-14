@@ -6,15 +6,25 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
+import { Undo2, Trash2 } from 'lucide-react';
 import SkyjoCard from '@/components/skyjo-card';
+import { RoundScorecard } from '@/components/round-scorecard';
 import { useResponsiveCardSize } from '@/hooks/use-responsive-card-size';
 import { cn } from '@/lib/utils';
+import { toSlot, getPlayerName, computeVisibleScore } from '@/lib/game-helpers';
 import {
   useOnlineGame,
   type RoomLobbyState,
   type ConnectionStatus,
 } from '@/hooks/use-online-game';
-import type { InteractiveGameState, PlayerAction, ActionNeeded, VisibleSlot, Slot } from '@/types';
+import type { RoundRecord } from '@/hooks/use-interactive-game';
+import type { InteractiveGameState, PlayerAction, ActionNeeded } from '@/types';
 
 // --- API helpers ---
 
@@ -169,6 +179,7 @@ export default function PlayOnlineRoute() {
           onConfigureSlot={game.configureSlot}
           onSetNumPlayers={game.setNumPlayers}
           onSetRules={game.setRules}
+          onSetTurnTimer={game.setTurnTimer}
           onKickPlayer={game.kickPlayer}
           onBanPlayer={game.banPlayer}
           onPromoteHost={game.promoteHost}
@@ -181,6 +192,8 @@ export default function PlayOnlineRoute() {
         <OnlinePlayBoard
           state={game.gameState}
           playerIndex={playerIndex!}
+          turnDeadlineSecs={game.turnDeadlineSecs}
+          wasTimeout={game.wasTimeout}
           onAction={game.applyAction}
           onContinueRound={game.continueRound}
           onPlayAgain={game.playAgain}
@@ -470,12 +483,21 @@ function ConnectionIndicator({ status, roomCode }: { status: ConnectionStatus; r
 
 // --- Lobby ---
 
+const TURN_TIMER_OPTIONS: { value: string; label: string }[] = [
+  { value: '30', label: '30s' },
+  { value: '60', label: '60s' },
+  { value: '90', label: '90s' },
+  { value: '120', label: '120s' },
+  { value: 'unlimited', label: 'Unlimited' },
+];
+
 function Lobby({
   state,
   playerIndex,
   onConfigureSlot,
   onSetNumPlayers,
   onSetRules,
+  onSetTurnTimer,
   onKickPlayer,
   onBanPlayer,
   onPromoteHost,
@@ -487,6 +509,7 @@ function Lobby({
   onConfigureSlot: (slot: number, playerType: string) => void;
   onSetNumPlayers: (n: number) => void;
   onSetRules: (rules: string) => void;
+  onSetTurnTimer: (secs: number | null) => void;
   onKickPlayer: (slot: number) => void;
   onBanPlayer: (slot: number) => void;
   onPromoteHost: (slot: number) => void;
@@ -549,7 +572,30 @@ function Lobby({
                 </SelectContent>
               </Select>
             </div>
+            <div className="flex items-center gap-2">
+              <label className="text-sm font-medium">Turn Timer:</label>
+              <Select
+                value={state.turn_timer_secs?.toString() ?? 'unlimited'}
+                onValueChange={v => onSetTurnTimer(v === 'unlimited' ? null : parseInt(v))}
+              >
+                <SelectTrigger className="w-28 h-8 text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {TURN_TIMER_OPTIONS.map(opt => (
+                    <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
+        )}
+
+        {/* Show turn timer info for non-creators */}
+        {!isCreator && (
+          <p className="text-xs text-muted-foreground text-center">
+            Turn timer: {state.turn_timer_secs ? `${state.turn_timer_secs}s` : 'Unlimited'}
+          </p>
         )}
 
         <div className="space-y-2">
@@ -739,20 +785,36 @@ function Lobby({
 
 // --- Online Game Board ---
 
-/** Convert a VisibleSlot to a Slot for SkyjoCard rendering */
-function toSlot(vs: VisibleSlot): Slot {
-  if (vs === 'Hidden') return { Hidden: 0 };
-  if (vs === 'Cleared') return 'Cleared';
-  return { Revealed: vs.Revealed };
-}
+function TurnTimer({ deadlineSecs }: { deadlineSecs: number }) {
+  const [secs, setSecs] = useState(deadlineSecs);
 
-function getPlayerName(state: InteractiveGameState, index: number) {
-  return state.player_names[index] || `Player ${index + 1}`;
+  useEffect(() => {
+    setSecs(deadlineSecs);
+  }, [deadlineSecs]);
+
+  useEffect(() => {
+    if (secs <= 0) return;
+    const id = setInterval(() => setSecs(s => Math.max(0, s - 1)), 1000);
+    return () => clearInterval(id);
+  }, [secs > 0]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <span className={cn(
+      'text-sm font-mono font-bold',
+      secs > 15 ? 'text-muted-foreground' :
+      secs > 5 ? 'text-yellow-600 dark:text-yellow-400' :
+      'text-red-600 dark:text-red-400 animate-pulse',
+    )}>
+      {secs}s
+    </span>
+  );
 }
 
 function OnlinePlayBoard({
   state,
   playerIndex,
+  turnDeadlineSecs,
+  wasTimeout,
   onAction,
   onContinueRound,
   onPlayAgain,
@@ -761,6 +823,8 @@ function OnlinePlayBoard({
 }: {
   state: InteractiveGameState;
   playerIndex: number;
+  turnDeadlineSecs: number | null;
+  wasTimeout: boolean;
   onAction: (action: PlayerAction) => void;
   onContinueRound: () => void;
   onPlayAgain: () => void;
@@ -770,6 +834,25 @@ function OnlinePlayBoard({
   const { action_needed, boards, num_rows, num_cols, current_player } = state;
   const [wantsFlip, setWantsFlip] = useState(false);
   const cardSizes = useResponsiveCardSize();
+  const activeBoardRef = useRef<HTMLDivElement>(null);
+
+  // Track round history for the scorecard
+  const [roundHistory, setRoundHistory] = useState<RoundRecord[]>([]);
+  const recordedRoundsRef = useRef(new Set<number>());
+
+  // Record round results when RoundOver is shown
+  useEffect(() => {
+    if (action_needed.type === 'RoundOver' && !recordedRoundsRef.current.has(action_needed.round_number)) {
+      recordedRoundsRef.current.add(action_needed.round_number);
+      setRoundHistory(prev => [...prev, {
+        roundNumber: action_needed.round_number,
+        roundScores: action_needed.round_scores,
+        rawRoundScores: action_needed.raw_round_scores,
+        cumulativeScores: action_needed.cumulative_scores,
+        goingOutPlayer: action_needed.going_out_player,
+      }]);
+    }
+  }, [action_needed]);
 
   // Round / game over screens
   if (action_needed.type === 'RoundOver') {
@@ -803,6 +886,13 @@ function OnlinePlayBoard({
   const isChooseDraw = action_needed.type === 'ChooseDraw';
   const isDeckDrawAction = action_needed.type === 'ChooseDeckDrawAction';
   const isDiscardPlacement = action_needed.type === 'ChooseDiscardDrawPlacement';
+
+  // Whether the game is in a draw/play phase (for stable layout)
+  const isPlayPhase = action_needed.type === 'ChooseDraw'
+    || action_needed.type === 'ChooseDeckDrawAction'
+    || action_needed.type === 'ChooseDiscardDrawPlacement';
+  const hasDrawnCard = (isDeckDrawAction && action_needed.drawn_card != null)
+    || isDiscardPlacement;
 
   // Prompt text
   let prompt: string;
@@ -843,32 +933,29 @@ function OnlinePlayBoard({
     return false;
   };
 
-  const handleCardClick = useCallback(
-    (boardPlayerIdx: number, position: number) => {
-      if (!isMyTurn) return;
-      if (isInitialFlips && boardPlayerIdx === playerIndex) {
+  const handleCardClick = (boardPlayerIdx: number, position: number) => {
+    if (!isMyTurn) return;
+    if (isInitialFlips && boardPlayerIdx === playerIndex) {
+      if (boards[boardPlayerIdx][position] === 'Hidden') {
+        onAction({ type: 'InitialFlip', position });
+      }
+    } else if (isDeckDrawAction) {
+      if (wantsFlip) {
         if (boards[boardPlayerIdx][position] === 'Hidden') {
-          onAction({ type: 'InitialFlip', position });
+          onAction({ type: 'DiscardAndFlip', position });
+          setWantsFlip(false);
         }
-      } else if (isDeckDrawAction) {
-        if (wantsFlip) {
-          if (boards[boardPlayerIdx][position] === 'Hidden') {
-            onAction({ type: 'DiscardAndFlip', position });
-            setWantsFlip(false);
-          }
-        } else {
-          if (boards[boardPlayerIdx][position] !== 'Cleared') {
-            onAction({ type: 'KeepDeckDraw', position });
-          }
-        }
-      } else if (isDiscardPlacement) {
+      } else {
         if (boards[boardPlayerIdx][position] !== 'Cleared') {
-          onAction({ type: 'PlaceDiscardDraw', position });
+          onAction({ type: 'KeepDeckDraw', position });
         }
       }
-    },
-    [isMyTurn, isInitialFlips, isDeckDrawAction, isDiscardPlacement, wantsFlip, boards, playerIndex, onAction]
-  );
+    } else if (isDiscardPlacement) {
+      if (boards[boardPlayerIdx][position] !== 'Cleared') {
+        onAction({ type: 'PlaceDiscardDraw', position });
+      }
+    }
+  };
 
   const handleDrawDeck = () => {
     if (isMyTurn && isChooseDraw) {
@@ -882,141 +969,291 @@ function OnlinePlayBoard({
     }
   };
 
-  // Drawn card display
-  const hasDrawnCard = (isDeckDrawAction && action_needed.drawn_card != null)
-    || isDiscardPlacement;
+  const hasGoneOut = state.going_out_player !== null;
+
+  // Auto-scroll to active player's board on mobile
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  useEffect(() => {
+    if (window.innerWidth < 640 && activeBoardRef.current) {
+      activeBoardRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }, [activePlayer]);
 
   return (
     <div className="space-y-4">
-      {/* Status */}
-      <div className="text-center">
-        <p className={cn(
-          'text-sm font-medium',
-          isMyTurn ? 'text-primary' : 'text-muted-foreground'
-        )}>
-          {prompt}
-        </p>
-        {state.is_final_turn && (
-          <Badge variant="destructive" className="mt-1">Final Turn</Badge>
+      {/* Info / going-out banner */}
+      <div
+        className={cn(
+          'rounded-lg border p-3 text-center transition-all duration-300',
+          hasGoneOut
+            ? 'border-orange-400 border-2 bg-orange-50 dark:bg-orange-950/30'
+            : 'border-border bg-muted/30'
+        )}
+      >
+        {hasGoneOut ? (
+          <>
+            <p className="text-sm font-bold text-orange-600 dark:text-orange-400">
+              {getPlayerName(state, state.going_out_player!)} has gone out!
+            </p>
+            <p className="text-xs text-orange-500 dark:text-orange-400/80 mt-0.5">
+              Each remaining player gets one final turn.
+            </p>
+          </>
+        ) : (
+          <>
+            <p className="text-sm font-medium text-muted-foreground">
+              Online Game · {state.num_players} players
+            </p>
+            <p className="text-xs text-muted-foreground/70 mt-0.5">
+              Round {state.round_number + 1} · {state.deck_remaining} cards in deck
+            </p>
+          </>
         )}
       </div>
 
-      {/* Deck / Discard / Drawn Card row */}
-      <div className="flex items-center justify-center gap-2 sm:gap-4">
-        {/* Deck */}
-        <div className="flex flex-col items-center gap-1">
-          <span className="text-xs text-muted-foreground">Deck ({state.deck_remaining})</span>
-          <button
-            onClick={handleDrawDeck}
-            disabled={!isMyTurn || !isChooseDraw}
-            className={cn(
-              'transition-transform',
-              isMyTurn && isChooseDraw && 'hover:scale-105 cursor-pointer ring-2 ring-blue-400 rounded-lg'
-            )}
-          >
-            <SkyjoCard slot={{ Hidden: 0 }} size={cardSizes.draw} />
-          </button>
+      {/* Timeout flash */}
+      {wasTimeout && (
+        <div className="text-center text-sm font-medium text-red-600 dark:text-red-400 animate-pulse">
+          Time ran out! A random move was played.
         </div>
+      )}
 
-        {/* Discard piles */}
-        {state.discard_tops.map((top, i) => (
-          <div key={i} className="flex flex-col items-center gap-1">
-            <span className="text-xs text-muted-foreground">Discard</span>
+      {/* Status bar */}
+      <div className="text-center space-y-1">
+        <h3 className={cn(
+          'text-lg font-semibold flex items-center justify-center gap-2',
+          state.is_final_turn && 'text-orange-600 dark:text-orange-400'
+        )}>
+          <span>
+            {getPlayerName(state, activePlayer)}'s{' '}
+            {state.is_final_turn ? 'Final Turn!' : 'Turn'}
+          </span>
+          {turnDeadlineSecs != null && turnDeadlineSecs > 0 && (
+            <TurnTimer deadlineSecs={turnDeadlineSecs} />
+          )}
+        </h3>
+        <p className="text-sm text-muted-foreground">
+          Round {state.round_number + 1}
+        </p>
+        <p className="text-sm font-medium text-primary">{prompt}</p>
+      </div>
+
+      {/* Draw area — always rendered during play phase for layout stability */}
+      {isPlayPhase && (
+        <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-4 md:gap-8">
+          {/* Deck + Discard piles group */}
+          <div className="flex items-center gap-2 sm:gap-4 md:gap-8">
+            {/* Deck */}
             <button
-              onClick={() => handleDrawDiscard(i)}
-              disabled={!isMyTurn || !isChooseDraw || top == null}
+              onClick={handleDrawDeck}
+              disabled={!isMyTurn || !isChooseDraw}
               className={cn(
-                'transition-transform',
-                isMyTurn && isChooseDraw && top != null && 'hover:scale-105 cursor-pointer ring-2 ring-blue-400 rounded-lg'
+                'flex flex-col items-center gap-1 transition-transform',
+                isMyTurn && isChooseDraw && 'hover:scale-105 cursor-pointer'
               )}
             >
-              {top != null ? (
-                <SkyjoCard slot={{ Revealed: top }} size={cardSizes.draw} />
+              <span className="text-xs text-muted-foreground">
+                Deck ({state.deck_remaining})
+              </span>
+              <div
+                className={cn(
+                  'rounded-lg',
+                  isMyTurn && isChooseDraw && 'ring-2 ring-blue-400'
+                )}
+              >
+                <SkyjoCard slot={{ Hidden: 0 }} size={cardSizes.draw} />
+              </div>
+            </button>
+
+            {/* Discard piles */}
+            {state.discard_tops.map((top, pileIdx) => (
+              <button
+                key={pileIdx}
+                onClick={() => handleDrawDiscard(pileIdx)}
+                disabled={
+                  !isMyTurn ||
+                  !isChooseDraw ||
+                  top === null ||
+                  !action_needed.drawable_piles?.includes(pileIdx)
+                }
+                className={cn(
+                  'flex flex-col items-center gap-1 transition-transform',
+                  isMyTurn &&
+                    isChooseDraw &&
+                    top !== null &&
+                    action_needed.drawable_piles?.includes(pileIdx) &&
+                    'hover:scale-105 cursor-pointer'
+                )}
+              >
+                <span className="text-xs text-muted-foreground">
+                  Discard ({state.discard_sizes[pileIdx]})
+                </span>
+                <div
+                  className={cn(
+                    'rounded-lg',
+                    isMyTurn &&
+                      isChooseDraw &&
+                      top !== null &&
+                      action_needed.drawable_piles?.includes(pileIdx) &&
+                      'ring-2 ring-blue-400'
+                  )}
+                >
+                  {top !== null ? (
+                    <SkyjoCard slot={{ Revealed: top }} size={cardSizes.draw} />
+                  ) : (
+                    <SkyjoCard slot="Cleared" size={cardSizes.draw} />
+                  )}
+                </div>
+              </button>
+            ))}
+          </div>
+
+          {/* Drawn card + Action buttons group */}
+          <div className="flex items-center gap-2 sm:gap-4 md:gap-8">
+            {/* Drawn card / placeholder — stable slot */}
+            <div className="flex flex-col items-center gap-1">
+              <span className="text-xs text-muted-foreground">Drawn</span>
+              {hasDrawnCard ? (
+                <div className="ring-2 ring-green-400 rounded-lg">
+                  <SkyjoCard
+                    slot={{ Revealed: action_needed.drawn_card! }}
+                    size={cardSizes.draw}
+                  />
+                </div>
               ) : (
                 <SkyjoCard slot="Cleared" size={cardSizes.draw} />
               )}
-            </button>
+            </div>
+
+            {/* Action icon buttons */}
+            <TooltipProvider>
+              <div className="flex flex-col items-center gap-2">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant={wantsFlip ? 'default' : 'outline'}
+                      size="icon"
+                      disabled={!isMyTurn || !isDeckDrawAction}
+                      onClick={() => setWantsFlip(!wantsFlip)}
+                      className="h-9 w-9"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">
+                    {wantsFlip ? 'Back to Place Mode' : 'Discard & Flip'}
+                  </TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      disabled={!isMyTurn || !isDiscardPlacement}
+                      onClick={() => onAction({ type: 'UndoDrawFromDiscard' })}
+                      className="h-9 w-9"
+                    >
+                      <Undo2 className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">
+                    Undo
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+            </TooltipProvider>
           </div>
-        ))}
-
-        {/* Drawn card */}
-        <div className="flex flex-col items-center gap-1">
-          <span className="text-xs text-muted-foreground">Drawn</span>
-          {hasDrawnCard && isDeckDrawAction && action_needed.drawn_card != null ? (
-            <div className="ring-2 ring-green-400 rounded-lg">
-              <SkyjoCard slot={{ Revealed: action_needed.drawn_card }} size={cardSizes.draw} />
-            </div>
-          ) : hasDrawnCard && isDiscardPlacement ? (
-            <div className="ring-2 ring-green-400 rounded-lg">
-              <SkyjoCard slot={{ Revealed: action_needed.drawn_card }} size={cardSizes.draw} />
-            </div>
-          ) : (
-            <SkyjoCard slot="Cleared" size={cardSizes.draw} />
-          )}
         </div>
-      </div>
+      )}
 
-      {/* Flip toggle for deck draw */}
-      {isMyTurn && isDeckDrawAction && (
-        <div className="flex justify-center">
-          <Button
-            variant={wantsFlip ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => setWantsFlip(!wantsFlip)}
-          >
-            {wantsFlip ? 'Flip mode (click hidden card)' : 'Switch to flip mode'}
-          </Button>
+      {/* Column clear notification */}
+      {state.last_column_clears.length > 0 && (
+        <div className="text-center text-sm font-medium text-green-600">
+          Column cleared! ({state.last_column_clears.map(c => {
+            const displaced = c.displaced_card !== null ? `, discarded ${c.displaced_card}` : '';
+            return `column ${c.column + 1}${displaced}`;
+          }).join('; ')})
         </div>
       )}
 
       {/* Player boards */}
       <div className="flex flex-wrap gap-2 sm:gap-4 justify-center">
-        {boards.map((board, boardPlayerIdx) => (
-          <div
-            key={boardPlayerIdx}
-            className={cn(
-              'rounded-lg border p-2 sm:p-3',
-              boardPlayerIdx === current_player && 'border-primary border-2',
-              boardPlayerIdx === playerIndex && 'bg-primary/5',
-              boardPlayerIdx === state.going_out_player && 'border-orange-400 border-2',
-            )}
-          >
-            <h4 className="text-xs sm:text-sm font-medium mb-1 sm:mb-2 flex items-center gap-1">
-              {getPlayerName(state, boardPlayerIdx)}
-              {boardPlayerIdx === playerIndex && (
-                <Badge variant="outline" className="text-[10px] py-0">you</Badge>
-              )}
-              {boardPlayerIdx === state.going_out_player && (
-                <span className="text-xs text-orange-500">(went out)</span>
-              )}
-            </h4>
+        {boards.map((board, boardPlayerIdx) => {
+          const isActive = boardPlayerIdx === activePlayer;
+          const cardSize = isActive ? cardSizes.boardActive : cardSizes.board;
+
+          return (
             <div
-              className="grid gap-0.5 sm:gap-1"
-              style={{ gridTemplateColumns: `repeat(${num_cols}, 1fr)` }}
+              key={boardPlayerIdx}
+              ref={isActive ? activeBoardRef : undefined}
+              className={cn(
+                'rounded-lg border p-3 transition-colors',
+                isActive && !state.is_final_turn && 'border-blue-500 border-2',
+                isActive && state.is_final_turn && 'border-orange-500 border-2 bg-orange-50/50 dark:bg-orange-950/20',
+                !isActive && boardPlayerIdx === state.going_out_player && 'border-orange-300 border-2 opacity-75',
+                !isActive && boardPlayerIdx !== state.going_out_player && 'border-border',
+                boardPlayerIdx === playerIndex && 'bg-primary/5',
+              )}
             >
-              {Array.from({ length: num_rows }, (_, r) =>
-                Array.from({ length: num_cols }, (_, c) => {
-                  const idx = c * num_rows + r;
-                  const interactive = getCardInteractive(boardPlayerIdx, idx);
-                  return (
-                    <button
-                      key={idx}
-                      onClick={() => handleCardClick(boardPlayerIdx, idx)}
-                      disabled={!interactive}
-                      className={cn(
-                        'transition-transform',
-                        interactive && 'hover:scale-105 cursor-pointer ring-2 ring-yellow-400 rounded-lg'
-                      )}
-                    >
-                      <SkyjoCard slot={toSlot(board[idx])} size={cardSizes.board} />
-                    </button>
-                  );
-                })
-              ).flat()}
+              <h4 className="text-sm font-medium mb-2 flex items-center gap-1">
+                {getPlayerName(state, boardPlayerIdx)}
+                {boardPlayerIdx === playerIndex && (
+                  <Badge variant="outline" className="text-[10px] py-0">you</Badge>
+                )}
+                {boardPlayerIdx === state.going_out_player && (
+                  <span className="text-xs font-semibold text-orange-500 ml-1">went out</span>
+                )}
+              </h4>
+              <div
+                className="grid gap-0.5 sm:gap-1"
+                style={{ gridTemplateColumns: `repeat(${num_cols}, 1fr)` }}
+              >
+                {Array.from({ length: num_rows }, (_, r) =>
+                  Array.from({ length: num_cols }, (_, c) => {
+                    const idx = c * num_rows + r;
+                    const interactive = getCardInteractive(boardPlayerIdx, idx);
+
+                    return (
+                      <button
+                        key={idx}
+                        onClick={() => interactive && handleCardClick(boardPlayerIdx, idx)}
+                        disabled={!interactive}
+                        className={cn(
+                          'transition-transform',
+                          interactive && 'hover:scale-110 cursor-pointer'
+                        )}
+                      >
+                        <SkyjoCard
+                          slot={toSlot(board[idx])}
+                          size={cardSize}
+                          highlight={interactive}
+                        />
+                      </button>
+                    );
+                  })
+                ).flat()}
+              </div>
+              <div className="text-xs mt-1 space-y-0.5">
+                <div className="text-muted-foreground">
+                  Visible: {computeVisibleScore(board)}
+                </div>
+                {state.cumulative_scores[boardPlayerIdx] !== 0 && (
+                  <div className="text-muted-foreground">
+                    Cumulative: {state.cumulative_scores[boardPlayerIdx]}
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
+
+      {/* Round Scorecard */}
+      <RoundScorecard
+        roundHistory={roundHistory}
+        playerNames={state.player_names}
+        currentCumulativeScores={state.cumulative_scores}
+      />
     </div>
   );
 }
