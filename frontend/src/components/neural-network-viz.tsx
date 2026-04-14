@@ -634,20 +634,21 @@ function NetworkDiagram({ model }: { model: GeneticModelData }) {
   const svgWidth = 900;
   const inputHeight = inputGroups.length * 38;
   const outputHeight = outputGroups.length * 38;
-  const hiddenHeight = 140; // minimum hidden layer visual height
-  const maxColHeight = Math.max(inputHeight, outputHeight, hiddenHeight);
+  const ioHeight = Math.max(inputHeight, outputHeight);
+  const hiddenBoxHeight = Math.min(140, ioHeight * 0.4); // hidden boxes are compact
+  const maxColHeight = ioHeight;
   const inputYOffset = (maxColHeight - inputHeight) / 2;
   const outputYOffset = (maxColHeight - outputHeight) / 2;
-  const hiddenYOffset = (maxColHeight - hiddenHeight) / 2;
-  const svgHeight = maxColHeight + 60; // padding for legend
+  const svgHeight = maxColHeight + 40; // tight padding for legend
   const inputX = 20;
   const hidden1X = svgWidth * 0.33;
   const hidden2X = svgWidth * 0.58;
   const outputX = svgWidth - 20;
-  const hiddenBoxTop = 10 + hiddenYOffset;
-  const hiddenBoxBottom = svgHeight - 30 - hiddenYOffset;
-  const hidden1CenterY = (hiddenBoxTop + hiddenBoxBottom) / 2;
-  const hidden2CenterY = hidden1CenterY;
+  const centerY = maxColHeight / 2 + 10;
+  const hiddenBoxTop = centerY - hiddenBoxHeight / 2;
+  const hiddenBoxBottom = centerY + hiddenBoxHeight / 2;
+  const hidden1CenterY = centerY;
+  const hidden2CenterY = centerY;
 
   const inputNodeCx = inputX + 155;
   const outputNodeCx = outputX - 155;
@@ -912,8 +913,7 @@ function computeLayout(model: GeneticModelData) {
 
   const inputHeight = (totalInputGroups - 1) * spacing;
   const outputHeight = (totalOutputGroups - 1) * spacing;
-  const hiddenMinHeight = 140;
-  const maxColHeight = Math.max(inputHeight, outputHeight, hiddenMinHeight);
+  const maxColHeight = Math.max(inputHeight, outputHeight);
   const inputYOffset = (maxColHeight - inputHeight) / 2;
   const outputYOffset = (maxColHeight - outputHeight) / 2;
   const inputStartY = 30 + inputYOffset;

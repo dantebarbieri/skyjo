@@ -103,7 +103,7 @@ fn all_client_messages_msgpack_round_trip() {
     ];
 
     for msg in &messages {
-        let packed = rmp_serde::to_vec(msg).unwrap();
+        let packed = rmp_serde::to_vec_named(msg).unwrap();
         let decoded: ClientMessage = rmp_serde::from_slice(&packed).unwrap();
         let _ = format!("{decoded:?}");
     }
@@ -173,7 +173,7 @@ fn all_server_messages_msgpack_round_trip() {
     ];
 
     for msg in &messages {
-        let packed = rmp_serde::to_vec(msg).unwrap();
+        let packed = rmp_serde::to_vec_named(msg).unwrap();
         let decoded: ServerMessage = rmp_serde::from_slice(&packed).unwrap();
         let _ = format!("{decoded:?}");
     }
@@ -210,7 +210,7 @@ fn client_message_format_detection_json() {
 #[test]
 fn client_message_format_detection_msgpack() {
     let msg = ClientMessage::Ping;
-    let msgpack = rmp_serde::to_vec(&msg).unwrap();
+    let msgpack = rmp_serde::to_vec_named(&msg).unwrap();
     let decoded = ClientMessage::from_bytes(&msgpack, true).unwrap();
     assert!(matches!(decoded, ClientMessage::Ping));
 }
@@ -229,7 +229,7 @@ fn client_message_with_fields_json_round_trip_via_from_bytes() {
 #[test]
 fn client_message_with_fields_msgpack_round_trip_via_from_bytes() {
     let msg = ClientMessage::SetNumPlayers { num_players: 5 };
-    let packed = rmp_serde::to_vec(&msg).unwrap();
+    let packed = rmp_serde::to_vec_named(&msg).unwrap();
     let decoded = ClientMessage::from_bytes(&packed, true).unwrap();
     assert!(matches!(
         decoded,
@@ -322,7 +322,7 @@ fn slot_update_variants_msgpack_round_trip() {
         SlotUpdate::Cleared,
     ];
     for v in &variants {
-        let packed = rmp_serde::to_vec(v).unwrap();
+        let packed = rmp_serde::to_vec_named(v).unwrap();
         let decoded: SlotUpdate = rmp_serde::from_slice(&packed).unwrap();
         assert_eq!(*v, decoded);
     }
@@ -421,7 +421,7 @@ fn player_slot_type_all_variants_msgpack() {
         PlayerSlotType::Empty,
     ];
     for v in &variants {
-        let packed = rmp_serde::to_vec(v).unwrap();
+        let packed = rmp_serde::to_vec_named(v).unwrap();
         let decoded: PlayerSlotType = rmp_serde::from_slice(&packed).unwrap();
         assert_eq!(*v, decoded);
     }
@@ -457,7 +457,7 @@ fn msgpack_consistently_smaller_or_equal() {
 
     for msg in &messages {
         let json_size = serde_json::to_vec(msg).unwrap().len();
-        let msgpack_size = rmp_serde::to_vec(msg).unwrap().len();
+        let msgpack_size = rmp_serde::to_vec_named(msg).unwrap().len();
         println!(
             "{:?}: JSON={json_size}B, MessagePack={msgpack_size}B, savings={:.0}%",
             std::mem::discriminant(msg),
@@ -486,7 +486,7 @@ fn delta_smaller_than_500_bytes() {
     };
 
     let delta_json = serde_json::to_vec(&delta).unwrap();
-    let delta_msgpack = rmp_serde::to_vec(&delta).unwrap();
+    let delta_msgpack = rmp_serde::to_vec_named(&delta).unwrap();
 
     println!(
         "Delta: JSON={} bytes, MsgPack={} bytes",
@@ -528,7 +528,7 @@ fn client_message_msgpack_smaller_than_json() {
 
     for msg in &messages {
         let json_size = serde_json::to_vec(msg).unwrap().len();
-        let msgpack_size = rmp_serde::to_vec(msg).unwrap().len();
+        let msgpack_size = rmp_serde::to_vec_named(msg).unwrap().len();
         println!(
             "{:?}: JSON={json_size}B, MessagePack={msgpack_size}B",
             std::mem::discriminant(msg),

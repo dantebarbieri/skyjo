@@ -148,7 +148,9 @@ pub async fn rate_limit_middleware(
         (p, &axum::http::Method::POST) if p.contains("/join") => {
             ("room_join", &rate_limit::limits::ROOM_JOIN)
         }
-        (p, _) if p.starts_with("/api/genetic/") => ("genetic", &rate_limit::limits::GENETIC_API),
+        (p, &axum::http::Method::POST) if p.starts_with("/api/genetic/") => {
+            ("genetic", &rate_limit::limits::GENETIC_API)
+        }
         _ => return next.run(req).await,
     };
 

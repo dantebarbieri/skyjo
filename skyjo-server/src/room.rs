@@ -1106,6 +1106,8 @@ impl Room {
         };
 
         // Broadcast delta to all connected human players
+        let mut delta_with_deadline = delta.clone();
+        delta_with_deadline.turn_deadline_secs = self.turn_deadline_secs().map(|d| d as f64);
         for (i, slot) in self.players.iter().enumerate() {
             if slot.connected && matches!(slot.slot_type, PlayerSlotType::Human) {
                 let _ = self.broadcast_tx.send((
@@ -1113,7 +1115,7 @@ impl Room {
                     ServerMessage::ActionAppliedDelta {
                         player,
                         action: action.clone(),
-                        delta: delta.clone(),
+                        delta: delta_with_deadline.clone(),
                     },
                 ));
             }
