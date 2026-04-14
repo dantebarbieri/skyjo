@@ -118,7 +118,7 @@ pub fn validate_player_name(name: &str) -> Result<String, ServerError> {
 }
 
 /// Validate a room code format: exactly 6 uppercase alphanumeric characters,
-/// excluding I, O, and L.
+/// excluding I and O.
 pub fn validate_room_code(code: &str) -> Result<(), ServerError> {
     let valid_chars: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     if code.len() != 6 || !code.bytes().all(|b| valid_chars.contains(&b)) {
@@ -662,16 +662,16 @@ impl Room {
 
     /// Reset for a new game (play again).
     pub fn play_again(&mut self) -> Result<(), ServerError> {
-        self.game = None;
         self.transition(RoomPhase::Lobby)?;
+        self.game = None;
         Ok(())
     }
 
     /// Return to lobby after game ends (preserves last_winners for crown display).
     pub fn return_to_lobby(&mut self) -> Result<(), ServerError> {
         // last_winners is already set by check_game_over
-        self.game = None;
         self.transition(RoomPhase::Lobby)?;
+        self.game = None;
         Ok(())
     }
 
@@ -1057,14 +1057,18 @@ impl Room {
         // Broadcast delta to all connected human players
         let mut delta_with_deadline = delta.clone();
         delta_with_deadline.turn_deadline_secs = deadline.map(|d| d as f64);
-        let _ = self.broadcast_tx.send((
-            usize::MAX,
-            ServerMessage::ActionAppliedDelta {
-                player,
-                action: action.clone(),
-                delta: delta_with_deadline,
-            },
-        ));
+        for (i, slot) in self.players.iter().enumerate() {
+            if slot.connected && matches!(slot.slot_type, PlayerSlotType::Human) {
+                let _ = self.broadcast_tx.send((
+                    i,
+                    ServerMessage::ActionAppliedDelta {
+                        player,
+                        action: action.clone(),
+                        delta: delta_with_deadline.clone(),
+                    },
+                ));
+            }
+        }
 
         for (i, slot) in self.players.iter().enumerate() {
             if slot.connected && matches!(slot.slot_type, PlayerSlotType::Human) {
@@ -1102,14 +1106,18 @@ impl Room {
         };
 
         // Broadcast delta to all connected human players
-        let _ = self.broadcast_tx.send((
-            usize::MAX,
-            ServerMessage::ActionAppliedDelta {
-                player,
-                action: action.clone(),
-                delta: delta.clone(),
-            },
-        ));
+        for (i, slot) in self.players.iter().enumerate() {
+            if slot.connected && matches!(slot.slot_type, PlayerSlotType::Human) {
+                let _ = self.broadcast_tx.send((
+                    i,
+                    ServerMessage::ActionAppliedDelta {
+                        player,
+                        action: action.clone(),
+                        delta: delta.clone(),
+                    },
+                ));
+            }
+        }
 
         for (i, slot) in self.players.iter().enumerate() {
             if slot.connected && matches!(slot.slot_type, PlayerSlotType::Human) {

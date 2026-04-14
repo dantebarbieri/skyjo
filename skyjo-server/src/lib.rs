@@ -141,16 +141,18 @@ pub async fn rate_limit_middleware(
     req: axum::extract::Request,
     next: Next,
 ) -> Response {
-    let config = match (req.uri().path(), req.method()) {
+    let (resource, config) = match (req.uri().path(), req.method()) {
         (p, &axum::http::Method::POST) if p.starts_with("/api/rooms") && !p.contains("/join") => {
-            &rate_limit::limits::ROOM_CREATION
+            ("room_create", &rate_limit::limits::ROOM_CREATION)
         }
-        (p, &axum::http::Method::POST) if p.contains("/join") => &rate_limit::limits::ROOM_JOIN,
-        (p, _) if p.starts_with("/api/genetic/") => &rate_limit::limits::GENETIC_API,
+        (p, &axum::http::Method::POST) if p.contains("/join") => {
+            ("room_join", &rate_limit::limits::ROOM_JOIN)
+        }
+        (p, _) if p.starts_with("/api/genetic/") => ("genetic", &rate_limit::limits::GENETIC_API),
         _ => return next.run(req).await,
     };
 
-    if !state.rate_limiter.check(addr.ip(), "http", config) {
+    if !state.rate_limiter.check(addr.ip(), resource, config) {
         return error::ServerError::RateLimited.into_response();
     }
 

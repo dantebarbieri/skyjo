@@ -28,6 +28,7 @@ pub async fn handle_ws(
     room_code: String,
     player_index: usize,
     client_ip: String,
+    initial_format: WireFormat,
 ) {
     let (mut ws_tx, mut ws_rx) = ws.split();
 
@@ -36,8 +37,9 @@ pub async fn handle_ws(
         .parse()
         .unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED));
 
-    // Track the client's preferred wire format (auto-detected from incoming messages).
-    let mut wire_format = WireFormat::Json;
+    // Wire format: use client's requested format, or default to JSON.
+    // Auto-updates if client sends a different frame type later.
+    let mut wire_format = initial_format;
 
     // Mark player as connected and record IP (never exposed to clients)
     let (player_msg_tx, mut player_msg_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();

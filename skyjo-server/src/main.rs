@@ -311,6 +311,9 @@ async fn main() {
 #[derive(Deserialize)]
 struct WsQuery {
     token: String,
+    /// Wire format preference: "json" (default) or "msgpack"
+    #[serde(default)]
+    format: Option<String>,
 }
 
 async fn ws_upgrade(
@@ -345,8 +348,21 @@ async fn ws_upgrade(
     }
 
     let client_ip = addr.ip().to_string();
+    let initial_format = match query.format.as_deref() {
+        Some("msgpack" | "messagepack") => skyjo_server::messages::WireFormat::MessagePack,
+        _ => skyjo_server::messages::WireFormat::Json,
+    };
     Ok(ws.on_upgrade(move |socket| async move {
-        ws::handle_ws(socket, state, room, room_code, player_index, client_ip).await;
+        ws::handle_ws(
+            socket,
+            state,
+            room,
+            room_code,
+            player_index,
+            client_ip,
+            initial_format,
+        )
+        .await;
     }))
 }
 
