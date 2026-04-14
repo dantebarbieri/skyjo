@@ -37,6 +37,9 @@ pub struct SavedGeneration {
     pub best_fitness: f64,
     pub genome: Vec<f32>,
     pub saved_at: String,
+    /// Lineage hash identifying which training run produced this genome.
+    #[serde(default)]
+    pub lineage_hash: String,
 }
 
 /// Summary of a saved generation (without genome, for listing).
@@ -47,6 +50,8 @@ pub struct SavedGenerationInfo {
     pub total_games_trained: usize,
     pub best_fitness: f64,
     pub saved_at: String,
+    #[serde(default)]
+    pub lineage_hash: String,
 }
 
 impl From<&SavedGeneration> for SavedGenerationInfo {
@@ -57,6 +62,7 @@ impl From<&SavedGeneration> for SavedGenerationInfo {
             total_games_trained: sg.total_games_trained,
             best_fitness: sg.best_fitness,
             saved_at: sg.saved_at.clone(),
+            lineage_hash: sg.lineage_hash.clone(),
         }
     }
 }
@@ -76,6 +82,8 @@ pub struct GeneticModelData {
     pub output_groups: Vec<(String, usize, usize)>,
     #[serde(default)]
     pub saved_generations: Vec<SavedGeneration>,
+    #[serde(default)]
+    pub lineage_hash: String,
 }
 
 impl GeneticModelData {
@@ -98,6 +106,7 @@ impl GeneticModelData {
                 .map(|(name, start, end)| (name.to_string(), *start, *end))
                 .collect(),
             saved_generations: state.saved_generations.clone(),
+            lineage_hash: state.lineage_hash.clone(),
         }
     }
 }
@@ -117,6 +126,14 @@ pub struct TrainingStatus {
     pub training_elapsed_ms: u64,
     /// Milliseconds elapsed at the last generation completion (for stable ETA).
     pub training_last_gen_elapsed_ms: u64,
+    /// Training mode: "generations", "until_generation", or "until_fitness".
+    pub training_mode: String,
+    /// For fitness-based training, the target fitness threshold.
+    pub training_target_fitness: f64,
+    /// Best fitness when training started (for ETA extrapolation in fitness mode).
+    pub training_start_fitness: f64,
+    /// Lineage hash identifying the current training run.
+    pub lineage_hash: String,
 }
 
 /// Mutable training state, shared behind Arc<Mutex<>>.
@@ -134,6 +151,14 @@ pub struct GeneticTrainingState {
     pub training_last_gen_elapsed_ms: u64,
     pub model_path: PathBuf,
     pub saved_generations: Vec<SavedGeneration>,
+    /// Training mode: "generations", "until_generation", or "until_fitness".
+    pub training_mode: String,
+    /// For fitness-based training, the target fitness threshold.
+    pub training_target_fitness: f64,
+    /// Best fitness when training started (for ETA extrapolation).
+    pub training_start_fitness: f64,
+    /// Lineage hash identifying the current training run.
+    pub lineage_hash: String,
 }
 
 impl GeneticTrainingState {
@@ -144,6 +169,7 @@ impl GeneticTrainingState {
             .map(|_| random_genome(&mut rng))
             .collect();
         let best_genome = population[0].clone();
+        let lineage_hash = compute_lineage_hash(&best_genome);
         Self {
             population,
             best_genome,
@@ -157,6 +183,10 @@ impl GeneticTrainingState {
             training_last_gen_elapsed_ms: 0,
             model_path,
             saved_generations: Vec::new(),
+            training_mode: "generations".to_string(),
+            training_target_fitness: 0.0,
+            training_start_fitness: 0.0,
+            lineage_hash,
         }
     }
 
@@ -181,6 +211,12 @@ impl GeneticTrainingState {
                             mutate(&mut child, &mut rng);
                             population.push(child);
                         }
+                        // Backward compat: compute hash if not stored
+                        let lineage_hash = if data.lineage_hash.is_empty() {
+                            compute_lineage_hash(&data.best_genome)
+                        } else {
+                            data.lineage_hash
+                        };
                         return Self {
                             population,
                             best_genome: data.best_genome,
@@ -194,6 +230,10 @@ impl GeneticTrainingState {
                             training_last_gen_elapsed_ms: 0,
                             model_path,
                             saved_generations: data.saved_generations,
+                            training_mode: "generations".to_string(),
+                            training_target_fitness: 0.0,
+                            training_start_fitness: 0.0,
+                            lineage_hash,
                         };
                     }
                     Err(e) => tracing::warn!("Failed to parse genetic model: {e}"),
@@ -223,6 +263,10 @@ impl GeneticTrainingState {
             training_target_generation: self.training_target_generation,
             training_elapsed_ms: elapsed_ms,
             training_last_gen_elapsed_ms: self.training_last_gen_elapsed_ms,
+            training_mode: self.training_mode.clone(),
+            training_target_fitness: self.training_target_fitness,
+            training_start_fitness: self.training_start_fitness,
+            lineage_hash: self.lineage_hash.clone(),
         }
     }
 
@@ -245,6 +289,7 @@ impl GeneticTrainingState {
             best_fitness: if self.best_fitness.is_finite() { self.best_fitness } else { 0.0 },
             genome: self.best_genome.clone(),
             saved_at: chrono_now(),
+            lineage_hash: self.lineage_hash.clone(),
         };
         let info = SavedGenerationInfo::from(&saved);
         self.saved_generations.push(saved);
@@ -295,6 +340,7 @@ impl GeneticTrainingState {
                 .map(|(n, s, e)| (n.to_string(), *s, *e))
                 .collect(),
             saved_generations: Vec::new(), // Don't nest saved generations
+            lineage_hash: saved.lineage_hash.clone(),
         })
     }
 
@@ -306,6 +352,7 @@ impl GeneticTrainingState {
         generation: usize,
         total_games_trained: usize,
         best_fitness: f64,
+        lineage_hash: Option<String>,
     ) -> Result<SavedGenerationInfo, String> {
         if genome.len() != GENOME_SIZE {
             return Err(format!(
@@ -316,6 +363,7 @@ impl GeneticTrainingState {
         if self.saved_generations.iter().any(|sg| sg.name == name) {
             return Err(format!("A saved generation named '{name}' already exists"));
         }
+        let lineage_hash = lineage_hash.unwrap_or_else(|| compute_lineage_hash(&genome));
         let saved = SavedGeneration {
             name,
             generation,
@@ -323,6 +371,7 @@ impl GeneticTrainingState {
             best_fitness,
             genome,
             saved_at: chrono_now(),
+            lineage_hash,
         };
         let info = SavedGenerationInfo::from(&saved);
         self.saved_generations.push(saved);
@@ -337,6 +386,51 @@ impl GeneticTrainingState {
             .find(|sg| sg.name == name)
             .map(|sg| (sg.genome.clone(), sg.total_games_trained))
     }
+
+    /// Load a saved generation as the current model, rebuilding population around it.
+    pub fn load_saved(&mut self, name: &str) -> Result<(), String> {
+        let saved = self
+            .saved_generations
+            .iter()
+            .find(|sg| sg.name == name)
+            .ok_or_else(|| format!("No saved generation named '{name}'"))?
+            .clone();
+        let mut rng = StdRng::from_os_rng();
+        let mut population = Vec::with_capacity(POPULATION_SIZE);
+        population.push(saved.genome.clone());
+        for _ in 1..POPULATION_SIZE {
+            let mut child = saved.genome.clone();
+            mutate(&mut child, &mut rng);
+            population.push(child);
+        }
+        self.population = population;
+        self.best_genome = saved.genome;
+        self.best_fitness = f64::NEG_INFINITY; // will be re-evaluated
+        self.generation = saved.generation;
+        self.total_games_trained = saved.total_games_trained;
+        self.lineage_hash = if saved.lineage_hash.is_empty() {
+            compute_lineage_hash(&self.best_genome)
+        } else {
+            saved.lineage_hash
+        };
+        save_model(self);
+        Ok(())
+    }
+
+    /// Reset to a new random population (Generation 0) with a new lineage hash.
+    /// Preserved saved generations are kept (they have their own lineage hashes).
+    pub fn reset(&mut self) {
+        let mut rng = StdRng::from_os_rng();
+        self.population = (0..POPULATION_SIZE)
+            .map(|_| random_genome(&mut rng))
+            .collect();
+        self.best_genome = self.population[0].clone();
+        self.best_fitness = f64::NEG_INFINITY;
+        self.generation = 0;
+        self.total_games_trained = 0;
+        self.lineage_hash = compute_lineage_hash(&self.best_genome);
+        save_model(self);
+    }
 }
 
 /// Returns seconds since Unix epoch as a string timestamp.
@@ -347,6 +441,19 @@ fn chrono_now() -> String {
         .unwrap_or_default()
         .as_secs();
     format!("{secs}")
+}
+
+/// Compute a short lineage hash from a genome (first 8 hex chars of FNV-1a hash).
+fn compute_lineage_hash(genome: &[f32]) -> String {
+    let mut hash: u64 = 0xcbf29ce484222325; // FNV offset basis
+    for &val in genome {
+        let bytes = val.to_le_bytes();
+        for &b in &bytes {
+            hash ^= b as u64;
+            hash = hash.wrapping_mul(0x100000001b3); // FNV prime
+        }
+    }
+    format!("{:08x}", hash as u32) // Take lower 32 bits for 8 hex chars
 }
 
 // --- Genetic algorithm operations ---
@@ -553,6 +660,41 @@ fn run_generation(
     (next_population, fitnesses, best_idx, games_played)
 }
 
+/// Auto-save at power-of-10 generation milestones (1, 10, 100, 1000, 10000, ...).
+fn auto_save_milestone(state: &mut GeneticTrainingState) {
+    let generation = state.generation;
+    if generation == 0 {
+        return;
+    }
+    // Check if generation is a power of 10
+    let mut power = 1usize;
+    while power <= generation {
+        if power == generation {
+            let name = format!("Gen {generation}");
+            if state.saved_generations.iter().any(|sg| sg.name == name) {
+                return;
+            }
+            let saved = SavedGeneration {
+                name: name.clone(),
+                generation,
+                total_games_trained: state.total_games_trained,
+                best_fitness: if state.best_fitness.is_finite() {
+                    state.best_fitness
+                } else {
+                    0.0
+                },
+                genome: state.best_genome.clone(),
+                saved_at: chrono_now(),
+                lineage_hash: state.lineage_hash.clone(),
+            };
+            state.saved_generations.push(saved);
+            tracing::info!("Auto-saved milestone: {name}");
+            return;
+        }
+        power = power.saturating_mul(10);
+    }
+}
+
 /// Save the model to disk.
 fn save_model(state: &GeneticTrainingState) {
     let data = state.model_data();
@@ -580,13 +722,19 @@ pub async fn train_generations(
 ) {
     for generation_i in 0..num_generations {
         // Clone population from state (brief lock)
-        let (population, generation_num, games_trained) = {
+        let (population, generation_num, games_trained, target_fitness, mode) = {
             let s = state.lock().await;
             if !s.is_training {
                 tracing::info!("Training was stopped, ending at generation {generation_i}");
                 return;
             }
-            (s.population.clone(), s.generation, s.total_games_trained)
+            (
+                s.population.clone(),
+                s.generation,
+                s.total_games_trained,
+                s.training_target_fitness,
+                s.training_mode.clone(),
+            )
         };
 
         // Run the CPU-intensive evaluation without holding the lock
@@ -599,7 +747,7 @@ pub async fn train_generations(
             .expect("Training task panicked");
 
         // Write back results (brief lock)
-        {
+        let should_stop = {
             let mut s = state.lock().await;
             let best_fitness = fitnesses[best_idx];
 
@@ -616,6 +764,8 @@ pub async fn train_generations(
                 .map(|t| t.elapsed().as_millis() as u64)
                 .unwrap_or(0);
 
+            auto_save_milestone(&mut s);
+
             tracing::info!(
                 "Generation {} complete: best_fitness={:.2}, total_games={}",
                 s.generation,
@@ -624,6 +774,21 @@ pub async fn train_generations(
             );
 
             save_model(&s);
+
+            // Check fitness-based early stop
+            mode == "until_fitness" && s.best_fitness >= target_fitness
+        };
+
+        if should_stop {
+            let mut s = state.lock().await;
+            s.is_training = false;
+            s.training_started_at = None;
+            tracing::info!(
+                "Fitness target {} reached at generation {}",
+                target_fitness,
+                s.generation
+            );
+            return;
         }
     }
 

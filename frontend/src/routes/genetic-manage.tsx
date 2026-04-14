@@ -130,6 +130,7 @@ export default function GeneticManageRoute() {
           generation: data.generation,
           total_games_trained: data.total_games_trained,
           best_fitness: data.best_fitness,
+          lineage_hash: data.lineage_hash,
         }),
       });
       if (!res.ok) {
@@ -188,6 +189,11 @@ export default function GeneticManageRoute() {
                 <Badge variant="outline" className="text-xs">
                   {model.total_games_trained.toLocaleString()} games
                 </Badge>
+                {model.lineage_hash && (
+                  <Badge variant="outline" className="text-xs font-mono">
+                    {model.lineage_hash}
+                  </Badge>
+                )}
                 {latestAlreadySaved && (
                   <Badge className="text-xs bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
                     Saved
@@ -243,12 +249,17 @@ export default function GeneticManageRoute() {
                 >
                   <div className="flex items-center gap-2 min-w-0 flex-wrap">
                     <span className="font-medium">{sg.name}</span>
+                    {sg.lineage_hash && (
+                      <Badge variant="outline" className="text-[10px] font-mono shrink-0">
+                        {sg.lineage_hash}
+                      </Badge>
+                    )}
+                    <Badge variant="outline" className="text-[10px] shrink-0">
+                      fitness: {sg.best_fitness.toFixed(1)}
+                    </Badge>
                     <Badge variant="outline" className="text-[10px] shrink-0">
                       {sg.total_games_trained.toLocaleString()} games
                     </Badge>
-                    <span className="text-xs text-muted-foreground shrink-0">
-                      fitness: {sg.best_fitness.toFixed(1)}
-                    </span>
                     <span className="text-xs text-muted-foreground shrink-0">
                       {formatTimestamp(sg.saved_at)}
                     </span>

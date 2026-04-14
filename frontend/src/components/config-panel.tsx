@@ -44,14 +44,16 @@ export default function ConfigPanel({
   const [playerCount, setPlayerCount] = useState(DEFAULTS.playerCount);
   const [playerStrategies, setPlayerStrategies] = useState<string[]>([]);
   const [bulkStrategy, setBulkStrategy] = useState(strategies[0] ?? '');
-  const [savedGens, setSavedGens] = useState<{ name: string; generation: number }[]>([]);
+  const [savedGens, setSavedGens] = useState<{ name: string; generation: number; lineage_hash: string; best_fitness: number }[]>([]);
 
   // Fetch saved genetic generations
   useEffect(() => {
     if (!strategies.includes('Genetic')) return;
     fetch('/api/genetic/saved')
       .then(res => res.ok ? res.json() : [])
-      .then(data => setSavedGens(data.map((sg: { name: string; generation: number }) => ({ name: sg.name, generation: sg.generation }))))
+      .then(data => setSavedGens(data.map((sg: { name: string; generation: number; lineage_hash: string; best_fitness: number }) => ({
+        name: sg.name, generation: sg.generation, lineage_hash: sg.lineage_hash, best_fitness: sg.best_fitness,
+      }))))
       .catch(() => {});
   }, [strategies]);
 
@@ -219,16 +221,23 @@ export default function ConfigPanel({
                     value={strat === 'Genetic' ? '__latest__' : strat.slice(8)}
                     onValueChange={(v) => updateStrategy(i, v === '__latest__' ? 'Genetic' : `Genetic:${v}`)}
                   >
-                    <SelectTrigger className="w-24 shrink-0 text-xs">
+                    <SelectTrigger className="w-32 shrink-0 text-xs">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="__latest__">Latest</SelectItem>
-                      {savedGens.map((sg) => (
-                        <SelectItem key={sg.name} value={sg.name}>
-                          {sg.name}
-                        </SelectItem>
-                      ))}
+                      {savedGens.map((sg) => {
+                        const hasMultipleLineages = new Set(savedGens.map(g => g.lineage_hash)).size > 1;
+                        return (
+                          <SelectItem key={sg.name} value={sg.name}>
+                            <span>{sg.name}</span>
+                            {hasMultipleLineages && sg.lineage_hash && (
+                              <span className="ml-1 font-mono text-muted-foreground">{sg.lineage_hash.slice(0, 4)}</span>
+                            )}
+                            <span className="ml-1 text-muted-foreground">({sg.best_fitness.toFixed(0)})</span>
+                          </SelectItem>
+                        );
+                      })}
                     </SelectContent>
                   </Select>
                 )}
