@@ -11,12 +11,23 @@ use super::common::{average_unknown_value, column_analysis, expected_score};
 
 // --- Architecture constants ---
 
-pub const INPUT_SIZE: usize = 48;
-pub const HIDDEN_SIZE: usize = 32;
+/// Architecture version for model compatibility checking.
+/// v1 = original (48→32→39 tanh), v2 = improved (INPUT_SIZE→64→32→39 ReLU)
+pub const ARCHITECTURE_VERSION: u32 = 2;
+
+pub const INPUT_SIZE: usize = 62; // expanded features
+pub const HIDDEN1_SIZE: usize = 64;
+pub const HIDDEN2_SIZE: usize = 32;
 pub const OUTPUT_SIZE: usize = 39;
 /// Total number of f32 weights in the genome.
+/// Layout: [W_ih1, b_h1, W_h1h2, b_h2, W_h2o, b_o]
 pub const GENOME_SIZE: usize =
-    INPUT_SIZE * HIDDEN_SIZE + HIDDEN_SIZE + HIDDEN_SIZE * OUTPUT_SIZE + OUTPUT_SIZE;
+    INPUT_SIZE * HIDDEN1_SIZE + HIDDEN1_SIZE +     // input → hidden1
+    HIDDEN1_SIZE * HIDDEN2_SIZE + HIDDEN2_SIZE +   // hidden1 → hidden2
+    HIDDEN2_SIZE * OUTPUT_SIZE + OUTPUT_SIZE;       // hidden2 → output
+
+/// Deprecated alias for backward compatibility.
+pub const HIDDEN_SIZE: usize = HIDDEN1_SIZE;
 
 // Output slice ranges
 const FLIP_START: usize = 0;
@@ -78,6 +89,22 @@ pub const INPUT_LABELS: &[&str] = &[
     "Col 1 Match",
     "Col 2 Match",
     "Col 3 Match",
+    // Opponent hidden counts (7 max opponents)
+    "Opp 0 Hidden Count",
+    "Opp 1 Hidden Count",
+    "Opp 2 Hidden Count",
+    "Opp 3 Hidden Count",
+    "Opp 4 Hidden Count",
+    "Opp 5 Hidden Count",
+    "Opp 6 Hidden Count",
+    // Game state features
+    "Discard Pile Depth",
+    "Score Rank",
+    "Opp 0 Near Done",
+    "Opp 1 Near Done",
+    "Opp 2 Near Done",
+    "Opp 3 Near Done",
+    "Opp 4 Near Done",
 ];
 
 /// Labels for each output, used by the frontend NN visualization.
@@ -140,6 +167,10 @@ pub const INPUT_GROUPS: &[(&str, usize, usize)] = &[
     ("Final Turn", 42, 43),
     ("Drawn Card", 43, 44),
     ("Column Matches (4)", 44, 48),
+    ("Opp Hidden Counts (7)", 48, 55),
+    ("Discard Pile Depth", 55, 56),
+    ("Score Rank", 56, 57),
+    ("Opp Near Done (5)", 57, 62),
 ];
 
 /// Grouped output labels for the frontend visualization (collapsed view).
@@ -153,8 +184,8 @@ pub const OUTPUT_GROUPS: &[(&str, usize, usize)] = &[
 
 // --- Neural Network ---
 
-/// A simple feedforward neural network with one hidden layer.
-/// Genome layout: [weights_ih, biases_h, weights_ho, biases_o]
+/// A feedforward neural network with two hidden layers and ReLU activation.
+/// Genome layout: [W_ih1, b_h1, W_h1h2, b_h2, W_h2o, b_o]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NeuralNetwork {
     pub genome: Vec<f32>,
@@ -173,15 +204,34 @@ impl NeuralNetwork {
         Self { genome }
     }
 
-    /// Create a random NN using the given RNG.
+    /// Create a random NN using He initialization for ReLU layers.
     pub fn random(rng: &mut dyn RngCore) -> Self {
-        let genome: Vec<f32> = (0..GENOME_SIZE)
-            .map(|_| {
-                // Uniform in [-1, 1]
-                let bits = rng.next_u32();
-                (bits as f32 / u32::MAX as f32) * 2.0 - 1.0
-            })
-            .collect();
+        let mut genome = Vec::with_capacity(GENOME_SIZE);
+
+        // He initialization scale = sqrt(2 / fan_in)
+        let scale_h1 = (2.0 / INPUT_SIZE as f32).sqrt();
+        let scale_h2 = (2.0 / HIDDEN1_SIZE as f32).sqrt();
+        let scale_out = (2.0 / HIDDEN2_SIZE as f32).sqrt();
+
+        // W_ih1: INPUT_SIZE * HIDDEN1_SIZE weights
+        for _ in 0..(INPUT_SIZE * HIDDEN1_SIZE) {
+            genome.push(he_init_weight(rng, scale_h1));
+        }
+        // b_h1: HIDDEN1_SIZE biases (zero init)
+        genome.extend(std::iter::repeat_n(0.0, HIDDEN1_SIZE));
+        // W_h1h2: HIDDEN1_SIZE * HIDDEN2_SIZE weights
+        for _ in 0..(HIDDEN1_SIZE * HIDDEN2_SIZE) {
+            genome.push(he_init_weight(rng, scale_h2));
+        }
+        // b_h2: HIDDEN2_SIZE biases (zero init)
+        genome.extend(std::iter::repeat_n(0.0, HIDDEN2_SIZE));
+        // W_h2o: HIDDEN2_SIZE * OUTPUT_SIZE weights
+        for _ in 0..(HIDDEN2_SIZE * OUTPUT_SIZE) {
+            genome.push(he_init_weight(rng, scale_out));
+        }
+        // b_o: OUTPUT_SIZE biases (zero init)
+        genome.extend(std::iter::repeat_n(0.0, OUTPUT_SIZE));
+
         Self { genome }
     }
 
@@ -190,32 +240,55 @@ impl NeuralNetwork {
         assert_eq!(inputs.len(), INPUT_SIZE);
 
         let g = &self.genome;
-        let wih_end = INPUT_SIZE * HIDDEN_SIZE;
-        let bh_end = wih_end + HIDDEN_SIZE;
-        let who_end = bh_end + HIDDEN_SIZE * OUTPUT_SIZE;
+        // Layer boundary offsets
+        let w1_end = INPUT_SIZE * HIDDEN1_SIZE;
+        let b1_end = w1_end + HIDDEN1_SIZE;
+        let w2_end = b1_end + HIDDEN1_SIZE * HIDDEN2_SIZE;
+        let b2_end = w2_end + HIDDEN2_SIZE;
+        let w3_end = b2_end + HIDDEN2_SIZE * OUTPUT_SIZE;
+        // b3 starts at w3_end
 
-        // Hidden layer: h = tanh(W_ih * x + b_h)
-        let mut hidden = Vec::with_capacity(HIDDEN_SIZE);
-        for j in 0..HIDDEN_SIZE {
-            let mut sum = g[wih_end + j]; // bias
+        // Hidden layer 1: h1 = ReLU(W1 * x + b1)
+        let mut hidden1 = Vec::with_capacity(HIDDEN1_SIZE);
+        for j in 0..HIDDEN1_SIZE {
+            let mut sum = g[w1_end + j]; // bias
             for i in 0..INPUT_SIZE {
                 sum += g[j * INPUT_SIZE + i] * inputs[i];
             }
-            hidden.push(sum.tanh());
+            hidden1.push(sum.max(0.0)); // ReLU
         }
 
-        // Output layer: o = W_ho * h + b_o (no activation — raw scores)
+        // Hidden layer 2: h2 = ReLU(W2 * h1 + b2)
+        let mut hidden2 = Vec::with_capacity(HIDDEN2_SIZE);
+        for k in 0..HIDDEN2_SIZE {
+            let mut sum = g[w2_end + k]; // bias
+            for j in 0..HIDDEN1_SIZE {
+                sum += g[b1_end + k * HIDDEN1_SIZE + j] * hidden1[j];
+            }
+            hidden2.push(sum.max(0.0)); // ReLU
+        }
+
+        // Output layer: o = W3 * h2 + b3 (no activation — raw scores)
         let mut output = Vec::with_capacity(OUTPUT_SIZE);
-        for k in 0..OUTPUT_SIZE {
-            let mut sum = g[who_end + k]; // bias
-            for j in 0..HIDDEN_SIZE {
-                sum += g[bh_end + k * HIDDEN_SIZE + j] * hidden[j];
+        for m in 0..OUTPUT_SIZE {
+            let mut sum = g[w3_end + m]; // bias
+            for k in 0..HIDDEN2_SIZE {
+                sum += g[b2_end + m * HIDDEN2_SIZE + k] * hidden2[k];
             }
             output.push(sum);
         }
 
         output
     }
+}
+
+/// Generate a weight using He initialization (normal distribution with given scale).
+fn he_init_weight(rng: &mut dyn RngCore, scale: f32) -> f32 {
+    // Box-Muller transform for normal distribution
+    let u1 = (rng.next_u32() as f32 / u32::MAX as f32).max(0.0001);
+    let u2 = rng.next_u32() as f32 / u32::MAX as f32 * std::f32::consts::TAU;
+    let normal = (-2.0 * u1.ln()).sqrt() * u2.cos();
+    normal * scale
 }
 
 // --- Feature extraction ---
@@ -322,6 +395,37 @@ pub fn extract_features(view: &StrategyView, drawn_card: Option<CardValue>) -> V
         }
     }
 
+    // Opponent hidden counts (7 slots, padded with 0 for fewer opponents)
+    for opp_idx in 0..7 {
+        if let Some(board) = view.opponent_boards.get(opp_idx) {
+            let hidden = board.iter().filter(|s| matches!(s, VisibleSlot::Hidden)).count();
+            features.push(hidden as f32 / 12.0);
+        } else {
+            features.push(0.0);
+        }
+    }
+
+    // Discard pile depth (normalized)
+    let discard_depth: usize = view.discard_piles.iter().map(|p| p.len()).sum();
+    features.push(discard_depth as f32 / 150.0);
+
+    // Score rank (0.0 = best, 1.0 = worst among players)
+    let my_cum_score = view.cumulative_scores.get(view.my_index).copied().unwrap_or(0);
+    let num_players = view.cumulative_scores.len();
+    let rank = view.cumulative_scores.iter().filter(|&&s| s < my_cum_score).count();
+    features.push(if num_players > 1 { rank as f32 / (num_players - 1) as f32 } else { 0.0 });
+
+    // Opponent "near done" signals (5 closest opponents, ratio of revealed cards)
+    let mut opp_revealed_ratios: Vec<f32> = view.opponent_boards.iter().map(|board| {
+        let total = board.len();
+        let revealed = board.iter().filter(|s| !matches!(s, VisibleSlot::Hidden)).count();
+        if total > 0 { revealed as f32 / total as f32 } else { 0.0 }
+    }).collect();
+    opp_revealed_ratios.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+    for i in 0..5 {
+        features.push(opp_revealed_ratios.get(i).copied().unwrap_or(0.0));
+    }
+
     assert_eq!(features.len(), INPUT_SIZE);
     features
 }
@@ -386,7 +490,8 @@ impl Strategy for GeneticStrategy {
             name: "Genetic".into(),
             summary: format!(
                 "A neural network strategy evolved through {} games of neuroevolution. \
-                 Uses a feedforward network ({INPUT_SIZE} inputs, {HIDDEN_SIZE} hidden neurons, \
+                 Uses a two-hidden-layer feedforward network ({INPUT_SIZE} inputs, \
+                 {HIDDEN1_SIZE}+{HIDDEN2_SIZE} hidden neurons with ReLU activation, \
                  {OUTPUT_SIZE} outputs) to evaluate board positions and make decisions. \
                  The network's weights are evolved via a genetic algorithm with tournament \
                  selection, crossover, and mutation — no gradient-based training.",
@@ -596,7 +701,9 @@ mod tests {
     fn genome_size_consistent() {
         assert_eq!(
             GENOME_SIZE,
-            INPUT_SIZE * HIDDEN_SIZE + HIDDEN_SIZE + HIDDEN_SIZE * OUTPUT_SIZE + OUTPUT_SIZE
+            INPUT_SIZE * HIDDEN1_SIZE + HIDDEN1_SIZE
+                + HIDDEN1_SIZE * HIDDEN2_SIZE + HIDDEN2_SIZE
+                + HIDDEN2_SIZE * OUTPUT_SIZE + OUTPUT_SIZE
         );
     }
 
@@ -700,7 +807,7 @@ mod tests {
         let view = make_test_view();
         let mut rng = rand::rng();
 
-        // All outputs will be 0 (tanh(0)=0, then 0*0+0=0). Should still pick valid positions.
+        // All outputs will be 0 (ReLU(0)=0, then 0*0+0=0). Should still pick valid positions.
         let flips = strategy.choose_initial_flips(&view, 2, &mut rng);
         assert_eq!(flips.len(), 2);
 

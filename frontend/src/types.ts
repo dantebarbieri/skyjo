@@ -287,6 +287,8 @@ export interface GeneticModelData {
   best_genome: number[];
   input_size: number;
   hidden_size: number;
+  hidden1_size: number;
+  hidden2_size: number;
   output_size: number;
   generation: number;
   total_games_trained: number;
@@ -295,6 +297,7 @@ export interface GeneticModelData {
   input_groups: [string, number, number][];
   output_groups: [string, number, number][];
   lineage_hash: string;
+  architecture_version: number;
 }
 
 export interface SavedGenerationInfo {
@@ -304,6 +307,7 @@ export interface SavedGenerationInfo {
   best_fitness: number;
   saved_at: string;
   lineage_hash: string;
+  architecture_version: number;
 }
 
 export interface GeneticTrainingStatus {
@@ -319,4 +323,6 @@ export interface GeneticTrainingStatus {
   training_target_fitness: number;
   training_start_fitness: number;
   lineage_hash: string;
+  current_mutation_rate: number;
+  current_mutation_sigma: number;
 }
