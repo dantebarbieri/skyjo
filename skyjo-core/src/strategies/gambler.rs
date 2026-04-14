@@ -1,4 +1,5 @@
-use rand::seq::SliceRandom;
+use rand::seq::IndexedRandom;
+use rand::prelude::SliceRandom;
 use rand::RngCore;
 
 use crate::card::{CardValue, VisibleSlot};
@@ -333,7 +334,7 @@ mod tests {
         let mut view = make_view(board);
         view.discard_piles = vec![vec![-2]]; // Even a great discard card is ignored
         let strategy = GamblerStrategy;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let draw = strategy.choose_draw(&view, &mut rng);
         assert!(matches!(draw, DrawChoice::DrawFromDeck));
     }
@@ -356,7 +357,7 @@ mod tests {
         ];
         let view = make_view(board);
         let strategy = GamblerStrategy;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         // Card value 2 (< 10) should be kept on a hidden card
         let action = strategy.choose_deck_draw_action(&view, 2, &mut rng);
@@ -381,7 +382,7 @@ mod tests {
         ];
         let view = make_view(board);
         let strategy = GamblerStrategy;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         // Card value 11 (>= 10) should be discarded and flip a hidden
         let action = strategy.choose_deck_draw_action(&view, 11, &mut rng);
@@ -408,7 +409,7 @@ mod tests {
         ];
         let view = make_view(board);
         let strategy = GamblerStrategy;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         // Drew a 10 — should keep to complete column clear even though >= 10
         let action = strategy.choose_deck_draw_action(&view, 10, &mut rng);
@@ -440,7 +441,7 @@ mod tests {
         ];
         let view = make_view(board);
         let strategy = GamblerStrategy;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         // Drew an 11 — should place in col 0 to chase the clear
         let action = strategy.choose_deck_draw_action(&view, 11, &mut rng);
@@ -470,7 +471,7 @@ mod tests {
         ];
         let view = make_view(board);
         let strategy = GamblerStrategy;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         // No hidden cards and card >= 10 — must replace highest revealed (9 at index 11)
         let action = strategy.choose_deck_draw_action(&view, 12, &mut rng);

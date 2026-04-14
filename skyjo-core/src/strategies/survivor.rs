@@ -1,4 +1,5 @@
-use rand::seq::SliceRandom;
+use rand::seq::IndexedRandom;
+use rand::prelude::SliceRandom;
 use rand::RngCore;
 
 use crate::card::{CardValue, VisibleSlot};
@@ -464,7 +465,7 @@ mod tests {
         ];
         let view = make_view_with_score(board, 20, Some(5));
         let strategy = SurvivorStrategy;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         // Low danger, discard=5 < highest revealed=10 -> take discard
         let choice = strategy.choose_draw(&view, &mut rng);
@@ -489,7 +490,7 @@ mod tests {
         ];
         let view = make_view_with_score(board, 75, Some(5));
         let strategy = SurvivorStrategy;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         // High danger, discard=5 > 3 threshold -> draw from deck
         let choice = strategy.choose_draw(&view, &mut rng);
@@ -514,7 +515,7 @@ mod tests {
         ];
         let view = make_view_with_score(board, 75, Some(2));
         let strategy = SurvivorStrategy;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         // High danger, discard=2 <= 3 threshold -> take discard
         let choice = strategy.choose_draw(&view, &mut rng);
@@ -538,7 +539,7 @@ mod tests {
             VisibleSlot::Hidden,
         ];
         let strategy = SurvivorStrategy;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         // Critical, discard=3 > 0 -> draw from deck
         let view = make_view_with_score(board.clone(), 90, Some(3));
@@ -574,7 +575,7 @@ mod tests {
         ];
         let view = make_view_with_score(board, 20, None);
         let strategy = SurvivorStrategy;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         // Low danger, drawn=5 < highest=10 -> keep, replace position 0 (the 10)
         let action = strategy.choose_deck_draw_action(&view, 5, &mut rng);
@@ -602,7 +603,7 @@ mod tests {
         ];
         let view = make_view_with_score(board, 75, None);
         let strategy = SurvivorStrategy;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         // High danger, drawn=5, no revealed >= 8, drawn > 0 -> discard and flip
         let action = strategy.choose_deck_draw_action(&view, 5, &mut rng);
@@ -627,7 +628,7 @@ mod tests {
         ];
         let view = make_view_with_score(board, 75, None);
         let strategy = SurvivorStrategy;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         // High danger, drawn=-1 <= 0 -> keep, replace highest (pos 0, value 6)
         let action = strategy.choose_deck_draw_action(&view, -1, &mut rng);
@@ -655,7 +656,7 @@ mod tests {
         ];
         let view = make_view_with_score(board, 90, None);
         let strategy = SurvivorStrategy;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         // Critical, drawn=5, revealed 11 >= 10 -> keep, replace the 11
         let action = strategy.choose_deck_draw_action(&view, 5, &mut rng);
@@ -683,7 +684,7 @@ mod tests {
         ];
         let view = make_view_with_score(board, 90, None);
         let strategy = SurvivorStrategy;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         // Critical, drawn=5, highest revealed=8 < 10 threshold, drawn > 0 -> discard
         let action = strategy.choose_deck_draw_action(&view, 5, &mut rng);
@@ -708,7 +709,7 @@ mod tests {
         ];
         let view = make_view_with_score(board, 20, None);
         let strategy = SurvivorStrategy;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         // Low danger, drawn=5 — 6 > 5 by >= 1 -> replace the 6 at pos 0
         let pos = strategy.choose_discard_draw_placement(&view, 5, &mut rng);
@@ -733,7 +734,7 @@ mod tests {
         ];
         let view = make_view_with_score(board, 75, None);
         let strategy = SurvivorStrategy;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         // High danger, drawn=5, highest=8, diff=3 < 5 -> no qualifying revealed, replace hidden
         let pos = strategy.choose_discard_draw_placement(&view, 5, &mut rng);
@@ -759,7 +760,7 @@ mod tests {
         ];
         let view = make_view_with_score(board, 75, None);
         let strategy = SurvivorStrategy;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         // High danger, drawn=5, 11-5=6 >= 5 -> replace the 11 at pos 0
         let pos = strategy.choose_discard_draw_placement(&view, 5, &mut rng);
@@ -784,7 +785,7 @@ mod tests {
         ];
         let view = make_view_with_score(board, 90, None);
         let strategy = SurvivorStrategy;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         // Critical, drawn=5, 10-5=5 < 8 -> no qualifying, replace hidden
         let pos = strategy.choose_discard_draw_placement(&view, 5, &mut rng);

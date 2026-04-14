@@ -1,5 +1,5 @@
 use rand::RngCore;
-use rand::seq::SliceRandom;
+use rand::prelude::SliceRandom;
 
 use crate::card::{CardValue, VisibleSlot};
 use crate::strategy::{
@@ -337,7 +337,7 @@ mod tests {
     #[test]
     fn test_choose_draw_prefers_deck() {
         let s = RusherStrategy;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         // Discard top is 5 — not <= 0, no column clear possible
         let mut view = make_view(vec![VisibleSlot::Hidden; 12]);
         view.discard_piles = vec![vec![5]];
@@ -347,7 +347,7 @@ mod tests {
     #[test]
     fn test_choose_draw_takes_negative_discard() {
         let s = RusherStrategy;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let mut view = make_view(vec![VisibleSlot::Hidden; 12]);
         view.discard_piles = vec![vec![-1]];
         assert_eq!(
@@ -359,7 +359,7 @@ mod tests {
     #[test]
     fn test_deck_draw_prefers_discard_and_flip() {
         let s = RusherStrategy;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let mut board = vec![VisibleSlot::Hidden; 12];
         board[0] = VisibleSlot::Revealed(3);
         board[1] = VisibleSlot::Revealed(4);
@@ -372,7 +372,7 @@ mod tests {
     #[test]
     fn test_deck_draw_keeps_negative() {
         let s = RusherStrategy;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let view = make_view(vec![VisibleSlot::Hidden; 12]);
         let action = s.choose_deck_draw_action(&view, -2, &mut rng);
         assert!(matches!(action, DeckDrawAction::Keep(_)));
@@ -381,7 +381,7 @@ mod tests {
     #[test]
     fn test_deck_draw_replaces_high_revealed() {
         let s = RusherStrategy;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let mut board = vec![VisibleSlot::Hidden; 12];
         board[0] = VisibleSlot::Revealed(11);
         let view = make_view(board);
@@ -393,7 +393,7 @@ mod tests {
     #[test]
     fn test_discard_placement_prefers_hidden() {
         let s = RusherStrategy;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let mut board = vec![VisibleSlot::Hidden; 12];
         board[0] = VisibleSlot::Revealed(3);
         let view = make_view(board);

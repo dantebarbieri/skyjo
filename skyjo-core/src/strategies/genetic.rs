@@ -629,7 +629,7 @@ mod tests {
 
     #[test]
     fn forward_pass_produces_correct_output_size() {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let nn = NeuralNetwork::random(&mut rng);
         let inputs = vec![0.5; INPUT_SIZE];
         let outputs = nn.forward(&inputs);
@@ -638,7 +638,7 @@ mod tests {
 
     #[test]
     fn forward_pass_deterministic() {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let nn = NeuralNetwork::random(&mut rng);
         let inputs = vec![0.5; INPUT_SIZE];
         let out1 = nn.forward(&inputs);
@@ -658,7 +658,7 @@ mod tests {
 
     #[test]
     fn strategy_makes_valid_decisions() {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let nn = NeuralNetwork::random(&mut rng);
         let strategy = GeneticStrategy::new(nn.genome, 0);
         let view = make_test_view();
@@ -702,7 +702,7 @@ mod tests {
         let genome = vec![0.0; GENOME_SIZE];
         let strategy = GeneticStrategy::new(genome, 0);
         let view = make_test_view();
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         // All outputs will be 0 (tanh(0)=0, then 0*0+0=0). Should still pick valid positions.
         let flips = strategy.choose_initial_flips(&view, 2, &mut rng);

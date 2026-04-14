@@ -1,4 +1,5 @@
-use rand::seq::SliceRandom;
+use rand::seq::IndexedRandom;
+use rand::prelude::SliceRandom;
 use rand::RngCore;
 
 use crate::card::{CardValue, VisibleSlot};
@@ -699,7 +700,7 @@ mod tests {
 
         let view = make_view(my_board, vec![opp_board]);
         let strategy = StatisticianStrategy;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         // Drew a 3 — both pos 0 and pos 1 give delta of 5 (8-3)
         // Both displace an 8, which is useful to opponent (matches their column)
@@ -734,7 +735,7 @@ mod tests {
         view.discard_piles = vec![vec![-2]];
 
         let strategy = StatisticianStrategy;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         let draw = strategy.choose_draw(&view, &mut rng);
         assert!(

@@ -1,4 +1,5 @@
-use rand::seq::SliceRandom;
+use rand::seq::IndexedRandom;
+use rand::prelude::SliceRandom;
 use rand::RngCore;
 
 use crate::card::{CardValue, VisibleSlot};
@@ -474,7 +475,7 @@ mod tests {
         view.discard_piles = vec![vec![10]];
 
         let strategy = ClearerStrategy;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         // Should take the 10 from discard to complete the column clear
         let draw = strategy.choose_draw(&view, &mut rng);
@@ -501,7 +502,7 @@ mod tests {
         ];
         let view = make_view(board);
         let strategy = ClearerStrategy;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         // Drew a 7 from deck — should place in col 0 to build toward a clear
         let action = strategy.choose_deck_draw_action(&view, 7, &mut rng);
@@ -534,7 +535,7 @@ mod tests {
         ];
         let view = make_view(board);
         let strategy = ClearerStrategy;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         // Drew a 9 — should keep it to complete the column clear
         let action = strategy.choose_deck_draw_action(&view, 9, &mut rng);

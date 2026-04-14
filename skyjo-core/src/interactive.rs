@@ -1,6 +1,6 @@
 use rand::SeedableRng;
 use rand::rngs::StdRng;
-use rand::seq::SliceRandom;
+use rand::prelude::SliceRandom;
 use serde::{Deserialize, Serialize};
 
 use crate::board::PlayerBoard;
@@ -1019,7 +1019,7 @@ mod tests {
                     PlayerAction::InitialFlip { position: pos }
                 }
                 ActionNeeded::ChooseDraw { drawable_piles, .. } => {
-                    if rng.gen_bool(0.5) {
+                    if rng.random_bool(0.5) {
                         PlayerAction::DrawFromDeck
                     } else {
                         PlayerAction::DrawFromDiscard {
@@ -1028,7 +1028,7 @@ mod tests {
                     }
                 }
                 ActionNeeded::ChooseDeckDrawAction { .. } => {
-                    if rng.gen_bool(0.5) {
+                    if rng.random_bool(0.5) {
                         // Find a non-cleared position
                         let state = game.get_full_state();
                         let board = &state.boards[state.current_player];
