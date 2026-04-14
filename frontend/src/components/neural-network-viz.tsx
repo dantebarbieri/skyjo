@@ -755,7 +755,7 @@ function NetworkDiagram({ model }: { model: GeneticModelData }) {
               if (text) text.style.fontWeight = '';
             }}
           >
-            <circle cx={inputNodeCx} cy={g.y} r={6} fill="#6366f1" fillOpacity={0.8} />
+            <circle cx={inputNodeCx} cy={g.y} r={8.5} fill="#6366f1" />
             <text x={inputX} y={g.y + 4} className="fill-current text-muted-foreground" fontSize={10} textAnchor="start">
               {g.label}
             </text>
@@ -863,7 +863,7 @@ function NetworkDiagram({ model }: { model: GeneticModelData }) {
               if (text) text.style.fontWeight = '';
             }}
           >
-            <circle cx={outputNodeCx} cy={g.y} r={6} fill="#f59e0b" fillOpacity={0.8} />
+            <circle cx={outputNodeCx} cy={g.y} r={8.5} fill="#f59e0b" />
             <text x={outputX} y={g.y + 4} className="fill-current text-muted-foreground" fontSize={10} textAnchor="end">
               {g.label}
             </text>
