@@ -11,21 +11,27 @@ use skyjo_core::game::Game;
 use skyjo_core::rules::StandardRules;
 use skyjo_core::strategy::Strategy;
 use skyjo_core::{
-    ClearerStrategy, DefensiveStrategy, GENOME_SIZE, GeneticStrategy, GreedyStrategy, HIDDEN_SIZE,
-    INPUT_GROUPS, INPUT_LABELS, INPUT_SIZE, OUTPUT_GROUPS, OUTPUT_LABELS, OUTPUT_SIZE,
-    RandomStrategy, StatisticianStrategy,
+    ARCHITECTURE_VERSION, ClearerStrategy, DefensiveStrategy, GENOME_SIZE, GeneticStrategy,
+    GreedyStrategy, HIDDEN_SIZE, HIDDEN1_SIZE, HIDDEN2_SIZE, INPUT_GROUPS, INPUT_LABELS,
+    INPUT_SIZE, OUTPUT_GROUPS, OUTPUT_LABELS, OUTPUT_SIZE, RandomStrategy, StatisticianStrategy,
 };
 
 // --- Configuration constants ---
 
-pub const POPULATION_SIZE: usize = 50;
-pub const GAMES_PER_INDIVIDUAL: usize = 10;
-pub const TOURNAMENT_SIZE: usize = 3;
-pub const MUTATION_RATE: f64 = 0.05;
-pub const MUTATION_SIGMA: f32 = 0.3;
-pub const RESET_RATE: f64 = 0.005;
-pub const ELITISM_COUNT: usize = 2;
+pub const POPULATION_SIZE: usize = 100;
+pub const GAMES_PER_INDIVIDUAL: usize = 30;
+pub const TOURNAMENT_SIZE: usize = 5;
+pub const BASE_MUTATION_RATE: f64 = 0.05;
+pub const BASE_MUTATION_SIGMA: f32 = 0.3;
+pub const BASE_RESET_RATE: f64 = 0.005;
+pub const ELITISM_COUNT: usize = 5;
 pub const NUM_OPPONENTS: usize = 3; // opponents per game (4-player games)
+/// Number of recent generations to track for adaptive mutation.
+pub const STAGNATION_WINDOW: usize = 20;
+/// Periodic checkpoint interval (in generations).
+pub const CHECKPOINT_INTERVAL: usize = 1000;
+/// Maximum number of periodic checkpoints to retain (older ones are pruned).
+pub const MAX_PERIODIC_CHECKPOINTS: usize = 10;
 
 // --- Types ---
 
@@ -41,6 +47,12 @@ pub struct SavedGeneration {
     /// Lineage hash identifying which training run produced this genome.
     #[serde(default)]
     pub lineage_hash: String,
+    #[serde(default)]
+    pub architecture_version: u32,
+    /// How this generation was saved: "manual", "milestone", "checkpoint", "training_result", "import".
+    /// Used to distinguish auto-checkpoints (safe to prune) from user saves.
+    #[serde(default)]
+    pub source: String,
 }
 
 /// Summary of a saved generation (without genome, for listing).
@@ -53,6 +65,8 @@ pub struct SavedGenerationInfo {
     pub saved_at: String,
     #[serde(default)]
     pub lineage_hash: String,
+    #[serde(default)]
+    pub architecture_version: u32,
 }
 
 impl From<&SavedGeneration> for SavedGenerationInfo {
@@ -64,6 +78,7 @@ impl From<&SavedGeneration> for SavedGenerationInfo {
             best_fitness: sg.best_fitness,
             saved_at: sg.saved_at.clone(),
             lineage_hash: sg.lineage_hash.clone(),
+            architecture_version: sg.architecture_version,
         }
     }
 }
@@ -74,6 +89,8 @@ pub struct GeneticModelData {
     pub best_genome: Vec<f32>,
     pub input_size: usize,
     pub hidden_size: usize,
+    pub hidden1_size: usize,
+    pub hidden2_size: usize,
     pub output_size: usize,
     pub generation: usize,
     pub total_games_trained: usize,
@@ -85,6 +102,8 @@ pub struct GeneticModelData {
     pub saved_generations: Vec<SavedGeneration>,
     #[serde(default)]
     pub lineage_hash: String,
+    #[serde(default)]
+    pub architecture_version: u32,
 }
 
 impl GeneticModelData {
@@ -93,6 +112,8 @@ impl GeneticModelData {
             best_genome: state.best_genome.clone(),
             input_size: INPUT_SIZE,
             hidden_size: HIDDEN_SIZE,
+            hidden1_size: HIDDEN1_SIZE,
+            hidden2_size: HIDDEN2_SIZE,
             output_size: OUTPUT_SIZE,
             generation: state.generation,
             total_games_trained: state.total_games_trained,
@@ -108,6 +129,7 @@ impl GeneticModelData {
                 .collect(),
             saved_generations: state.saved_generations.clone(),
             lineage_hash: state.lineage_hash.clone(),
+            architecture_version: ARCHITECTURE_VERSION,
         }
     }
 }
@@ -135,6 +157,10 @@ pub struct TrainingStatus {
     pub training_start_fitness: f64,
     /// Lineage hash identifying the current training run.
     pub lineage_hash: String,
+    /// Current adaptive mutation rate.
+    pub current_mutation_rate: f64,
+    /// Current adaptive mutation sigma.
+    pub current_mutation_sigma: f32,
 }
 
 /// Mutable training state, shared behind Arc<Mutex<>>.
@@ -160,6 +186,14 @@ pub struct GeneticTrainingState {
     pub training_start_fitness: f64,
     /// Lineage hash identifying the current training run.
     pub lineage_hash: String,
+    /// Rolling window of best fitness values for stagnation detection.
+    pub fitness_history: Vec<f64>,
+    /// Current adaptive mutation rate (starts at BASE_MUTATION_RATE).
+    pub current_mutation_rate: f64,
+    /// Current adaptive mutation sigma (starts at BASE_MUTATION_SIGMA).
+    pub current_mutation_sigma: f32,
+    /// Current adaptive reset rate (starts at BASE_RESET_RATE).
+    pub current_reset_rate: f64,
 }
 
 impl GeneticTrainingState {
@@ -188,6 +222,10 @@ impl GeneticTrainingState {
             training_target_fitness: 0.0,
             training_start_fitness: 0.0,
             lineage_hash,
+            fitness_history: Vec::new(),
+            current_mutation_rate: BASE_MUTATION_RATE,
+            current_mutation_sigma: BASE_MUTATION_SIGMA,
+            current_reset_rate: BASE_RESET_RATE,
         }
     }
 
@@ -197,6 +235,23 @@ impl GeneticTrainingState {
             match std::fs::read_to_string(&model_path) {
                 Ok(json) => match serde_json::from_str::<GeneticModelData>(&json) {
                     Ok(data) => {
+                        if data.architecture_version != 0
+                            && data.architecture_version != ARCHITECTURE_VERSION
+                        {
+                            tracing::warn!(
+                                "Model architecture version {} does not match current version {}, creating new random model",
+                                data.architecture_version,
+                                ARCHITECTURE_VERSION
+                            );
+                            return Self::new_random(model_path);
+                        }
+                        if data.best_genome.len() != GENOME_SIZE {
+                            tracing::warn!(
+                                "Model genome size {} does not match expected {GENOME_SIZE}, creating new random model",
+                                data.best_genome.len()
+                            );
+                            return Self::new_random(model_path);
+                        }
                         tracing::info!(
                             "Loaded genetic model: generation {}, {} games trained, {} saved generations",
                             data.generation,
@@ -209,7 +264,13 @@ impl GeneticTrainingState {
                         population.push(data.best_genome.clone());
                         for _ in 1..POPULATION_SIZE {
                             let mut child = data.best_genome.clone();
-                            mutate(&mut child, &mut rng);
+                            mutate(
+                                &mut child,
+                                &mut rng,
+                                BASE_MUTATION_RATE,
+                                BASE_MUTATION_SIGMA,
+                                BASE_RESET_RATE,
+                            );
                             population.push(child);
                         }
                         // Backward compat: compute hash if not stored
@@ -235,6 +296,10 @@ impl GeneticTrainingState {
                             training_target_fitness: 0.0,
                             training_start_fitness: 0.0,
                             lineage_hash,
+                            fitness_history: Vec::new(),
+                            current_mutation_rate: BASE_MUTATION_RATE,
+                            current_mutation_sigma: BASE_MUTATION_SIGMA,
+                            current_reset_rate: BASE_RESET_RATE,
                         };
                     }
                     Err(e) => tracing::warn!("Failed to parse genetic model: {e}"),
@@ -272,6 +337,8 @@ impl GeneticTrainingState {
             training_target_fitness: self.training_target_fitness,
             training_start_fitness: self.training_start_fitness,
             lineage_hash: self.lineage_hash.clone(),
+            current_mutation_rate: self.current_mutation_rate,
+            current_mutation_sigma: self.current_mutation_sigma,
         }
     }
 
@@ -299,6 +366,8 @@ impl GeneticTrainingState {
             genome: self.best_genome.clone(),
             saved_at: chrono_now(),
             lineage_hash: self.lineage_hash.clone(),
+            architecture_version: ARCHITECTURE_VERSION,
+            source: "manual".to_string(),
         };
         let info = SavedGenerationInfo::from(&saved);
         self.saved_generations.push(saved);
@@ -338,6 +407,8 @@ impl GeneticTrainingState {
             best_genome: saved.genome.clone(),
             input_size: INPUT_SIZE,
             hidden_size: HIDDEN_SIZE,
+            hidden1_size: HIDDEN1_SIZE,
+            hidden2_size: HIDDEN2_SIZE,
             output_size: OUTPUT_SIZE,
             generation: saved.generation,
             total_games_trained: saved.total_games_trained,
@@ -353,10 +424,12 @@ impl GeneticTrainingState {
                 .collect(),
             saved_generations: Vec::new(), // Don't nest saved generations
             lineage_hash: saved.lineage_hash.clone(),
+            architecture_version: saved.architecture_version,
         })
     }
 
     /// Import an external genome as a saved generation.
+    #[allow(clippy::too_many_arguments)]
     pub fn import_generation(
         &mut self,
         name: String,
@@ -365,6 +438,7 @@ impl GeneticTrainingState {
         total_games_trained: usize,
         best_fitness: f64,
         lineage_hash: Option<String>,
+        architecture_version: Option<u32>,
     ) -> Result<SavedGenerationInfo, String> {
         if genome.len() != GENOME_SIZE {
             return Err(format!(
@@ -384,6 +458,8 @@ impl GeneticTrainingState {
             genome,
             saved_at: chrono_now(),
             lineage_hash,
+            architecture_version: architecture_version.unwrap_or(ARCHITECTURE_VERSION),
+            source: "import".to_string(),
         };
         let info = SavedGenerationInfo::from(&saved);
         self.saved_generations.push(saved);
@@ -412,7 +488,13 @@ impl GeneticTrainingState {
         population.push(saved.genome.clone());
         for _ in 1..POPULATION_SIZE {
             let mut child = saved.genome.clone();
-            mutate(&mut child, &mut rng);
+            mutate(
+                &mut child,
+                &mut rng,
+                BASE_MUTATION_RATE,
+                BASE_MUTATION_SIGMA,
+                BASE_RESET_RATE,
+            );
             population.push(child);
         }
         self.population = population;
@@ -425,6 +507,10 @@ impl GeneticTrainingState {
         } else {
             saved.lineage_hash
         };
+        self.fitness_history.clear();
+        self.current_mutation_rate = BASE_MUTATION_RATE;
+        self.current_mutation_sigma = BASE_MUTATION_SIGMA;
+        self.current_reset_rate = BASE_RESET_RATE;
         save_model(self);
         Ok(())
     }
@@ -441,6 +527,10 @@ impl GeneticTrainingState {
         self.generation = 0;
         self.total_games_trained = 0;
         self.lineage_hash = compute_lineage_hash(&self.best_genome);
+        self.fitness_history.clear();
+        self.current_mutation_rate = BASE_MUTATION_RATE;
+        self.current_mutation_sigma = BASE_MUTATION_SIGMA;
+        self.current_reset_rate = BASE_RESET_RATE;
         save_model(self);
     }
 }
@@ -493,27 +583,43 @@ fn tournament_select(population: &[Vec<f32>], fitnesses: &[f64], rng: &mut impl 
     population[best_idx].clone()
 }
 
-/// Uniform crossover: each gene randomly picked from parent_a or parent_b.
+/// BLX-α blend crossover: for each gene, sample uniformly from the interval
+/// [min(a,b) - α*d, max(a,b) + α*d] where d = |a - b| and α = 0.5.
+/// This explores beyond the parents' range, unlike simple arithmetic crossover.
 fn crossover(parent_a: &[f32], parent_b: &[f32], rng: &mut impl Rng) -> Vec<f32> {
+    const ALPHA: f32 = 0.5;
     parent_a
         .iter()
         .zip(parent_b.iter())
-        .map(|(&a, &b)| if rng.random_bool(0.5) { a } else { b })
+        .map(|(&a, &b)| {
+            let lo = a.min(b);
+            let hi = a.max(b);
+            let d = hi - lo;
+            let expanded_lo = lo - ALPHA * d;
+            let expanded_hi = hi + ALPHA * d;
+            rng.random_range(expanded_lo..=expanded_hi)
+        })
         .collect()
 }
 
 /// Mutate a genome in place with Gaussian perturbation and occasional resets.
-fn mutate(genome: &mut [f32], rng: &mut impl Rng) {
+fn mutate(
+    genome: &mut [f32],
+    rng: &mut impl Rng,
+    mutation_rate: f64,
+    mutation_sigma: f32,
+    reset_rate: f64,
+) {
     for gene in genome.iter_mut() {
         let r: f64 = rng.random();
-        if r < RESET_RATE {
+        if r < reset_rate {
             *gene = rng.random_range(-1.0f32..1.0);
-        } else if r < RESET_RATE + MUTATION_RATE {
+        } else if r < reset_rate + mutation_rate {
             // Box-Muller approximation for normal distribution
             let u1: f32 = rng.random_range(0.0001f32..1.0);
             let u2: f32 = rng.random_range(0.0f32..std::f32::consts::TAU);
             let normal = (-2.0 * u1.ln()).sqrt() * u2.cos();
-            *gene += normal * MUTATION_SIGMA;
+            *gene += normal * mutation_sigma;
         }
     }
 }
@@ -550,7 +656,7 @@ fn select_opponent(
 }
 
 /// Evaluate fitness for a single individual by playing games.
-/// Returns negative average cumulative score (higher = better).
+/// Returns a composite fitness score (higher = better).
 fn evaluate_individual(
     genome: &[f32],
     individual_idx: usize,
@@ -558,13 +664,14 @@ fn evaluate_individual(
     base_seed: u64,
     games_trained: usize,
 ) -> f64 {
-    let mut total_cum_score: i64 = 0;
+    let mut total_score: f64 = 0.0;
+    let mut total_wins: usize = 0;
+    let mut total_score_diff: f64 = 0.0;
     let mut rng = StdRng::seed_from_u64(base_seed);
 
     for game_idx in 0..GAMES_PER_INDIVIDUAL {
         let seed = base_seed.wrapping_add(game_idx as u64);
 
-        // Build strategies: individual at position 0, opponents at 1..
         let mut strategies: Vec<Box<dyn Strategy>> = Vec::with_capacity(1 + NUM_OPPONENTS);
         strategies.push(Box::new(GeneticStrategy::new(
             genome.to_vec(),
@@ -583,36 +690,49 @@ fn evaluate_individual(
         match Game::new(rules, strategies, seed) {
             Ok(game) => match game.play() {
                 Ok(history) => {
-                    let my_score = history.final_scores[0] as i64;
-                    let _min_other = history.final_scores[1..]
+                    let my_score = history.final_scores[0] as f64;
+                    let min_other = history.final_scores[1..]
                         .iter()
                         .copied()
                         .min()
-                        .unwrap_or(i32::MAX) as i64;
+                        .unwrap_or(i32::MAX) as f64;
                     let is_winner = history.winners.contains(&0);
 
-                    // Penalty: if not cumulative winner (ties OK), double the score
-                    let penalized = if !is_winner && my_score > 0 {
-                        my_score * 2
+                    // Base score penalty
+                    let penalized = if !is_winner && my_score > 0.0 {
+                        my_score * 2.0
                     } else {
                         my_score
                     };
-                    total_cum_score += penalized;
+                    total_score += penalized;
+
+                    // Win bonus
+                    if is_winner {
+                        total_wins += 1;
+                    }
+
+                    // Score differential (how much better than best opponent)
+                    total_score_diff += min_other - my_score;
                 }
                 Err(e) => {
                     tracing::warn!("Game play error during training: {e}");
-                    total_cum_score += 200; // Penalty for broken games
+                    total_score += 200.0;
                 }
             },
             Err(e) => {
                 tracing::warn!("Game creation error during training: {e}");
-                total_cum_score += 200;
+                total_score += 200.0;
             }
         }
     }
 
-    // Fitness = negative average score (lower score = higher fitness)
-    -(total_cum_score as f64 / GAMES_PER_INDIVIDUAL as f64)
+    let n = GAMES_PER_INDIVIDUAL as f64;
+    // Fitness = -(avg score) + win bonus + score differential bonus
+    let avg_score = total_score / n;
+    let win_rate = total_wins as f64 / n;
+    let avg_diff = total_score_diff / n;
+
+    -avg_score + (win_rate * 10.0) + (avg_diff * 0.1)
 }
 
 /// Run one generation of the genetic algorithm.
@@ -621,6 +741,9 @@ fn run_generation(
     population: &[Vec<f32>],
     generation_seed: u64,
     games_trained: usize,
+    mutation_rate: f64,
+    mutation_sigma: f32,
+    reset_rate: f64,
 ) -> (Vec<Vec<f32>>, Vec<f64>, usize, usize) {
     let mut rng = StdRng::seed_from_u64(generation_seed);
 
@@ -659,7 +782,13 @@ fn run_generation(
         let parent_a = tournament_select(population, &fitnesses, &mut rng);
         let parent_b = tournament_select(population, &fitnesses, &mut rng);
         let mut child = crossover(&parent_a, &parent_b, &mut rng);
-        mutate(&mut child, &mut rng);
+        mutate(
+            &mut child,
+            &mut rng,
+            mutation_rate,
+            mutation_sigma,
+            reset_rate,
+        );
         next_population.push(child);
     }
 
@@ -693,6 +822,8 @@ fn auto_save_milestone(state: &mut GeneticTrainingState) {
                 genome: state.best_genome.clone(),
                 saved_at: chrono_now(),
                 lineage_hash: state.lineage_hash.clone(),
+                architecture_version: ARCHITECTURE_VERSION,
+                source: "milestone".to_string(),
             };
             state.saved_generations.push(saved);
             tracing::info!("Auto-saved milestone: {name}");
@@ -726,7 +857,16 @@ fn save_model(state: &GeneticTrainingState) {
 pub async fn train_generations(state: Arc<Mutex<GeneticTrainingState>>, num_generations: usize) {
     for generation_i in 0..num_generations {
         // Clone population from state (brief lock)
-        let (population, generation_num, games_trained, target_fitness, mode) = {
+        let (
+            population,
+            generation_num,
+            games_trained,
+            target_fitness,
+            mode,
+            mutation_rate,
+            mutation_sigma,
+            reset_rate,
+        ) = {
             let s = state.lock().await;
             if !s.is_training {
                 tracing::info!("Training was stopped, ending at generation {generation_i}");
@@ -738,6 +878,9 @@ pub async fn train_generations(state: Arc<Mutex<GeneticTrainingState>>, num_gene
                 s.total_games_trained,
                 s.training_target_fitness,
                 s.training_mode.clone(),
+                s.current_mutation_rate,
+                s.current_mutation_sigma,
+                s.current_reset_rate,
             )
         };
 
@@ -745,7 +888,14 @@ pub async fn train_generations(state: Arc<Mutex<GeneticTrainingState>>, num_gene
         let generation_seed = (generation_num as u64).wrapping_mul(7919) ^ 0xDEADBEEF;
         let (new_population, fitnesses, best_idx, games_played) =
             tokio::task::spawn_blocking(move || {
-                run_generation(&population, generation_seed, games_trained)
+                run_generation(
+                    &population,
+                    generation_seed,
+                    games_trained,
+                    mutation_rate,
+                    mutation_sigma,
+                    reset_rate,
+                )
             })
             .await
             .expect("Training task panicked");
@@ -775,6 +925,12 @@ pub async fn train_generations(state: Arc<Mutex<GeneticTrainingState>>, num_gene
                 .unwrap_or(0);
 
             auto_save_milestone(&mut s);
+            update_adaptive_mutation(&mut s);
+
+            // Periodic checkpoint
+            if s.generation % CHECKPOINT_INTERVAL == 0 {
+                auto_save_checkpoint(&mut s);
+            }
 
             tracing::info!(
                 "Generation {} complete: best_fitness={:.2}, total_games={}",
@@ -835,10 +991,103 @@ fn auto_save_training_result(state: &mut GeneticTrainingState) {
         genome: state.best_genome.clone(),
         saved_at: chrono_now(),
         lineage_hash: state.lineage_hash.clone(),
+        architecture_version: ARCHITECTURE_VERSION,
+        source: "training_result".to_string(),
     };
     state.saved_generations.push(saved);
     save_model(state);
     tracing::info!("Auto-saved training result: {name}");
+}
+
+/// Update adaptive mutation parameters based on fitness history.
+fn update_adaptive_mutation(state: &mut GeneticTrainingState) {
+    // Add current best fitness to history
+    if state.best_fitness.is_finite() {
+        state.fitness_history.push(state.best_fitness);
+    }
+
+    // Need at least STAGNATION_WINDOW entries to assess
+    if state.fitness_history.len() < STAGNATION_WINDOW {
+        return;
+    }
+
+    // Keep only the last STAGNATION_WINDOW entries
+    let len = state.fitness_history.len();
+    if len > STAGNATION_WINDOW {
+        state.fitness_history.drain(..len - STAGNATION_WINDOW);
+    }
+
+    // Calculate improvement over the window
+    let oldest = state.fitness_history[0];
+    let newest = *state.fitness_history.last().unwrap();
+    let improvement_pct = if oldest.abs() > 0.01 {
+        ((newest - oldest) / oldest.abs()) * 100.0
+    } else {
+        (newest - oldest) * 100.0
+    };
+
+    // Stagnation: less than 1% improvement over window
+    if improvement_pct < 1.0 {
+        // Increase mutation (bounded)
+        state.current_mutation_rate = (state.current_mutation_rate * 1.2).min(0.15);
+        state.current_mutation_sigma = (state.current_mutation_sigma * 1.2).min(1.0);
+        state.current_reset_rate = (state.current_reset_rate * 1.5).min(0.02);
+    } else {
+        // Good progress — decrease toward baseline
+        state.current_mutation_rate = (state.current_mutation_rate * 0.95).max(BASE_MUTATION_RATE);
+        state.current_mutation_sigma =
+            (state.current_mutation_sigma * 0.95).max(BASE_MUTATION_SIGMA);
+        state.current_reset_rate = (state.current_reset_rate * 0.95).max(BASE_RESET_RATE);
+    }
+}
+
+/// Auto-save at periodic checkpoint intervals.
+fn auto_save_checkpoint(state: &mut GeneticTrainingState) {
+    if state.generation == 0 {
+        return;
+    }
+    let name = format!("Gen {}", state.generation);
+    if state.saved_generations.iter().any(|sg| sg.name == name) {
+        return;
+    }
+    let saved = SavedGeneration {
+        name: name.clone(),
+        generation: state.generation,
+        total_games_trained: state.total_games_trained,
+        best_fitness: if state.best_fitness.is_finite() {
+            state.best_fitness
+        } else {
+            0.0
+        },
+        genome: state.best_genome.clone(),
+        saved_at: chrono_now(),
+        lineage_hash: state.lineage_hash.clone(),
+        architecture_version: ARCHITECTURE_VERSION,
+        source: "checkpoint".to_string(),
+    };
+    state.saved_generations.push(saved);
+    tracing::info!("Periodic checkpoint saved: {name}");
+
+    // Prune old periodic checkpoints using the source field.
+    let mut periodic: Vec<usize> = state
+        .saved_generations
+        .iter()
+        .enumerate()
+        .filter(|(_, sg)| sg.source == "checkpoint")
+        .map(|(i, _)| i)
+        .collect();
+
+    // Remove oldest periodic checkpoints beyond the cap
+    if periodic.len() > MAX_PERIODIC_CHECKPOINTS {
+        let to_remove = periodic.len() - MAX_PERIODIC_CHECKPOINTS;
+        // Remove from the front (oldest), but indices shift as we remove
+        periodic.truncate(to_remove);
+        // Remove in reverse order to keep indices valid
+        for &idx in periodic.iter().rev() {
+            state.saved_generations.remove(idx);
+        }
+        tracing::info!("Pruned {to_remove} old periodic checkpoint(s)");
+    }
 }
 
 #[cfg(test)]
@@ -1034,6 +1283,7 @@ mod tests {
                 10000,
                 -30.0,
                 Some("abcd1234".to_string()),
+                None,
             )
             .unwrap();
         assert_eq!(info.name, "imported");
@@ -1050,7 +1300,7 @@ mod tests {
     fn import_generation_rejects_wrong_genome_size() {
         let mut state = test_state("import_bad_size");
         let bad_genome = vec![0.0_f32; 10]; // Wrong size
-        let result = state.import_generation("bad".to_string(), bad_genome, 0, 0, 0.0, None);
+        let result = state.import_generation("bad".to_string(), bad_genome, 0, 0, 0.0, None, None);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Invalid genome size"));
         cleanup(&state);
@@ -1061,9 +1311,9 @@ mod tests {
         let mut state = test_state("import_dup");
         let genome = vec![0.5_f32; GENOME_SIZE];
         state
-            .import_generation("dup".to_string(), genome.clone(), 1, 100, -20.0, None)
+            .import_generation("dup".to_string(), genome.clone(), 1, 100, -20.0, None, None)
             .unwrap();
-        let result = state.import_generation("dup".to_string(), genome, 2, 200, -10.0, None);
+        let result = state.import_generation("dup".to_string(), genome, 2, 200, -10.0, None, None);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("already exists"));
         cleanup(&state);
@@ -1074,7 +1324,15 @@ mod tests {
         let mut state = test_state("get_saved_genome");
         let genome = vec![0.3_f32; GENOME_SIZE];
         state
-            .import_generation("sg_test".to_string(), genome.clone(), 5, 5000, -25.0, None)
+            .import_generation(
+                "sg_test".to_string(),
+                genome.clone(),
+                5,
+                5000,
+                -25.0,
+                None,
+                None,
+            )
             .unwrap();
 
         let (g, games) = state.get_saved_genome("sg_test").unwrap();
@@ -1094,11 +1352,18 @@ mod tests {
         let parent_b: Vec<f32> = (0..GENOME_SIZE).map(|i| -(i as f32)).collect();
         let child = crossover(&parent_a, &parent_b, &mut rng);
         assert_eq!(child.len(), GENOME_SIZE);
-        // Each gene should come from one of the parents
+        // BLX-α: each gene should be within the expanded interval [min - α*d, max + α*d]
         for (i, &gene) in child.iter().enumerate() {
+            let a = parent_a[i];
+            let b = parent_b[i];
+            let lo = a.min(b);
+            let hi = a.max(b);
+            let d = hi - lo;
+            let expanded_lo = lo - 0.5 * d;
+            let expanded_hi = hi + 0.5 * d;
             assert!(
-                gene == parent_a[i] || gene == parent_b[i],
-                "Gene {i} should come from a parent"
+                gene >= expanded_lo && gene <= expanded_hi,
+                "Gene {i} should be within BLX-α range [{expanded_lo}, {expanded_hi}], got {gene}"
             );
         }
     }
@@ -1108,7 +1373,13 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(99);
         let mut genome = vec![0.0_f32; GENOME_SIZE];
         let original = genome.clone();
-        mutate(&mut genome, &mut rng);
+        mutate(
+            &mut genome,
+            &mut rng,
+            BASE_MUTATION_RATE,
+            BASE_MUTATION_SIGMA,
+            BASE_RESET_RATE,
+        );
         assert_eq!(genome.len(), GENOME_SIZE);
         // At least some genes should have mutated (statistically near-certain)
         let changed = genome
@@ -1116,7 +1387,7 @@ mod tests {
             .zip(original.iter())
             .filter(|(a, b)| a != b)
             .count();
-        // With MUTATION_RATE=0.05 + RESET_RATE=0.005, about 5.5% should change
+        // With BASE_MUTATION_RATE=0.05 + BASE_RESET_RATE=0.005, about 5.5% should change
         assert!(changed > 0, "Some genes should have been mutated");
     }
 

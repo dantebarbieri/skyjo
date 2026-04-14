@@ -1587,13 +1587,13 @@ mod tests {
 
     #[test]
     fn make_strategy_genetic_with_genome() {
-        let genome = vec![0.0f32; 2855];
+        let genome = vec![0.0f32; skyjo_core::GENOME_SIZE];
         assert!(make_strategy("Genetic", Some(&genome), 100).is_ok());
     }
 
     #[test]
     fn make_strategy_genetic_generation_variant() {
-        let genome = vec![0.0f32; 2855];
+        let genome = vec![0.0f32; skyjo_core::GENOME_SIZE];
         assert!(make_strategy("Genetic:Gen 5", Some(&genome), 100).is_ok());
     }
 

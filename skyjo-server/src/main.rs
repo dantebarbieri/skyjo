@@ -177,18 +177,29 @@ async fn genetic_model(State(state): State<AppState>) -> Json<genetic::GeneticMo
 #[serde(tag = "mode")]
 enum TrainRequest {
     #[serde(rename = "generations")]
-    ForGenerations { generations: usize },
+    ForGenerations {
+        generations: usize,
+        #[serde(default)]
+        unlimited: bool,
+    },
     #[serde(rename = "until_generation")]
-    UntilGeneration { target_generation: usize },
+    UntilGeneration {
+        target_generation: usize,
+        #[serde(default)]
+        unlimited: bool,
+    },
     #[serde(rename = "until_fitness")]
     UntilFitness {
         target_fitness: f64,
         max_generations: Option<usize>,
+        #[serde(default)]
+        unlimited: bool,
     },
 }
 
 async fn genetic_train(
     State(state): State<AppState>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Json(req): Json<TrainRequest>,
 ) -> Result<Json<genetic::TrainingStatus>, (StatusCode, String)> {
     let mut s = state.genetic.lock().await;
@@ -196,11 +207,25 @@ async fn genetic_train(
         return Ok(Json(s.status()));
     }
 
+    // Only allow unlimited training from localhost
+    let is_local = addr.ip().is_loopback();
+
     let (generations, mode, target_fitness) = match req {
-        TrainRequest::ForGenerations { generations } => {
-            (generations.min(10_000), "generations".to_string(), 0.0)
+        TrainRequest::ForGenerations {
+            generations,
+            unlimited,
+        } => {
+            let gens = if unlimited && is_local {
+                generations.min(10_000_000)
+            } else {
+                generations.min(50_000)
+            };
+            (gens, "generations".to_string(), 0.0)
         }
-        TrainRequest::UntilGeneration { target_generation } => {
+        TrainRequest::UntilGeneration {
+            target_generation,
+            unlimited,
+        } => {
             let current = s.generation;
             if target_generation <= current {
                 return Err((
@@ -210,21 +235,29 @@ async fn genetic_train(
                     ),
                 ));
             }
-            let gens = (target_generation - current).min(10_000);
+            let gens = if unlimited && is_local {
+                (target_generation - current).min(10_000_000)
+            } else {
+                (target_generation - current).min(50_000)
+            };
             (gens, "until_generation".to_string(), 0.0)
         }
         TrainRequest::UntilFitness {
             target_fitness,
             max_generations,
+            unlimited,
         } => {
-            let cap = max_generations.unwrap_or(100_000).min(100_000);
+            let allow_unlimited = unlimited && is_local;
+            let default_cap = if allow_unlimited { 10_000_000 } else { 50_000 };
+            let max_cap = if allow_unlimited { 10_000_000 } else { 50_000 };
+            let cap = max_generations.unwrap_or(default_cap).min(max_cap);
             (cap, "until_fitness".to_string(), target_fitness)
         }
     };
 
     s.is_training = true;
     s.training_start_generation = s.generation;
-    s.training_target_generation = s.generation + generations;
+    s.training_target_generation = s.generation.saturating_add(generations);
     s.training_mode = mode;
     s.training_target_fitness = target_fitness;
     s.training_start_fitness = if s.best_fitness.is_finite() {
@@ -327,6 +360,7 @@ struct ImportRequest {
     total_games_trained: Option<usize>,
     best_fitness: Option<f64>,
     lineage_hash: Option<String>,
+    architecture_version: Option<u32>,
 }
 
 async fn genetic_import(
@@ -341,6 +375,7 @@ async fn genetic_import(
         req.total_games_trained.unwrap_or(0),
         req.best_fitness.unwrap_or(0.0),
         req.lineage_hash,
+        req.architecture_version,
     )
     .map(Json)
     .map_err(|e| (StatusCode::BAD_REQUEST, e))
