@@ -4,16 +4,16 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
-use axum::extract::{ConnectInfo, Path, Query, State, WebSocketUpgrade};
-use axum::http::StatusCode;
-use axum::response::{Json, Response};
-use axum::routing::{get, post};
+use axum::extract::{ConnectInfo, Extension, Path, Query, State, WebSocketUpgrade};
+use axum::http::{HeaderValue, StatusCode, header};
+use axum::response::{IntoResponse, Json, Response};
+use axum::routing::{delete, get, patch, post};
 use clap::Parser;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tower_http::compression::CompressionLayer;
-use tower_http::services::{ServeDir, ServeFile};
 
+use skyjo_server::auth::{self, AuthUser, PermissionLevel};
 use skyjo_server::error::ServerError;
 use skyjo_server::genetic::{self, GeneticTrainingState};
 use skyjo_server::lobby::Lobby;
@@ -30,21 +30,37 @@ struct Args {
     #[arg(long, default_value = "8080")]
     port: u16,
 
-    /// Directory containing static frontend files.
-    #[arg(long, default_value = "./static")]
-    static_dir: PathBuf,
+    /// Directory containing static frontend files (for single-binary mode).
+    #[arg(long)]
+    static_dir: Option<PathBuf>,
 
     /// Path to the genetic model file.
     #[arg(long)]
     genetic_model_path: Option<PathBuf>,
 
-    /// Directory for persistent data (SQLite DB, genetic model)
+    /// Directory for persistent data (genetic model files)
     #[arg(long, env = "SKYJO_DATA_DIR", default_value = "./data")]
     data_dir: PathBuf,
 
-    /// API key for genetic endpoints (env: SKYJO_GENETIC_API_KEY). If not set, mutation endpoints return 403.
-    #[arg(long, env = "SKYJO_GENETIC_API_KEY")]
-    genetic_api_key: Option<String>,
+    /// PostgreSQL connection URL
+    #[arg(long, env = "DATABASE_URL")]
+    database_url: String,
+
+    /// JWT signing secret
+    #[arg(long, env = "SKYJO_JWT_SECRET")]
+    jwt_secret: Option<String>,
+
+    /// Default admin username
+    #[arg(long, env = "SKYJO_ADMIN_USERNAME", default_value = "admin")]
+    admin_username: String,
+
+    /// Default admin password
+    #[arg(
+        long,
+        env = "SKYJO_ADMIN_PASSWORD",
+        default_value = "Skyjo-Change-Me-1!"
+    )]
+    admin_password: String,
 }
 
 #[tokio::main]
@@ -70,36 +86,56 @@ async fn main() {
         genetic_model_path,
     )));
 
-    // Initialize persistence (SQLite)
-    let db_path = args.data_dir.join("skyjo.db");
-    let persistence = match Persistence::open(&db_path) {
-        Ok(p) => {
-            tracing::info!("Opened persistence database at {db_path:?}");
-            Some(Arc::new(p))
+    // Initialize persistence (PostgreSQL)
+    let persistence = Persistence::connect(&args.database_url)
+        .await
+        .expect("Failed to connect to PostgreSQL database");
+    tracing::info!("Connected to PostgreSQL database");
+
+    // JWT secret — generate one if not provided (warn about it)
+    let jwt_secret = args.jwt_secret.unwrap_or_else(|| {
+        let secret = uuid::Uuid::new_v4().to_string();
+        tracing::warn!(
+            "No SKYJO_JWT_SECRET set — generated ephemeral secret. Sessions will not survive restart."
+        );
+        secret
+    });
+
+    // Seed admin account
+    match auth::seed_admin_account(
+        persistence.pool(),
+        &args.admin_username,
+        &args.admin_password,
+    )
+    .await
+    {
+        Ok(true) => {
+            tracing::info!("Created initial admin account: {}", args.admin_username);
+            if args.admin_password == "Skyjo-Change-Me-1!" {
+                tracing::warn!("Admin account is using default password — change it immediately!");
+            }
+        }
+        Ok(false) => {
+            tracing::info!("Admin account already exists, skipping seed");
         }
         Err(e) => {
-            tracing::warn!("Failed to open persistence database: {e}. Snapshots disabled.");
-            None
+            tracing::error!("Failed to seed admin account: {e}");
         }
-    };
+    }
 
     let rate_limiter = Arc::new(skyjo_server::rate_limit::RateLimiter::new());
 
     let app_state = Arc::new(AppStateInner {
         lobby: Lobby::new(100),
         genetic: genetic_state,
-        genetic_api_key: args.genetic_api_key.clone(),
         persistence: persistence.clone(),
         rate_limiter,
+        jwt_secret,
     });
 
     // Restore rooms from snapshots (best-effort crash recovery)
-    if let Some(ref db) = persistence {
-        let db_clone = db.clone();
-        let snapshots = tokio::task::spawn_blocking(move || db_clone.load_all_room_snapshots())
-            .await
-            .expect("spawn_blocking panicked");
-        match snapshots {
+    {
+        match persistence.load_all_room_snapshots().await {
             Ok(snapshots) => {
                 let count = snapshots.len();
                 for (code, data) in snapshots {
@@ -126,12 +162,9 @@ async fn main() {
                         }
                     }
                     // Clean up snapshot after restoration attempt
-                    let db_clone = db.clone();
-                    let code_clone = code.clone();
-                    let _ = tokio::task::spawn_blocking(move || {
-                        db_clone.delete_room_snapshot(&code_clone)
-                    })
-                    .await;
+                    if let Err(e) = persistence.delete_room_snapshot(&code).await {
+                        tracing::warn!(room = %code, "Failed to delete snapshot: {e}");
+                    }
                 }
                 if count > 0 {
                     tracing::info!("Processed {count} room snapshot(s) from previous session");
@@ -159,29 +192,23 @@ async fn main() {
             cleanup_state.rate_limiter.cleanup(Duration::from_secs(300));
 
             // Periodic snapshot of active in-game rooms
-            if let Some(ref db) = cleanup_persistence {
-                for entry in cleanup_state.lobby.rooms.iter() {
-                    let code = entry.key().clone();
-                    if let Ok(room) = entry.value().try_lock()
-                        && room.phase == skyjo_server::room::RoomPhase::InGame
+            for entry in cleanup_state.lobby.rooms.iter() {
+                let code = entry.key().clone();
+                if let Ok(room) = entry.value().try_lock()
+                    && room.phase == skyjo_server::room::RoomPhase::InGame
+                {
+                    let snapshot = room.to_snapshot();
+                    if let Ok(json) = serde_json::to_string(&snapshot)
+                        && let Err(e) = cleanup_persistence.save_room_snapshot(&code, &json).await
                     {
-                        let snapshot = room.to_snapshot();
-                        if let Ok(json) = serde_json::to_string(&snapshot) {
-                            let db = db.clone();
-                            let code_clone = code.clone();
-                            tokio::task::spawn_blocking(move || {
-                                if let Err(e) = db.save_room_snapshot(&code_clone, &json) {
-                                    tracing::warn!(room = %code_clone, "Failed to save snapshot: {e}");
-                                }
-                            });
-                        }
+                        tracing::warn!(room = %code, "Failed to save snapshot: {e}");
                     }
                 }
             }
         }
     });
 
-    // Genetic mutation routes (require auth)
+    // Genetic mutation routes (require moderator+ auth)
     let genetic_mutation_routes = Router::new()
         .route("/genetic/train", post(genetic_train))
         .route("/genetic/stop", post(genetic_stop))
@@ -189,14 +216,49 @@ async fn main() {
         .route("/genetic/load", post(genetic_load))
         .route("/genetic/saved", post(genetic_save))
         .route("/genetic/saved/import", post(genetic_import))
-        .route(
-            "/genetic/saved/{name}",
-            axum::routing::delete(genetic_saved_delete),
-        )
+        .route("/genetic/saved/{name}", delete(genetic_saved_delete))
         .layer(axum::middleware::from_fn_with_state(
             app_state.clone(),
-            skyjo_server::genetic_auth_middleware,
+            skyjo_server::require_moderator_middleware,
         ));
+
+    // Admin routes (require admin auth)
+    let admin_routes = Router::new()
+        .route("/admin/users", get(admin_list_users))
+        .route("/admin/users", post(admin_create_user))
+        .route(
+            "/admin/users/{id}/permission",
+            patch(admin_update_permission),
+        )
+        .route("/admin/users/{id}", delete(admin_delete_user))
+        .route("/admin/settings", get(admin_get_settings))
+        .route("/admin/settings", patch(admin_update_settings))
+        .layer(axum::middleware::from_fn_with_state(
+            app_state.clone(),
+            skyjo_server::require_admin_middleware,
+        ));
+
+    // Authenticated user routes
+    let user_routes = Router::new()
+        .route("/users/me/password", patch(update_my_password))
+        .route("/users/me/display-name", patch(update_my_display_name))
+        .layer(axum::middleware::from_fn_with_state(
+            app_state.clone(),
+            skyjo_server::require_auth_middleware,
+        ));
+
+    // Auth routes (public)
+    let auth_routes = Router::new()
+        .route("/auth/login", post(auth_login))
+        .route("/auth/refresh", post(auth_refresh))
+        .route("/auth/logout", post(auth_logout))
+        .route(
+            "/auth/me",
+            get(auth_me).layer(axum::middleware::from_fn_with_state(
+                app_state.clone(),
+                skyjo_server::require_auth_middleware,
+            )),
+        );
 
     // API routes
     let api_routes = Router::new()
@@ -208,26 +270,45 @@ async fn main() {
         .route("/genetic/status", get(skyjo_server::genetic_status))
         .route("/genetic/saved", get(genetic_saved_list))
         .route("/genetic/saved/{name}/model", get(genetic_saved_model))
-        .merge(genetic_mutation_routes);
+        .merge(genetic_mutation_routes)
+        .merge(admin_routes)
+        .merge(user_routes)
+        .merge(auth_routes);
 
-    // SPA fallback: serve index.html for any non-file route
-    let index_path = args.static_dir.join("index.html");
-    let static_service =
-        ServeDir::new(&args.static_dir).not_found_service(ServeFile::new(&index_path));
+    // Build the app — optionally serve static files for single-binary mode
+    let app = if let Some(ref static_dir) = args.static_dir {
+        use tower_http::services::{ServeDir, ServeFile};
+        let index_path = static_dir.join("index.html");
+        let static_service =
+            ServeDir::new(static_dir).not_found_service(ServeFile::new(&index_path));
 
-    let app = Router::new()
-        .nest("/api", api_routes)
-        .fallback_service(static_service)
-        .layer(axum::middleware::from_fn_with_state(
-            app_state.clone(),
-            skyjo_server::rate_limit_middleware,
-        ))
-        .layer(CompressionLayer::new())
-        .with_state(app_state.clone());
+        Router::new()
+            .nest("/api", api_routes)
+            .fallback_service(static_service)
+            .layer(axum::middleware::from_fn_with_state(
+                app_state.clone(),
+                skyjo_server::rate_limit_middleware,
+            ))
+            .layer(CompressionLayer::new())
+            .with_state(app_state.clone())
+    } else {
+        Router::new()
+            .nest("/api", api_routes)
+            .layer(axum::middleware::from_fn_with_state(
+                app_state.clone(),
+                skyjo_server::rate_limit_middleware,
+            ))
+            .layer(CompressionLayer::new())
+            .with_state(app_state.clone())
+    };
 
     let addr = format!("0.0.0.0:{}", args.port);
     tracing::info!("Starting server on {addr}");
-    tracing::info!("Serving static files from {:?}", args.static_dir);
+    if let Some(ref static_dir) = args.static_dir {
+        tracing::info!("Serving static files from {:?}", static_dir);
+    } else {
+        tracing::info!("Static file serving disabled (use --static-dir to enable)");
+    }
 
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
@@ -278,9 +359,7 @@ async fn main() {
 
             // Snapshot rooms that have active players or are in-game
             let has_connected = room.players.iter().any(|p| p.connected);
-            let snapshot_json = if (room.phase != RoomPhase::Lobby || has_connected)
-                && shutdown_persistence.is_some()
-            {
+            let snapshot_json = if room.phase != RoomPhase::Lobby || has_connected {
                 serde_json::to_string(&room.to_snapshot()).ok()
             } else {
                 None
@@ -288,25 +367,14 @@ async fn main() {
 
             drop(room);
 
-            if let (Some(db), Some(json)) = (shutdown_persistence.as_ref(), snapshot_json) {
-                let db = db.clone();
-                let code_clone = code.clone();
-                match tokio::task::spawn_blocking(move || db.save_room_snapshot(&code_clone, &json))
-                    .await
-                {
-                    Ok(Ok(())) => {
+            if let Some(json) = snapshot_json {
+                match shutdown_persistence.save_room_snapshot(&code, &json).await {
+                    Ok(()) => {
                         snapshot_count += 1;
-                    }
-                    Ok(Err(err)) => {
-                        tracing::warn!(
-                            "Failed to persist snapshot for room {} during shutdown: {}",
-                            code,
-                            err
-                        );
                     }
                     Err(err) => {
                         tracing::warn!(
-                            "Snapshot task failed for room {} during shutdown: {}",
+                            "Failed to persist snapshot for room {} during shutdown: {}",
                             code,
                             err
                         );
@@ -609,4 +677,405 @@ async fn genetic_saved_model(
     s.get_saved_generation_model(&name)
         .map(Json)
         .map_err(|e| (StatusCode::NOT_FOUND, e))
+}
+
+// --- Auth Handlers ---
+
+#[derive(Deserialize)]
+struct LoginRequest {
+    username: String,
+    password: String,
+}
+
+#[derive(Serialize)]
+struct LoginResponse {
+    access_token: String,
+    user: UserInfo,
+}
+
+#[derive(Serialize)]
+struct UserInfo {
+    id: String,
+    username: String,
+    display_name: String,
+    permission: PermissionLevel,
+}
+
+impl From<&auth::User> for UserInfo {
+    fn from(u: &auth::User) -> Self {
+        Self {
+            id: u.id.to_string(),
+            username: u.username.clone(),
+            display_name: u.display_name.clone(),
+            permission: u.permission_level,
+        }
+    }
+}
+
+async fn auth_login(
+    State(state): State<AppState>,
+    Json(req): Json<LoginRequest>,
+) -> Result<Response, ServerError> {
+    let user = auth::find_user_by_username(state.persistence.pool(), &req.username)
+        .await?
+        .ok_or(ServerError::Unauthorized)?;
+
+    if !auth::verify_password(&req.password, &user.password_hash)? {
+        return Err(ServerError::Unauthorized);
+    }
+
+    let access_token = auth::create_access_token(&user, &state.jwt_secret)?;
+
+    // Create refresh token
+    let refresh_token = auth::generate_refresh_token();
+    let token_hash = auth::hash_refresh_token(&refresh_token);
+    let expires_at = auth::refresh_token_expiry();
+    auth::store_refresh_token(state.persistence.pool(), user.id, &token_hash, expires_at).await?;
+
+    let body = LoginResponse {
+        access_token,
+        user: UserInfo::from(&user),
+    };
+
+    let mut response = Json(body).into_response();
+    let cookie = format!(
+        "refresh_token={}; HttpOnly; Secure; SameSite=Strict; Path=/api/auth; Max-Age={}",
+        refresh_token,
+        7 * 24 * 60 * 60
+    );
+    response
+        .headers_mut()
+        .insert(header::SET_COOKIE, HeaderValue::from_str(&cookie).unwrap());
+    Ok(response)
+}
+
+async fn auth_refresh(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> Result<Response, ServerError> {
+    // Extract refresh token from cookie
+    let cookie_header = headers
+        .get(axum::http::header::COOKIE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+
+    let refresh_token = cookie_header
+        .split(';')
+        .filter_map(|c| {
+            let c = c.trim();
+            c.strip_prefix("refresh_token=")
+        })
+        .next()
+        .ok_or(ServerError::Unauthorized)?;
+
+    let token_hash = auth::hash_refresh_token(refresh_token);
+
+    let user_id = auth::validate_refresh_token(state.persistence.pool(), &token_hash)
+        .await?
+        .ok_or(ServerError::Unauthorized)?;
+
+    // Revoke old refresh token
+    auth::revoke_refresh_token(state.persistence.pool(), &token_hash).await?;
+
+    let user = auth::find_user_by_id(state.persistence.pool(), user_id)
+        .await?
+        .ok_or(ServerError::Unauthorized)?;
+
+    let access_token = auth::create_access_token(&user, &state.jwt_secret)?;
+
+    // Issue new refresh token (rotation)
+    let new_refresh_token = auth::generate_refresh_token();
+    let new_token_hash = auth::hash_refresh_token(&new_refresh_token);
+    let expires_at = auth::refresh_token_expiry();
+    auth::store_refresh_token(
+        state.persistence.pool(),
+        user.id,
+        &new_token_hash,
+        expires_at,
+    )
+    .await?;
+
+    let body = LoginResponse {
+        access_token,
+        user: UserInfo::from(&user),
+    };
+
+    let mut response = Json(body).into_response();
+    let cookie = format!(
+        "refresh_token={}; HttpOnly; Secure; SameSite=Strict; Path=/api/auth; Max-Age={}",
+        new_refresh_token,
+        7 * 24 * 60 * 60
+    );
+    response
+        .headers_mut()
+        .insert(header::SET_COOKIE, HeaderValue::from_str(&cookie).unwrap());
+    Ok(response)
+}
+
+async fn auth_logout(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> Result<Response, ServerError> {
+    let cookie_header = headers
+        .get(axum::http::header::COOKIE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+
+    if let Some(refresh_token) = cookie_header
+        .split(';')
+        .filter_map(|c| {
+            let c = c.trim();
+            c.strip_prefix("refresh_token=")
+        })
+        .next()
+    {
+        let token_hash = auth::hash_refresh_token(refresh_token);
+        auth::revoke_refresh_token(state.persistence.pool(), &token_hash).await?;
+    }
+
+    let mut response = Json(serde_json::json!({"ok": true})).into_response();
+    response.headers_mut().insert(
+        header::SET_COOKIE,
+        HeaderValue::from_static(
+            "refresh_token=; HttpOnly; Secure; SameSite=Strict; Path=/api/auth; Max-Age=0",
+        ),
+    );
+    Ok(response)
+}
+
+async fn auth_me(Extension(user): Extension<AuthUser>) -> Json<UserInfo> {
+    Json(UserInfo {
+        id: user.id.to_string(),
+        username: user.username,
+        display_name: user.display_name,
+        permission: user.permission,
+    })
+}
+
+// --- Admin Handlers ---
+
+#[derive(Serialize)]
+struct AdminUserInfo {
+    id: String,
+    username: String,
+    display_name: String,
+    permission: PermissionLevel,
+    created_at: String,
+}
+
+async fn admin_list_users(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<AdminUserInfo>>, ServerError> {
+    let users = auth::list_all_users(state.persistence.pool()).await?;
+    let infos: Vec<AdminUserInfo> = users
+        .iter()
+        .map(|u| AdminUserInfo {
+            id: u.id.to_string(),
+            username: u.username.clone(),
+            display_name: u.display_name.clone(),
+            permission: u.permission_level,
+            created_at: u.created_at.to_rfc3339(),
+        })
+        .collect();
+    Ok(Json(infos))
+}
+
+#[derive(Deserialize)]
+struct CreateUserRequest {
+    username: String,
+    display_name: Option<String>,
+    permission: Option<PermissionLevel>,
+}
+
+#[derive(Serialize)]
+struct CreateUserResponse {
+    user: AdminUserInfo,
+    password: String,
+}
+
+async fn admin_create_user(
+    State(state): State<AppState>,
+    Json(req): Json<CreateUserRequest>,
+) -> Result<Json<CreateUserResponse>, ServerError> {
+    let username = req.username.trim().to_string();
+    if username.is_empty() {
+        return Err(ServerError::InvalidAction(
+            "Username cannot be empty".to_string(),
+        ));
+    }
+
+    let password = auth::generate_random_password();
+    let display_name = req.display_name.unwrap_or_else(|| username.clone());
+    let permission = req.permission.unwrap_or(PermissionLevel::User);
+
+    let user = auth::create_user(
+        state.persistence.pool(),
+        &username,
+        &password,
+        &display_name,
+        permission,
+    )
+    .await?;
+
+    Ok(Json(CreateUserResponse {
+        user: AdminUserInfo {
+            id: user.id.to_string(),
+            username: user.username,
+            display_name: user.display_name,
+            permission: user.permission_level,
+            created_at: user.created_at.to_rfc3339(),
+        },
+        password,
+    }))
+}
+
+#[derive(Deserialize)]
+struct UpdatePermissionRequest {
+    permission: PermissionLevel,
+}
+
+async fn admin_update_permission(
+    State(state): State<AppState>,
+    Extension(admin): Extension<AuthUser>,
+    Path(user_id): Path<uuid::Uuid>,
+    Json(req): Json<UpdatePermissionRequest>,
+) -> Result<Json<serde_json::Value>, ServerError> {
+    if admin.id == user_id {
+        return Err(ServerError::InvalidAction(
+            "Cannot change your own permissions".to_string(),
+        ));
+    }
+
+    auth::update_user_permission(state.persistence.pool(), user_id, req.permission).await?;
+
+    Ok(Json(serde_json::json!({"ok": true})))
+}
+
+async fn admin_delete_user(
+    State(state): State<AppState>,
+    Extension(admin): Extension<AuthUser>,
+    Path(user_id): Path<uuid::Uuid>,
+) -> Result<Json<serde_json::Value>, ServerError> {
+    if admin.id == user_id {
+        return Err(ServerError::InvalidAction(
+            "Cannot delete your own account".to_string(),
+        ));
+    }
+
+    // Revoke all their tokens first
+    auth::revoke_all_user_tokens(state.persistence.pool(), user_id).await?;
+    auth::delete_user(state.persistence.pool(), user_id).await?;
+
+    Ok(Json(serde_json::json!({"deleted": user_id.to_string()})))
+}
+
+#[derive(Serialize)]
+struct AppSettings {
+    registration_enabled: bool,
+}
+
+async fn admin_get_settings(
+    State(state): State<AppState>,
+) -> Result<Json<AppSettings>, ServerError> {
+    let reg = auth::get_app_setting(state.persistence.pool(), "registration_enabled")
+        .await?
+        .unwrap_or_else(|| "false".to_string());
+
+    Ok(Json(AppSettings {
+        registration_enabled: reg == "true",
+    }))
+}
+
+#[derive(Deserialize)]
+struct UpdateSettingsRequest {
+    registration_enabled: Option<bool>,
+}
+
+async fn admin_update_settings(
+    State(state): State<AppState>,
+    Json(req): Json<UpdateSettingsRequest>,
+) -> Result<Json<AppSettings>, ServerError> {
+    if let Some(reg) = req.registration_enabled {
+        auth::set_app_setting(
+            state.persistence.pool(),
+            "registration_enabled",
+            if reg { "true" } else { "false" },
+        )
+        .await?;
+    }
+
+    let reg = auth::get_app_setting(state.persistence.pool(), "registration_enabled")
+        .await?
+        .unwrap_or_else(|| "false".to_string());
+
+    Ok(Json(AppSettings {
+        registration_enabled: reg == "true",
+    }))
+}
+
+// --- User Self-Service Handlers ---
+
+#[derive(Deserialize)]
+struct UpdatePasswordRequest {
+    current_password: String,
+    new_password: String,
+}
+
+async fn update_my_password(
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+    Json(req): Json<UpdatePasswordRequest>,
+) -> Result<Json<serde_json::Value>, ServerError> {
+    let user = auth::find_user_by_id(state.persistence.pool(), auth_user.id)
+        .await?
+        .ok_or(ServerError::Unauthorized)?;
+
+    if !auth::verify_password(&req.current_password, &user.password_hash)? {
+        return Err(ServerError::InvalidAction(
+            "Current password is incorrect".to_string(),
+        ));
+    }
+
+    if req.new_password.len() < 8 {
+        return Err(ServerError::InvalidAction(
+            "New password must be at least 8 characters".to_string(),
+        ));
+    }
+
+    let new_hash = auth::hash_password(&req.new_password)?;
+    auth::update_user_password(state.persistence.pool(), auth_user.id, &new_hash).await?;
+
+    // Revoke all refresh tokens (force re-login)
+    auth::revoke_all_user_tokens(state.persistence.pool(), auth_user.id).await?;
+
+    Ok(Json(serde_json::json!({"ok": true})))
+}
+
+#[derive(Deserialize)]
+struct UpdateDisplayNameRequest {
+    display_name: String,
+}
+
+async fn update_my_display_name(
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+    Json(req): Json<UpdateDisplayNameRequest>,
+) -> Result<Json<serde_json::Value>, ServerError> {
+    let display_name = req.display_name.trim().to_string();
+    if display_name.is_empty() {
+        return Err(ServerError::InvalidAction(
+            "Display name cannot be empty".to_string(),
+        ));
+    }
+    if display_name.len() > 32 {
+        return Err(ServerError::InvalidAction(
+            "Display name must be 32 characters or fewer".to_string(),
+        ));
+    }
+
+    auth::update_user_display_name(state.persistence.pool(), auth_user.id, &display_name).await?;
+
+    Ok(Json(
+        serde_json::json!({"ok": true, "display_name": display_name}),
+    ))
 }
