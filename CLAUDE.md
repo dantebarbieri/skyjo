@@ -89,7 +89,7 @@ Thin wasm-bindgen layer exposing simulation, interactive play, and genetic model
 - `set_genetic_genome(model_json)` — load a genome for the Genetic strategy to use
 - `is_genetic_loaded()` — check if a genome is loaded
 
-Config structs: `WasmSimConfig { num_games, seed, strategies[], rules? }`, `SingleGameConfig { seed, strategies[], rules?, max_turns_per_round? }`, `InteractiveGameConfig { num_players, player_names[], rules?, seed }`. Strategy/rule names are mapped to concrete types via match statements in `lib.rs`. All serialization uses `serde_json` (string-based JSON, not `serde-wasm-bindgen`). All functions return JSON; errors are `{"error": "message"}`.
+Config structs: `WasmSimConfig { num_games, seed, strategies[], rules? }`, `SingleGameConfig { seed, strategies[], rules?, max_turns_per_round? }`, `InteractiveGameConfig { num_players, player_names[], rules?, seed }`. Strategy/rule names are mapped to concrete types via match statements in `lib.rs`. All serialization uses `serde_json` (string-based JSON, not `serde-wasm-bindgen`). All functions return JSON strings except `is_genetic_loaded()` which returns a raw `bool`. Errors are `{"error": "message"}`.
 
 Interactive games are stored in thread-local `HashMap<u32, InteractiveGame>` with auto-incrementing IDs. The genetic genome is cached in thread-local storage.
 

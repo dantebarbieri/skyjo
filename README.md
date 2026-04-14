@@ -22,7 +22,7 @@ A web-based [Skyjo](https://magilano.com/en/products/skyjo) card game — play i
 ### Simulate
 - **Batch simulation** — run up to millions of games and view aggregate statistics (win rates, score distributions, average rounds)
 - **11 AI strategies** — Random, Greedy, Gambler, Rusher, Defensive, Clearer, Mimic, Saboteur, Survivor, Statistician, and Genetic (neural network)
-- **Rule variants** — swap in alternate rule sets (e.g., "Aunt Janet Rules")
+- **Extensible rules** — the engine supports alternate rule sets (currently Standard rules; the architecture allows adding variants like "Aunt Janet Rules")
 - **Game replay** — step through any game turn-by-turn with an animated board
 - **Live visualization** — watch games play out in real time with adjustable speed
 - **Deterministic** — every simulation is seeded and fully reproducible
