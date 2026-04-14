@@ -1,4 +1,5 @@
-use rand::seq::SliceRandom;
+use rand::seq::IndexedRandom;
+use rand::prelude::SliceRandom;
 use rand::RngCore;
 
 use crate::card::{CardValue, VisibleSlot};
@@ -434,7 +435,7 @@ mod tests {
         view.discard_piles = vec![vec![5]];
 
         let strategy = SaboteurStrategy;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let choice = strategy.choose_draw(&view, &mut rng);
         assert_eq!(choice, DrawChoice::DrawFromDeck);
     }
@@ -460,7 +461,7 @@ mod tests {
         let view = make_view(my_board, opp_board);
 
         let strategy = SaboteurStrategy;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         // discard pile has [3], top is 3 which is < 10
         let choice = strategy.choose_draw(&view, &mut rng);
         assert_eq!(choice, DrawChoice::DrawFromDiscard(0));
@@ -488,7 +489,7 @@ mod tests {
         let view = make_view(my_board, opp_board);
 
         let strategy = SaboteurStrategy;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         // Drew a 5 — very useful to opponent (would complete their column)
         let action = strategy.choose_deck_draw_action(&view, 5, &mut rng);
@@ -509,7 +510,7 @@ mod tests {
         let view = make_view(my_board, opp_board);
 
         let strategy = SaboteurStrategy;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         // Drew a 10 — high value, not useful to opponent (they have no 10 partial matches)
         let action = strategy.choose_deck_draw_action(&view, 10, &mut rng);
@@ -556,7 +557,7 @@ mod tests {
         let view = make_view(my_board, opp_board);
 
         let strategy = SaboteurStrategy;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         // Drew a 3 — not useful to opponent, improves board
         // Can replace 10 (displaces 10, not useful to opponent) or 7 (displaces 7, very useful)
@@ -605,7 +606,7 @@ mod tests {
         let view = make_view(my_board, opp_board);
 
         let strategy = SaboteurStrategy;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         // Drew a 2 from discard — both 8 and 9 are improvements
         // Displacing 8 would help opponent (matches their partial column)

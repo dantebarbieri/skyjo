@@ -1,4 +1,5 @@
-use rand::seq::SliceRandom;
+use rand::seq::IndexedRandom;
+use rand::prelude::SliceRandom;
 use rand::RngCore;
 
 use crate::card::{CardValue, VisibleSlot};
@@ -365,7 +366,7 @@ mod tests {
         ];
         let view = make_view(my_board, opp_board);
         let strategy = DefensiveStrategy;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         // Drew a 5 from deck — doesn't improve our board (5 < 8 so it does improve),
         // but let's test with a card that doesn't improve: drew a 9
@@ -412,7 +413,7 @@ mod tests {
         ];
         let view = make_view(my_board, opp_board);
         let strategy = DefensiveStrategy;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         // Drew a -2 — very useful to next player
         let action = strategy.choose_deck_draw_action(&view, -2, &mut rng);
@@ -459,7 +460,7 @@ mod tests {
         ];
         let view = make_view(my_board, opp_board);
         let strategy = DefensiveStrategy;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         // Drew a 3 — can replace either the 10 or the 7
         // Displacing the 7 would help the opponent (matches their partial column)

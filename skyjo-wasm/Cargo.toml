@@ -11,5 +11,5 @@ wasm-bindgen = "=0.2.100"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 skyjo-core = { path = "../skyjo-core" }
-getrandom = { version = "0.2", features = ["js"] }
+getrandom = { version = "0.3", features = ["wasm_js"] }
 

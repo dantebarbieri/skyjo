@@ -17,18 +17,6 @@ on:
       - "Cargo.lock"
   pull_request:
     branches: [main]
-    paths:
-      - "Dockerfile"
-      - ".dockerignore"
-      - "docker-compose.yml"
-      - "frontend/nginx.conf"
-      - "frontend/src/**"
-      - "frontend/package.json"
-      - "frontend/pnpm-lock.yaml"
-      - "skyjo-core/**"
-      - "skyjo-wasm/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
 
 concurrency:
   group: docker-${{ github.ref }}

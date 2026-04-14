@@ -1,4 +1,4 @@
-use rand::seq::SliceRandom;
+use rand::prelude::SliceRandom;
 // Use StdRng (ChaCha12) instead of StdRng to ensure identical RNG sequences
 // across all platforms. StdRng uses different algorithms on 32-bit (WASM)
 // vs 64-bit (native), causing different game outcomes for the same seed.

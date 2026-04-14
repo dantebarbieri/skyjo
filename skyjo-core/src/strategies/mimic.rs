@@ -1,4 +1,5 @@
-use rand::seq::SliceRandom;
+use rand::seq::IndexedRandom;
+use rand::prelude::SliceRandom;
 use rand::RngCore;
 
 use crate::card::{CardValue, VisibleSlot};
@@ -439,7 +440,7 @@ mod tests {
         };
 
         let strategy = MimicStrategy;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let flips = strategy.choose_initial_flips(&view, 2, &mut rng);
 
         assert_eq!(flips.len(), 2);
@@ -457,7 +458,7 @@ mod tests {
         view.discard_piles = vec![vec![5]];
 
         let strategy = MimicStrategy;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let draw = strategy.choose_draw(&view, &mut rng);
         assert!(matches!(draw, DrawChoice::DrawFromDiscard(0)));
     }
@@ -470,7 +471,7 @@ mod tests {
         view.discard_piles = vec![vec![10]];
 
         let strategy = MimicStrategy;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let draw = strategy.choose_draw(&view, &mut rng);
         assert!(matches!(draw, DrawChoice::DrawFromDeck));
     }
@@ -494,7 +495,7 @@ mod tests {
         let view = make_view(board);
 
         let strategy = MimicStrategy;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         // Leader has value 2 revealed; drawn card is 2, which is < 8 (highest revealed)
         let action = strategy.choose_deck_draw_action(&view, 2, &mut rng);
         match action {
@@ -524,7 +525,7 @@ mod tests {
         let view = make_view(board);
 
         let strategy = MimicStrategy;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         // Drawing a 7 — leader doesn't have 7, so fallback: replace highest revealed > 7 → the 10
         let pos = strategy.choose_discard_draw_placement(&view, 7, &mut rng);
         assert_eq!(pos, 0, "Should replace the 10 (highest > drawn)");
