@@ -91,7 +91,8 @@ impl Persistence {
                     .await?;
 
             if !applied {
-                sqlx::query(sql).execute(&self.pool).await?;
+                // Use raw_sql to support multiple statements in a single migration file
+                sqlx::raw_sql(sql).execute(&self.pool).await?;
                 sqlx::query("INSERT INTO _migrations (name) VALUES ($1)")
                     .bind(name)
                     .execute(&self.pool)
