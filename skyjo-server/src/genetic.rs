@@ -786,6 +786,7 @@ pub async fn train_generations(
             let mut s = state.lock().await;
             s.is_training = false;
             s.training_started_at = None;
+            auto_save_training_result(&mut s);
             tracing::info!(
                 "Fitness target {} reached at generation {}",
                 target_fitness,
@@ -800,6 +801,35 @@ pub async fn train_generations(
         let mut s = state.lock().await;
         s.is_training = false;
         s.training_started_at = None;
+        auto_save_training_result(&mut s);
         tracing::info!("Training complete after {num_generations} generations");
     }
+}
+
+/// Auto-save when training finishes (any mode). Skips if the generation was
+/// already saved (e.g. by `auto_save_milestone` at a power-of-10 boundary).
+fn auto_save_training_result(state: &mut GeneticTrainingState) {
+    if state.generation == 0 {
+        return;
+    }
+    let name = format!("Gen {}", state.generation);
+    if state.saved_generations.iter().any(|sg| sg.name == name) {
+        return;
+    }
+    let saved = SavedGeneration {
+        name: name.clone(),
+        generation: state.generation,
+        total_games_trained: state.total_games_trained,
+        best_fitness: if state.best_fitness.is_finite() {
+            state.best_fitness
+        } else {
+            0.0
+        },
+        genome: state.best_genome.clone(),
+        saved_at: chrono_now(),
+        lineage_hash: state.lineage_hash.clone(),
+    };
+    state.saved_generations.push(saved);
+    save_model(state);
+    tracing::info!("Auto-saved training result: {name}");
 }
