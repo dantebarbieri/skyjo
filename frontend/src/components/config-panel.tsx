@@ -226,9 +226,9 @@ export default function ConfigPanel({
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="__latest__">Latest</SelectItem>
-                      {savedGens.map((sg) => {
+                      {(() => {
                         const hasMultipleLineages = new Set(savedGens.map(g => g.lineage_hash)).size > 1;
-                        return (
+                        return savedGens.map((sg) => (
                           <SelectItem key={sg.name} value={sg.name}>
                             <span>{sg.name}</span>
                             {hasMultipleLineages && sg.lineage_hash && (
@@ -236,8 +236,8 @@ export default function ConfigPanel({
                             )}
                             <span className="ml-1 text-muted-foreground">({sg.best_fitness.toFixed(0)})</span>
                           </SelectItem>
-                        );
-                      })}
+                        ));
+                      })()}
                     </SelectContent>
                   </Select>
                 )}
