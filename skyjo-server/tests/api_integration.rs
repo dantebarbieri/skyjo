@@ -21,6 +21,7 @@ fn test_app() -> Router {
         genetic: genetic_state,
         genetic_api_key: None,
         persistence: None,
+        rate_limiter: Arc::new(skyjo_server::rate_limit::RateLimiter::new()),
     });
 
     // Mirror the routes from main.rs (no API key = no auth required for existing tests)
@@ -266,6 +267,7 @@ fn test_app_with_api_key(api_key: Option<String>) -> Router {
         genetic: genetic_state,
         genetic_api_key: api_key,
         persistence: None,
+        rate_limiter: Arc::new(skyjo_server::rate_limit::RateLimiter::new()),
     });
 
     // Protected mutation routes behind genetic auth middleware

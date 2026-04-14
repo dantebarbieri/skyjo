@@ -31,6 +31,11 @@ pub async fn handle_ws(
 ) {
     let (mut ws_tx, mut ws_rx) = ws.split();
 
+    // Parse IP for rate limiting
+    let client_ip_addr: std::net::IpAddr = client_ip
+        .parse()
+        .unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED));
+
     // Track the client's preferred wire format (auto-detected from incoming messages).
     let mut wire_format = WireFormat::Json;
 
@@ -107,6 +112,22 @@ pub async fn handle_ws(
                 match msg {
                     Some(Ok(Message::Text(text))) => {
                         wire_format = WireFormat::Json;
+                        if !state.rate_limiter.check(
+                            client_ip_addr,
+                            "ws_message",
+                            &crate::rate_limit::limits::WS_MESSAGE,
+                        ) {
+                            let _ = send_msg(
+                                &mut ws_tx,
+                                &ServerMessage::Error {
+                                    code: "RateLimited".into(),
+                                    message: "Too many messages".into(),
+                                },
+                                wire_format,
+                            )
+                            .await;
+                            continue;
+                        }
                         let response = handle_client_message(
                             &text,
                             &state,
@@ -121,6 +142,22 @@ pub async fn handle_ws(
                     }
                     Some(Ok(Message::Binary(data))) => {
                         wire_format = WireFormat::MessagePack;
+                        if !state.rate_limiter.check(
+                            client_ip_addr,
+                            "ws_message",
+                            &crate::rate_limit::limits::WS_MESSAGE,
+                        ) {
+                            let _ = send_msg(
+                                &mut ws_tx,
+                                &ServerMessage::Error {
+                                    code: "RateLimited".into(),
+                                    message: "Too many messages".into(),
+                                },
+                                wire_format,
+                            )
+                            .await;
+                            continue;
+                        }
                         let client_msg: ClientMessage = match rmp_serde::from_slice(&data) {
                             Ok(m) => m,
                             Err(e) => {
@@ -182,7 +219,23 @@ pub async fn handle_ws(
             msg = player_msg_rx.recv() => {
                 match msg {
                     Some(data) => {
-                        if ws_tx.send(Message::Binary(data.into())).await.is_err() {
+                        let send_result = match wire_format {
+                            WireFormat::Json => {
+                                match String::from_utf8(data) {
+                                    Ok(text) => ws_tx.send(Message::Text(text.into())).await,
+                                    Err(e) => {
+                                        tracing::warn!(
+                                            "Failed to send targeted JSON message to player {player_index}: invalid UTF-8: {e}"
+                                        );
+                                        continue;
+                                    }
+                                }
+                            }
+                            WireFormat::MessagePack => {
+                                ws_tx.send(Message::Binary(data.into())).await
+                            }
+                        };
+                        if send_result.is_err() {
                             break;
                         }
                     }
@@ -491,7 +544,7 @@ async fn handle_parsed_message(
             }
 
             match room_guard.apply_action(player_index, action.clone()) {
-                Ok(()) => {
+                Ok(delta) => {
                     tracing::info!(
                         room = %room_code,
                         player = player_index,
@@ -500,7 +553,7 @@ async fn handle_parsed_message(
                         "action_applied"
                     );
 
-                    room_guard.broadcast_action(player_index, &action, false);
+                    room_guard.broadcast_action(player_index, &action, false, &delta);
 
                     // Schedule bot turns if the next player is a bot
                     if room_guard.is_current_player_bot() {
@@ -643,8 +696,8 @@ fn schedule_turn_timeout(room: SharedRoom) {
 
         // Check and apply timeout
         match room_guard.check_turn_timeout() {
-            Ok(Some((player, action))) => {
-                room_guard.broadcast_timeout_action(player, &action);
+            Ok(Some((player, action, delta))) => {
+                room_guard.broadcast_timeout_action(player, &action, &delta);
 
                 // If the next player is a bot, run bot turns
                 if room_guard.is_current_player_bot() {
@@ -685,8 +738,8 @@ async fn run_bot_turns(room: SharedRoom) {
         }
 
         match room_guard.apply_bot_action() {
-            Ok((bot_player, action)) => {
-                room_guard.broadcast_action(bot_player, &action, true);
+            Ok((bot_player, action, delta)) => {
+                room_guard.broadcast_action(bot_player, &action, true, &delta);
             }
             Err(e) => {
                 tracing::error!("Bot action failed: {e}");

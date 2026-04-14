@@ -83,11 +83,14 @@ async fn main() {
         }
     };
 
+    let rate_limiter = Arc::new(skyjo_server::rate_limit::RateLimiter::new());
+
     let app_state = Arc::new(AppStateInner {
         lobby: Lobby::new(100),
         genetic: genetic_state,
         genetic_api_key: args.genetic_api_key.clone(),
         persistence: persistence.clone(),
+        rate_limiter,
     });
 
     // Restore rooms from snapshots (best-effort crash recovery)
@@ -152,6 +155,9 @@ async fn main() {
                 Duration::from_secs(600), // 10 min after all disconnect
             );
 
+            // Clean up stale rate limiter entries
+            cleanup_state.rate_limiter.cleanup(Duration::from_secs(300));
+
             // Periodic snapshot of active in-game rooms
             if let Some(ref db) = cleanup_persistence {
                 for entry in cleanup_state.lobby.rooms.iter() {
@@ -212,6 +218,10 @@ async fn main() {
     let app = Router::new()
         .nest("/api", api_routes)
         .fallback_service(static_service)
+        .layer(axum::middleware::from_fn_with_state(
+            app_state.clone(),
+            skyjo_server::rate_limit_middleware,
+        ))
         .layer(CompressionLayer::new())
         .with_state(app_state.clone());
 

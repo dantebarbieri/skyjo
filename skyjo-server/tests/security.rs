@@ -29,6 +29,7 @@ fn test_app() -> Router {
         genetic: genetic_state,
         genetic_api_key: None,
         persistence: None,
+        rate_limiter: Arc::new(skyjo_server::rate_limit::RateLimiter::new()),
     });
 
     let api_routes = Router::new()
@@ -53,6 +54,7 @@ fn test_app_with_api_key(api_key: Option<String>) -> Router {
         genetic: genetic_state,
         genetic_api_key: api_key,
         persistence: None,
+        rate_limiter: Arc::new(skyjo_server::rate_limit::RateLimiter::new()),
     });
 
     let genetic_mutation_routes = Router::new()
@@ -242,6 +244,7 @@ async fn session_token_invalid_after_kick() {
             )),
             genetic_api_key: None,
             persistence: None,
+            rate_limiter: Arc::new(skyjo_server::rate_limit::RateLimiter::new()),
         });
 
         // Create room directly in lobby

@@ -8,10 +8,11 @@ pub mod room;
 pub mod session;
 pub mod ws;
 
+use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use axum::extract::{Path, State};
+use axum::extract::{ConnectInfo, Path, State};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Json, Response};
 
@@ -28,6 +29,7 @@ pub struct AppStateInner {
     pub genetic: Arc<Mutex<GeneticTrainingState>>,
     pub genetic_api_key: Option<String>,
     pub persistence: Option<Arc<Persistence>>,
+    pub rate_limiter: Arc<crate::rate_limit::RateLimiter>,
 }
 
 pub type AppState = Arc<AppStateInner>;
@@ -129,4 +131,28 @@ pub async fn join_room(
 pub async fn genetic_status(State(state): State<AppState>) -> Json<genetic::TrainingStatus> {
     let s = state.genetic.lock().await;
     Json(s.status())
+}
+
+// --- Rate Limit Middleware ---
+
+pub async fn rate_limit_middleware(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    req: axum::extract::Request,
+    next: Next,
+) -> Response {
+    let config = match (req.uri().path(), req.method()) {
+        (p, &axum::http::Method::POST) if p.starts_with("/api/rooms") && !p.contains("/join") => {
+            &rate_limit::limits::ROOM_CREATION
+        }
+        (p, &axum::http::Method::POST) if p.contains("/join") => &rate_limit::limits::ROOM_JOIN,
+        (p, _) if p.starts_with("/api/genetic/") => &rate_limit::limits::GENETIC_API,
+        _ => return next.run(req).await,
+    };
+
+    if !state.rate_limiter.check(addr.ip(), "http", config) {
+        return error::ServerError::RateLimited.into_response();
+    }
+
+    next.run(req).await
 }
