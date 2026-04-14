@@ -639,13 +639,17 @@ function NetworkDiagram({ model }: { model: GeneticModelData }) {
   const outputHeight = (outputGroups.length - 1) * spacing;
   const ioHeight = Math.max(inputHeight, outputHeight);
   const topPadding = 30; // same as computeLayout's inputStartY base
-  const hiddenBoxHeight = Math.min(140, ioHeight * 0.4);
+  // Hidden box heights proportional to neuron count
+  const maxHiddenNeurons = Math.max(hidden1Size, hidden2Size);
+  const hiddenMaxHeight = Math.min(ioHeight * 0.6, 300);
+  const hidden1BoxHeight = hiddenMaxHeight * (hidden1Size / maxHiddenNeurons);
+  const hidden2BoxHeight = hiddenMaxHeight * (hidden2Size / maxHiddenNeurons);
   // Center of the I/O columns: topPadding + ioHeight / 2
   const centerY = topPadding + ioHeight / 2;
-  const hiddenBoxTop = centerY - hiddenBoxHeight / 2;
-  const hiddenBoxBottom = centerY + hiddenBoxHeight / 2;
-  const hidden1CenterY = centerY;
-  const hidden2CenterY = centerY;
+  const hidden1BoxTop = centerY - hidden1BoxHeight / 2;
+  const hidden1BoxBottom = centerY + hidden1BoxHeight / 2;
+  const hidden2BoxTop = centerY - hidden2BoxHeight / 2;
+  const hidden2BoxBottom = centerY + hidden2BoxHeight / 2;
   // SVG height: just enough for content + legend
   const contentBottom = topPadding + ioHeight;
   const svgHeight = contentBottom + 25; // 25px for legend below content
@@ -656,6 +660,22 @@ function NetworkDiagram({ model }: { model: GeneticModelData }) {
 
   const inputNodeCx = inputX + 155;
   const outputNodeCx = outputX - 155;
+
+  // Distribute edge connection points evenly along hidden box heights
+  const inputEdgeCount = edges.inputToHidden1.length;
+  const outputEdgeCount = edges.hidden2ToOutput.length;
+  const hidden1InputY = (idx: number) => {
+    if (inputEdgeCount <= 1) return centerY;
+    const pad = 8; // inset from box edges
+    return hidden1BoxTop + pad + idx * ((hidden1BoxHeight - 2 * pad) / (inputEdgeCount - 1));
+  };
+  const hidden1OutputY = centerY; // single edge to hidden2
+  const hidden2InputY = centerY; // single edge from hidden1
+  const hidden2OutputY = (idx: number) => {
+    if (outputEdgeCount <= 1) return centerY;
+    const pad = 8;
+    return hidden2BoxTop + pad + idx * ((hidden2BoxHeight - 2 * pad) / (outputEdgeCount - 1));
+  };
 
   // Threshold for "near zero" classification
   const nearZeroThreshold = 0.25;
@@ -668,14 +688,14 @@ function NetworkDiagram({ model }: { model: GeneticModelData }) {
   function renderEdgeGroup(
     edgeList: Edge[],
     prefix: string,
-    x1Fn: (e: Edge) => number,
-    y1Fn: (e: Edge) => number,
-    x2Fn: (e: Edge) => number,
-    y2Fn: (e: Edge) => number,
+    x1Fn: (e: Edge, i: number) => number,
+    y1Fn: (e: Edge, i: number) => number,
+    x2Fn: (e: Edge, i: number) => number,
+    y2Fn: (e: Edge, i: number) => number,
   ) {
     return edgeList.map((e, i) => {
       const key = `${prefix}-${i}`;
-      const x1 = x1Fn(e), y1 = y1Fn(e), x2 = x2Fn(e), y2 = y2Fn(e);
+      const x1 = x1Fn(e, i), y1 = y1Fn(e, i), x2 = x2Fn(e, i), y2 = y2Fn(e, i);
       const nw = normalize(e.weight);
       const color = weightToColor(nw);
       const width = Math.max(1.5, Math.min(Math.abs(nw) * 5, 5));
@@ -712,22 +732,22 @@ function NetworkDiagram({ model }: { model: GeneticModelData }) {
         className="w-full max-w-[900px] min-w-[600px] mx-auto"
         style={{ minHeight: 200 }}
       >
-        {/* Edges: input → hidden1 */}
+        {/* Edges: input → hidden1 (distributed along hidden1 box height) */}
         {renderEdgeGroup(
           edges.inputToHidden1, 'ih1',
-          () => inputNodeCx, e => e.fromY!, () => hidden1X - 40, () => hidden1CenterY
+          () => inputNodeCx, e => e.fromY!, () => hidden1X - 40, (_e, i) => hidden1InputY(i)
         )}
 
         {/* Edges: hidden1 → hidden2 */}
         {renderEdgeGroup(
           edges.hidden1ToHidden2, 'h1h2',
-          () => hidden1X + 40, () => hidden1CenterY, () => hidden2X - 40, () => hidden2CenterY
+          () => hidden1X + 40, () => hidden1OutputY, () => hidden2X - 40, () => hidden2InputY
         )}
 
-        {/* Edges: hidden2 → output */}
+        {/* Edges: hidden2 → output (distributed along hidden2 box height) */}
         {renderEdgeGroup(
           edges.hidden2ToOutput, 'h2o',
-          () => hidden2X + 40, () => hidden2CenterY, () => outputNodeCx, e => e.toY!
+          () => hidden2X + 40, (_e, i) => hidden2OutputY(i), () => outputNodeCx, e => e.toY!
         )}
 
         {/* Input group labels */}
@@ -769,7 +789,7 @@ function NetworkDiagram({ model }: { model: GeneticModelData }) {
             const rect = e.currentTarget.querySelector('rect');
             if (rect) {
               rect.style.transform = 'scale(1.05)';
-              rect.style.transformOrigin = `${hidden1X}px ${hidden1CenterY}px`;
+              rect.style.transformOrigin = `${hidden1X}px ${centerY}px`;
               rect.style.transition = 'transform 0.15s ease-out';
             }
             e.currentTarget.querySelectorAll('text').forEach(t => {
@@ -786,16 +806,16 @@ function NetworkDiagram({ model }: { model: GeneticModelData }) {
           }}
         >
           <rect
-            x={hidden1X - 40} y={hiddenBoxTop} width={80} height={hiddenBoxBottom - hiddenBoxTop}
+            x={hidden1X - 40} y={hidden1BoxTop} width={80} height={hidden1BoxBottom - hidden1BoxTop}
             rx={8} fill="none" stroke="currentColor" strokeOpacity={0.3} strokeWidth={1.5} strokeDasharray="4 2"
           />
-          <text x={hidden1X} y={hidden1CenterY - 8} textAnchor="middle" className="fill-current text-muted-foreground" fontSize={10}>
+          <text x={hidden1X} y={centerY - 8} textAnchor="middle" className="fill-current text-muted-foreground" fontSize={10}>
             {hidden1Size}
           </text>
-          <text x={hidden1X} y={hidden1CenterY + 6} textAnchor="middle" className="fill-current text-muted-foreground" fontSize={10}>
+          <text x={hidden1X} y={centerY + 6} textAnchor="middle" className="fill-current text-muted-foreground" fontSize={10}>
             neurons
           </text>
-          <text x={hidden1X} y={hidden1CenterY + 18} textAnchor="middle" className="fill-current text-muted-foreground" fontSize={9} fontStyle="italic">
+          <text x={hidden1X} y={centerY + 18} textAnchor="middle" className="fill-current text-muted-foreground" fontSize={9} fontStyle="italic">
             (ReLU)
           </text>
         </g>
@@ -807,7 +827,7 @@ function NetworkDiagram({ model }: { model: GeneticModelData }) {
             const rect = e.currentTarget.querySelector('rect');
             if (rect) {
               rect.style.transform = 'scale(1.05)';
-              rect.style.transformOrigin = `${hidden2X}px ${hidden2CenterY}px`;
+              rect.style.transformOrigin = `${hidden2X}px ${centerY}px`;
               rect.style.transition = 'transform 0.15s ease-out';
             }
             e.currentTarget.querySelectorAll('text').forEach(t => {
@@ -824,16 +844,16 @@ function NetworkDiagram({ model }: { model: GeneticModelData }) {
           }}
         >
           <rect
-            x={hidden2X - 40} y={hiddenBoxTop} width={80} height={hiddenBoxBottom - hiddenBoxTop}
+            x={hidden2X - 40} y={hidden2BoxTop} width={80} height={hidden2BoxBottom - hidden2BoxTop}
             rx={8} fill="none" stroke="currentColor" strokeOpacity={0.3} strokeWidth={1.5} strokeDasharray="4 2"
           />
-          <text x={hidden2X} y={hidden2CenterY - 8} textAnchor="middle" className="fill-current text-muted-foreground" fontSize={10}>
+          <text x={hidden2X} y={centerY - 8} textAnchor="middle" className="fill-current text-muted-foreground" fontSize={10}>
             {hidden2Size}
           </text>
-          <text x={hidden2X} y={hidden2CenterY + 6} textAnchor="middle" className="fill-current text-muted-foreground" fontSize={10}>
+          <text x={hidden2X} y={centerY + 6} textAnchor="middle" className="fill-current text-muted-foreground" fontSize={10}>
             neurons
           </text>
-          <text x={hidden2X} y={hidden2CenterY + 18} textAnchor="middle" className="fill-current text-muted-foreground" fontSize={9} fontStyle="italic">
+          <text x={hidden2X} y={centerY + 18} textAnchor="middle" className="fill-current text-muted-foreground" fontSize={9} fontStyle="italic">
             (ReLU)
           </text>
         </g>
