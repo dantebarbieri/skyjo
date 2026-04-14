@@ -2,10 +2,10 @@
 
 use std::sync::Arc;
 
+use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use axum::routing::{get, post};
-use axum::Router;
 use http_body_util::BodyExt;
 use tokio::sync::Mutex;
 use tower::ServiceExt;
@@ -56,10 +56,7 @@ fn test_app_with_api_key(api_key: Option<String>) -> Router {
     });
 
     let genetic_mutation_routes = Router::new()
-        .route(
-            "/genetic/train",
-            post(skyjo_server::genetic_status),
-        )
+        .route("/genetic/train", post(skyjo_server::genetic_status))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             skyjo_server::genetic_auth_middleware,
@@ -115,10 +112,16 @@ fn rate_limiter_allows_burst_then_blocks() {
 
     // Should allow 5 requests (burst)
     for i in 0..5 {
-        assert!(limiter.check(ip, "room_create", &config), "request {i} should pass");
+        assert!(
+            limiter.check(ip, "room_create", &config),
+            "request {i} should pass"
+        );
     }
     // 6th should be blocked
-    assert!(!limiter.check(ip, "room_create", &config), "6th request should be blocked");
+    assert!(
+        !limiter.check(ip, "room_create", &config),
+        "6th request should be blocked"
+    );
 }
 
 #[test]
@@ -261,12 +264,14 @@ async fn session_token_invalid_after_kick() {
         state.lobby.sessions.remove(&kicked_token.unwrap());
 
         // Now the token should not resolve to a session
-        assert!(state.lobby.get_session(&bob_token).is_none() || {
-            // bob_token was from the HTTP-level test above, not this lobby.
-            // Verify the kicked token is truly gone from this lobby.
-            let kicked_str = _bob_token.to_string();
-            state.lobby.get_session(&kicked_str).is_none()
-        });
+        assert!(
+            state.lobby.get_session(&bob_token).is_none() || {
+                // bob_token was from the HTTP-level test above, not this lobby.
+                // Verify the kicked token is truly gone from this lobby.
+                let kicked_str = _bob_token.to_string();
+                state.lobby.get_session(&kicked_str).is_none()
+            }
+        );
     }
 }
 

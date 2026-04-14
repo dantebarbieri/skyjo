@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
-use skyjo_core::interactive::{ActionNeeded, InteractiveGameState, PlayerAction};
 use skyjo_core::VisibleSlot;
+use skyjo_core::interactive::{ActionNeeded, InteractiveGameState, PlayerAction};
 
 /// Wire format for WebSocket messages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -238,10 +238,7 @@ pub fn slot_to_update(slot: &VisibleSlot) -> SlotUpdate {
 }
 
 /// Compute the delta between before and after game states.
-pub fn compute_delta(
-    before: &InteractiveGameState,
-    after: &InteractiveGameState,
-) -> StateDelta {
+pub fn compute_delta(before: &InteractiveGameState, after: &InteractiveGameState) -> StateDelta {
     let mut board_changes = Vec::new();
 
     // Compare boards
@@ -294,9 +291,7 @@ fn action_needed_name(action: &ActionNeeded) -> String {
         ActionNeeded::ChooseInitialFlips { .. } => "ChooseInitialFlips".to_string(),
         ActionNeeded::ChooseDraw { .. } => "ChooseDraw".to_string(),
         ActionNeeded::ChooseDeckDrawAction { .. } => "ChooseDeckDrawAction".to_string(),
-        ActionNeeded::ChooseDiscardDrawPlacement { .. } => {
-            "ChooseDiscardDrawPlacement".to_string()
-        }
+        ActionNeeded::ChooseDiscardDrawPlacement { .. } => "ChooseDiscardDrawPlacement".to_string(),
         ActionNeeded::RoundOver { .. } => "RoundOver".to_string(),
         ActionNeeded::GameOver { .. } => "GameOver".to_string(),
     }
@@ -710,7 +705,10 @@ mod tests {
 
     // --- Delta state update tests ---
 
-    fn make_test_state(boards: Vec<Vec<VisibleSlot>>, discard_top: Option<i8>) -> InteractiveGameState {
+    fn make_test_state(
+        boards: Vec<Vec<VisibleSlot>>,
+        discard_top: Option<i8>,
+    ) -> InteractiveGameState {
         use skyjo_core::interactive::ActionNeeded;
         InteractiveGameState {
             num_players: boards.len(),
@@ -737,10 +735,7 @@ mod tests {
     #[test]
     fn delta_detects_board_changes() {
         let before = make_test_state(
-            vec![
-                vec![VisibleSlot::Hidden; 12],
-                vec![VisibleSlot::Hidden; 12],
-            ],
+            vec![vec![VisibleSlot::Hidden; 12], vec![VisibleSlot::Hidden; 12]],
             Some(5),
         );
         let mut after = before.clone();
@@ -754,10 +749,7 @@ mod tests {
     #[test]
     fn delta_empty_when_no_changes() {
         let state = make_test_state(
-            vec![
-                vec![VisibleSlot::Hidden; 12],
-                vec![VisibleSlot::Hidden; 12],
-            ],
+            vec![vec![VisibleSlot::Hidden; 12], vec![VisibleSlot::Hidden; 12]],
             Some(5),
         );
         let delta = compute_delta(&state, &state);
@@ -823,7 +815,11 @@ mod tests {
 
     #[test]
     fn slot_update_serde_round_trip() {
-        let updates = vec![SlotUpdate::Hidden, SlotUpdate::Revealed(-2), SlotUpdate::Cleared];
+        let updates = vec![
+            SlotUpdate::Hidden,
+            SlotUpdate::Revealed(-2),
+            SlotUpdate::Cleared,
+        ];
         let json = serde_json::to_string(&updates).unwrap();
         let decoded: Vec<SlotUpdate> = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded, updates);
@@ -831,10 +827,7 @@ mod tests {
 
     #[test]
     fn delta_detects_discard_change() {
-        let before = make_test_state(
-            vec![vec![VisibleSlot::Hidden; 12]; 2],
-            Some(3),
-        );
+        let before = make_test_state(vec![vec![VisibleSlot::Hidden; 12]; 2], Some(3));
         let mut after = before.clone();
         after.discard_tops = vec![Some(9)];
 
@@ -844,10 +837,7 @@ mod tests {
 
     #[test]
     fn delta_detects_going_out_player_change() {
-        let before = make_test_state(
-            vec![vec![VisibleSlot::Hidden; 12]; 2],
-            Some(3),
-        );
+        let before = make_test_state(vec![vec![VisibleSlot::Hidden; 12]; 2], Some(3));
         let mut after = before.clone();
         after.going_out_player = Some(0);
         after.is_final_turn = true;

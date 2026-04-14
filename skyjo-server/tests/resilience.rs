@@ -71,10 +71,8 @@ fn persistence_creates_tables_on_open() {
 
 #[test]
 fn persistence_open_at_new_file_path_succeeds() {
-    let path = std::env::temp_dir().join(format!(
-        "skyjo_resilience_test_{}.db",
-        std::process::id()
-    ));
+    let path =
+        std::env::temp_dir().join(format!("skyjo_resilience_test_{}.db", std::process::id()));
     // Ensure the file doesn't exist
     let _ = std::fs::remove_file(&path);
 
@@ -112,7 +110,10 @@ fn convert_disconnected_to_bot_preserves_integrity() {
     assert_eq!(converted, vec![1]);
 
     // Verify slot type is Bot
-    assert!(matches!(room.players[1].slot_type, PlayerSlotType::Bot { .. }));
+    assert!(matches!(
+        room.players[1].slot_type,
+        PlayerSlotType::Bot { .. }
+    ));
     // Verify name has "(Bot)" suffix
     assert!(room.players[1].name.ends_with(" (Bot)"));
     // Verify was_human flag
@@ -199,9 +200,7 @@ fn from_snapshot_always_restores_to_lobby() {
 #[test]
 fn all_disconnected_room_is_cleanup_eligible() {
     let lobby = skyjo_server::lobby::Lobby::new(10);
-    let (code, _token, _) = lobby
-        .create_room("Solo".into(), 2, None, 0, 0)
-        .unwrap();
+    let (code, _token, _) = lobby.create_room("Solo".into(), 2, None, 0, 0).unwrap();
 
     {
         let room_ref = lobby.rooms.get(&code).unwrap().clone();
@@ -216,15 +215,16 @@ fn all_disconnected_room_is_cleanup_eligible() {
 
     // Cleanup with a short disconnect timeout should remove the room
     lobby.cleanup_stale_rooms(Duration::from_secs(60), Duration::from_secs(60));
-    assert!(lobby.rooms.is_empty(), "disconnected room should be cleaned up");
+    assert!(
+        lobby.rooms.is_empty(),
+        "disconnected room should be cleaned up"
+    );
 }
 
 #[test]
 fn connected_room_not_cleaned_up() {
     let lobby = skyjo_server::lobby::Lobby::new(10);
-    let (code, _token, _) = lobby
-        .create_room("Active".into(), 2, None, 0, 0)
-        .unwrap();
+    let (code, _token, _) = lobby.create_room("Active".into(), 2, None, 0, 0).unwrap();
 
     {
         let room_ref = lobby.rooms.get(&code).unwrap().clone();
@@ -235,7 +235,10 @@ fn connected_room_not_cleaned_up() {
 
     // Even with aggressive cleanup, connected room should survive
     lobby.cleanup_stale_rooms(Duration::from_secs(60), Duration::from_secs(60));
-    assert!(lobby.rooms.contains_key(&code), "connected room should not be cleaned up");
+    assert!(
+        lobby.rooms.contains_key(&code),
+        "connected room should not be cleaned up"
+    );
 }
 
 // ========================================================================

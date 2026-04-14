@@ -90,7 +90,9 @@ impl ServerError {
             Self::PlayerNameTooLong => "Player name must be 32 characters or fewer".into(),
             Self::PlayerNameEmpty => "Player name cannot be empty".into(),
             Self::InvalidTurnTimer => "Turn timer must be between 10 and 300 seconds".into(),
-            Self::InvalidDisconnectTimeout => "Disconnect timeout must be between 10 and 300 seconds".into(),
+            Self::InvalidDisconnectTimeout => {
+                "Disconnect timeout must be between 10 and 300 seconds".into()
+            }
             Self::InvalidNumPlayers => "Number of players must be between 2 and 8".into(),
             Self::InvalidStrategy(s) => format!("Unknown strategy: {s}"),
             Self::InvalidRules(r) => format!("Unknown rules: {r}"),
@@ -126,14 +128,32 @@ mod tests {
 
     #[test]
     fn error_to_http_status_codes() {
-        assert_eq!(ServerError::RoomNotFound.status_code(), StatusCode::NOT_FOUND);
-        assert_eq!(ServerError::Unauthorized.status_code(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            ServerError::RoomNotFound.status_code(),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            ServerError::Unauthorized.status_code(),
+            StatusCode::FORBIDDEN
+        );
         assert_eq!(ServerError::Banned.status_code(), StatusCode::FORBIDDEN);
-        assert_eq!(ServerError::RateLimited.status_code(), StatusCode::TOO_MANY_REQUESTS);
-        assert_eq!(ServerError::InternalError("test".into()).status_code(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            ServerError::RateLimited.status_code(),
+            StatusCode::TOO_MANY_REQUESTS
+        );
+        assert_eq!(
+            ServerError::InternalError("test".into()).status_code(),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
         assert_eq!(ServerError::RoomFull.status_code(), StatusCode::CONFLICT);
-        assert_eq!(ServerError::InvalidSlot(5).status_code(), StatusCode::BAD_REQUEST);
-        assert_eq!(ServerError::NotYourTurn.status_code(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            ServerError::InvalidSlot(5).status_code(),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            ServerError::NotYourTurn.status_code(),
+            StatusCode::BAD_REQUEST
+        );
     }
 
     #[test]

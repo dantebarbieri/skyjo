@@ -35,8 +35,7 @@ pub async fn handle_ws(
     let mut wire_format = WireFormat::Json;
 
     // Mark player as connected and record IP (never exposed to clients)
-    let (player_msg_tx, mut player_msg_rx) =
-        tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
+    let (player_msg_tx, mut player_msg_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
     let broadcast_rx = {
         let mut room_guard = room.lock().await;
         room_guard.players[player_index].connected = true;

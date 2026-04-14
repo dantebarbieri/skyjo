@@ -297,9 +297,7 @@ async fn genetic_train_without_key_returns_403() {
                 .method("POST")
                 .uri("/api/genetic/train")
                 .header("content-type", "application/json")
-                .body(Body::from(
-                    r#"{"mode":"generations","generations":1}"#,
-                ))
+                .body(Body::from(r#"{"mode":"generations","generations":1}"#))
                 .unwrap(),
         )
         .await
@@ -319,9 +317,7 @@ async fn genetic_train_with_wrong_key_returns_403() {
                 .uri("/api/genetic/train")
                 .header("content-type", "application/json")
                 .header("authorization", "Bearer wrong")
-                .body(Body::from(
-                    r#"{"mode":"generations","generations":1}"#,
-                ))
+                .body(Body::from(r#"{"mode":"generations","generations":1}"#))
                 .unwrap(),
         )
         .await
@@ -341,9 +337,7 @@ async fn genetic_train_with_correct_key_succeeds() {
                 .uri("/api/genetic/train")
                 .header("content-type", "application/json")
                 .header("authorization", "Bearer secret123")
-                .body(Body::from(
-                    r#"{"mode":"generations","generations":1}"#,
-                ))
+                .body(Body::from(r#"{"mode":"generations","generations":1}"#))
                 .unwrap(),
         )
         .await

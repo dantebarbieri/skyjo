@@ -50,9 +50,7 @@ pub async fn genetic_auth_middleware(
                 .get("authorization")
                 .and_then(|v| v.to_str().ok());
             match auth_header {
-                Some(h) if h.strip_prefix("Bearer ") == Some(key.as_str()) => {
-                    next.run(req).await
-                }
+                Some(h) if h.strip_prefix("Bearer ") == Some(key.as_str()) => next.run(req).await,
                 _ => ServerError::Unauthorized.into_response(),
             }
         }
@@ -69,15 +67,13 @@ pub async fn create_room(
         let g = state.genetic.lock().await;
         (g.total_games_trained, g.generation)
     };
-    let (code, token, player_index) = state
-        .lobby
-        .create_room(
-            req.player_name,
-            req.num_players,
-            req.rules,
-            genetic_games,
-            genetic_gen,
-        )?;
+    let (code, token, player_index) = state.lobby.create_room(
+        req.player_name,
+        req.num_players,
+        req.rules,
+        genetic_games,
+        genetic_gen,
+    )?;
 
     Ok(Json(CreateRoomResponse {
         room_code: code,
@@ -122,10 +118,7 @@ pub async fn join_room(
     Path(code): Path<String>,
     Json(req): Json<JoinRoomRequest>,
 ) -> Result<Json<JoinRoomResponse>, ServerError> {
-    let (token, player_index) = state
-        .lobby
-        .join_room(&code, req.player_name)
-        .await?;
+    let (token, player_index) = state.lobby.join_room(&code, req.player_name).await?;
 
     Ok(Json(JoinRoomResponse {
         session_token: token.to_string(),

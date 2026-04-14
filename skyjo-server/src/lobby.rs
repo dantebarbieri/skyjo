@@ -103,9 +103,7 @@ impl Lobby {
             return Err(ServerError::GameAlreadyStarted);
         }
 
-        let slot = room
-            .next_available_slot()
-            .ok_or(ServerError::RoomFull)?;
+        let slot = room.next_available_slot().ok_or(ServerError::RoomFull)?;
 
         let token = SessionToken::new();
         room.players[slot].name = player_name.clone();
@@ -440,9 +438,7 @@ mod tests {
     #[test]
     fn create_room_rejects_whitespace_only_name() {
         let lobby = make_lobby(5);
-        let err = lobby
-            .create_room("   ".into(), 2, None, 0, 0)
-            .unwrap_err();
+        let err = lobby.create_room("   ".into(), 2, None, 0, 0).unwrap_err();
         assert_eq!(err, ServerError::PlayerNameEmpty);
     }
 

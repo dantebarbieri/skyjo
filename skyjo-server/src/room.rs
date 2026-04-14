@@ -277,7 +277,7 @@ impl Room {
                     broadcast_lag_count: 0,
                 };
             }
-            s if s.starts_with("Bot:")=> {
+            s if s.starts_with("Bot:") => {
                 let strategy = &s[4..];
                 // Validate strategy name (Genetic variants are valid even without genome at config time)
                 if !strategy.starts_with("Genetic") {
@@ -298,7 +298,11 @@ impl Room {
                     broadcast_lag_count: 0,
                 };
             }
-            _ => return Err(ServerError::InvalidAction(format!("Unknown player type: {player_type}"))),
+            _ => {
+                return Err(ServerError::InvalidAction(format!(
+                    "Unknown player type: {player_type}"
+                )));
+            }
         }
 
         Ok(())
@@ -589,7 +593,7 @@ impl Room {
                 _ => {
                     return Err(ServerError::InvalidAction(
                         "Current player is not a bot".to_string(),
-                    ))
+                    ));
                 }
             };
 
@@ -783,7 +787,10 @@ impl Room {
     }
 
     /// Get the per-player game state for a specific player.
-    pub fn get_player_state(&self, player_index: usize) -> Result<InteractiveGameState, ServerError> {
+    pub fn get_player_state(
+        &self,
+        player_index: usize,
+    ) -> Result<InteractiveGameState, ServerError> {
         let game = self.game.as_ref().ok_or(ServerError::NotInGame)?;
         Ok(game.get_player_state(player_index))
     }
@@ -953,11 +960,7 @@ impl Room {
     // -- Per-player targeted channel methods --
 
     /// Register a player's message channel (called on connect/reconnect).
-    pub fn set_player_tx(
-        &mut self,
-        slot: usize,
-        tx: tokio::sync::mpsc::UnboundedSender<Vec<u8>>,
-    ) {
+    pub fn set_player_tx(&mut self, slot: usize, tx: tokio::sync::mpsc::UnboundedSender<Vec<u8>>) {
         if slot < self.player_txs.len() {
             self.player_txs[slot] = Some(tx);
         }
@@ -2055,7 +2058,13 @@ mod tests {
     fn make_strategy_genetic_requires_genome() {
         let result = make_strategy("Genetic", None, 0);
         assert!(result.is_err());
-        assert!(result.err().unwrap().message().contains("requires a trained model"));
+        assert!(
+            result
+                .err()
+                .unwrap()
+                .message()
+                .contains("requires a trained model")
+        );
     }
 
     #[test]
@@ -2074,7 +2083,10 @@ mod tests {
     fn make_strategy_unknown_fails() {
         let result = make_strategy("FooBar", None, 0);
         assert!(result.is_err());
-        assert!(matches!(result.err().unwrap(), ServerError::InvalidStrategy(_)));
+        assert!(matches!(
+            result.err().unwrap(),
+            ServerError::InvalidStrategy(_)
+        ));
     }
 
     #[test]
@@ -2091,7 +2103,10 @@ mod tests {
     fn make_rules_unknown_fails() {
         let result = make_rules("Chaos");
         assert!(result.is_err());
-        assert!(matches!(result.err().unwrap(), ServerError::InvalidRules(_)));
+        assert!(matches!(
+            result.err().unwrap(),
+            ServerError::InvalidRules(_)
+        ));
     }
 
     #[test]
@@ -2122,7 +2137,9 @@ mod tests {
 
         let converted = room.convert_disconnected_to_bots(Duration::from_secs(60));
         assert_eq!(converted, vec![0]);
-        assert!(matches!(room.players[0].slot_type, PlayerSlotType::Bot { ref strategy } if strategy == "Random"));
+        assert!(
+            matches!(room.players[0].slot_type, PlayerSlotType::Bot { ref strategy } if strategy == "Random")
+        );
         assert!(room.players[0].name.ends_with(" (Bot)"));
         assert!(room.players[0].was_human);
     }
@@ -2175,12 +2192,18 @@ mod tests {
         let mut room = test_room();
         // Default is None
         assert_eq!(room.disconnect_bot_timeout_secs, None);
-        assert_eq!(room.effective_disconnect_bot_timeout(), Duration::from_secs(60));
+        assert_eq!(
+            room.effective_disconnect_bot_timeout(),
+            Duration::from_secs(60)
+        );
 
         // Set custom
         room.set_disconnect_bot_timeout(Some(120)).unwrap();
         assert_eq!(room.disconnect_bot_timeout_secs, Some(120));
-        assert_eq!(room.effective_disconnect_bot_timeout(), Duration::from_secs(120));
+        assert_eq!(
+            room.effective_disconnect_bot_timeout(),
+            Duration::from_secs(120)
+        );
 
         // Reject out of range
         assert!(room.set_disconnect_bot_timeout(Some(5)).is_err());
@@ -2565,8 +2588,7 @@ mod tests {
         let snapshot = room.to_snapshot();
         let json = snapshot.game_state_json.unwrap();
         // Should be valid InteractiveGameState JSON
-        let state: skyjo_core::InteractiveGameState =
-            serde_json::from_str(&json).unwrap();
+        let state: skyjo_core::InteractiveGameState = serde_json::from_str(&json).unwrap();
         assert_eq!(state.num_players, 2);
     }
 }

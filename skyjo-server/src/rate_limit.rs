@@ -96,9 +96,8 @@ impl RateLimiter {
     /// Clean up stale entries (call periodically). Removes buckets that have been full for a while.
     pub fn cleanup(&self, max_idle: Duration) {
         let now = Instant::now();
-        self.buckets.retain(|_, bucket| {
-            now.duration_since(bucket.last_refill) < max_idle
-        });
+        self.buckets
+            .retain(|_, bucket| now.duration_since(bucket.last_refill) < max_idle);
     }
 }
 

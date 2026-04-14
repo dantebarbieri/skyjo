@@ -12,7 +12,9 @@ impl Persistence {
     pub fn open(path: &Path) -> Result<Self, rusqlite::Error> {
         let conn = Connection::open(path)?;
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
-        let persistence = Self { conn: Mutex::new(conn) };
+        let persistence = Self {
+            conn: Mutex::new(conn),
+        };
         persistence.migrate()?;
         Ok(persistence)
     }
@@ -20,7 +22,8 @@ impl Persistence {
     /// Run schema migrations.
     fn migrate(&self) -> Result<(), rusqlite::Error> {
         let conn = self.conn.lock().unwrap();
-        conn.execute_batch("
+        conn.execute_batch(
+            "
             CREATE TABLE IF NOT EXISTS game_replays (
                 id TEXT PRIMARY KEY,
                 room_code TEXT NOT NULL,
@@ -52,7 +55,8 @@ impl Persistence {
             CREATE INDEX IF NOT EXISTS idx_replays_room ON game_replays(room_code);
             CREATE INDEX IF NOT EXISTS idx_replays_created ON game_replays(created_at);
             CREATE INDEX IF NOT EXISTS idx_stats_name ON player_stats(player_name);
-        ")?;
+        ",
+        )?;
         Ok(())
     }
 
@@ -68,8 +72,8 @@ impl Persistence {
         history_json: &str,
         winner_indices: &[usize],
     ) -> Result<(), rusqlite::Error> {
-        let compressed = zstd::encode_all(history_json.as_bytes(), 3)
-            .expect("zstd compression failed");
+        let compressed =
+            zstd::encode_all(history_json.as_bytes(), 3).expect("zstd compression failed");
         let players_json = serde_json::to_string(players).unwrap();
         let winners_json = serde_json::to_string(winner_indices).unwrap();
         let now = chrono::Utc::now().to_rfc3339();
@@ -86,9 +90,7 @@ impl Persistence {
     /// Load a game replay by ID, decompressing the history.
     pub fn load_replay(&self, id: &str) -> Result<Option<(String, Vec<u8>)>, rusqlite::Error> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT players, history FROM game_replays WHERE id = ?1"
-        )?;
+        let mut stmt = conn.prepare("SELECT players, history FROM game_replays WHERE id = ?1")?;
         let result = stmt.query_row(params![id], |row| {
             let players: String = row.get(0)?;
             let compressed: Vec<u8> = row.get(1)?;
@@ -96,8 +98,8 @@ impl Persistence {
         });
         match result {
             Ok((players, compressed)) => {
-                let decompressed = zstd::decode_all(compressed.as_slice())
-                    .expect("zstd decompression failed");
+                let decompressed =
+                    zstd::decode_all(compressed.as_slice()).expect("zstd decompression failed");
                 Ok(Some((players, decompressed)))
             }
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
@@ -129,7 +131,10 @@ impl Persistence {
     }
 
     /// Get player stats.
-    pub fn get_player_stats(&self, player_name: &str) -> Result<Vec<PlayerStatsRow>, rusqlite::Error> {
+    pub fn get_player_stats(
+        &self,
+        player_name: &str,
+    ) -> Result<Vec<PlayerStatsRow>, rusqlite::Error> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT player_name, rules, games_played, games_won, total_score, best_score, worst_score
@@ -155,8 +160,8 @@ impl Persistence {
         room_code: &str,
         snapshot_json: &str,
     ) -> Result<(), rusqlite::Error> {
-        let compressed = zstd::encode_all(snapshot_json.as_bytes(), 3)
-            .expect("zstd compression failed");
+        let compressed =
+            zstd::encode_all(snapshot_json.as_bytes(), 3).expect("zstd compression failed");
         let now = chrono::Utc::now().to_rfc3339();
         let conn = self.conn.lock().unwrap();
         conn.execute(
@@ -170,17 +175,15 @@ impl Persistence {
     /// Load a room snapshot, decompressing.
     pub fn load_room_snapshot(&self, room_code: &str) -> Result<Option<Vec<u8>>, rusqlite::Error> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT snapshot FROM room_snapshots WHERE room_code = ?1"
-        )?;
+        let mut stmt = conn.prepare("SELECT snapshot FROM room_snapshots WHERE room_code = ?1")?;
         let result = stmt.query_row(params![room_code], |row| {
             let compressed: Vec<u8> = row.get(0)?;
             Ok(compressed)
         });
         match result {
             Ok(compressed) => {
-                let decompressed = zstd::decode_all(compressed.as_slice())
-                    .expect("zstd decompression failed");
+                let decompressed =
+                    zstd::decode_all(compressed.as_slice()).expect("zstd decompression failed");
                 Ok(Some(decompressed))
             }
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
@@ -191,14 +194,12 @@ impl Persistence {
     /// Load all room snapshots (for crash recovery on startup).
     pub fn load_all_room_snapshots(&self) -> Result<Vec<(String, Vec<u8>)>, rusqlite::Error> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT room_code, snapshot FROM room_snapshots"
-        )?;
+        let mut stmt = conn.prepare("SELECT room_code, snapshot FROM room_snapshots")?;
         let rows = stmt.query_map([], |row| {
             let code: String = row.get(0)?;
             let compressed: Vec<u8> = row.get(1)?;
-            let decompressed = zstd::decode_all(compressed.as_slice())
-                .expect("zstd decompression failed");
+            let decompressed =
+                zstd::decode_all(compressed.as_slice()).expect("zstd decompression failed");
             Ok((code, decompressed))
         })?;
         rows.collect()
@@ -246,7 +247,16 @@ mod tests {
     fn insert_and_query_replay() {
         let db = test_db();
         let history = r#"{"rounds":[]}"#;
-        db.save_replay("r1", "ABCDEF", &["Alice".into(), "Bob".into()], "Standard", 42, history, &[0]).unwrap();
+        db.save_replay(
+            "r1",
+            "ABCDEF",
+            &["Alice".into(), "Bob".into()],
+            "Standard",
+            42,
+            history,
+            &[0],
+        )
+        .unwrap();
 
         let (players, data) = db.load_replay("r1").unwrap().unwrap();
         assert!(players.contains("Alice"));
@@ -262,8 +272,10 @@ mod tests {
     #[test]
     fn update_player_stats() {
         let db = test_db();
-        db.update_player_stats("Alice", "Standard", 45, true).unwrap();
-        db.update_player_stats("Alice", "Standard", 60, false).unwrap();
+        db.update_player_stats("Alice", "Standard", 45, true)
+            .unwrap();
+        db.update_player_stats("Alice", "Standard", 60, false)
+            .unwrap();
 
         let stats = db.get_player_stats("Alice").unwrap();
         assert_eq!(stats.len(), 1);
@@ -307,7 +319,8 @@ mod tests {
         let db = test_db();
         // Large-ish history to test compression
         let history = "{\"data\":\"".to_string() + &"x".repeat(10000) + "\"}";
-        db.save_replay("big", "ROOM", &["P1".into()], "Standard", 1, &history, &[]).unwrap();
+        db.save_replay("big", "ROOM", &["P1".into()], "Standard", 1, &history, &[])
+            .unwrap();
         let (_, data) = db.load_replay("big").unwrap().unwrap();
         assert_eq!(String::from_utf8(data).unwrap(), history);
     }

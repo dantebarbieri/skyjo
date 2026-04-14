@@ -99,10 +99,8 @@ async fn main() {
                     match String::from_utf8(data) {
                         Ok(json) => match serde_json::from_str::<RoomSnapshot>(&json) {
                             Ok(snapshot) => {
-                                let room =
-                                    skyjo_server::room::Room::from_snapshot(snapshot);
-                                let shared =
-                                    Arc::new(tokio::sync::Mutex::new(room));
+                                let room = skyjo_server::room::Room::from_snapshot(snapshot);
+                                let shared = Arc::new(tokio::sync::Mutex::new(room));
                                 app_state.lobby.rooms.insert(code.clone(), shared);
                                 tracing::info!(room = %code, "Restored room from snapshot");
                             }
