@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { z } from 'zod';
+import { StrategyDescriptionsDataSchema } from '@/schemas';
 
 // Module-level cache so WASM functions are accessible after init
 let wasmModule: typeof import('../../pkg/skyjo_wasm.js') | null = null;
@@ -28,8 +30,8 @@ export function useWasm(): WasmState {
         wasmModule = mod;
         if (cancelled) return;
 
-        const strategies: string[] = JSON.parse(mod.get_available_strategies());
-        const rules: string[] = JSON.parse(mod.get_available_rules());
+        const strategies: string[] = z.array(z.string()).parse(JSON.parse(mod.get_available_strategies()));
+        const rules: string[] = z.array(z.string()).parse(JSON.parse(mod.get_available_rules()));
 
         setState({ ready: true, strategies, rules, error: null });
       } catch (err) {
@@ -58,7 +60,7 @@ export function getRulesInfo(rulesName: string): Record<string, string> | null {
 export function getStrategyDescriptions(): import('@/types').StrategyDescriptionsData | null {
   if (!wasmModule) return null;
   try {
-    return JSON.parse(wasmModule.get_strategy_descriptions());
+    return StrategyDescriptionsDataSchema.parse(JSON.parse(wasmModule.get_strategy_descriptions()));
   } catch {
     return null;
   }
