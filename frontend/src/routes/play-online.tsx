@@ -392,7 +392,7 @@ function RoomCodeInput({ value, onChange }: { value: string; onChange: (v: strin
           onPaste={handlePaste}
           onFocus={e => e.target.select()}
           className={cn(
-            'w-10 h-12 text-center text-xl font-mono font-bold rounded-md border border-input bg-background',
+            'w-9 h-11 sm:w-10 sm:h-12 text-center text-lg sm:text-xl font-mono font-bold rounded-md border border-input bg-background',
             'focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent',
             'uppercase transition-colors',
           )}

@@ -2,6 +2,7 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
+import { SkipBack, SkipForward, ChevronLeft, ChevronRight } from 'lucide-react';
 import type { GameHistory } from '../types';
 
 interface ReplayControlsProps {
@@ -43,14 +44,14 @@ export default function ReplayControls({
   return (
     <div className="space-y-3">
       {/* Round navigation */}
-      <div className="flex items-center gap-2 flex-wrap">
+      <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
         <span className="text-sm font-medium">Rounds:</span>
         {history.rounds.map((r, i) => (
           <Button
             key={i}
             size="sm"
             variant={i === activeRound ? 'default' : 'outline'}
-            className="h-7 text-xs"
+            className="h-8 sm:h-7 text-xs"
             onClick={() => onJumpToRound(i)}
           >
             R{i + 1} ({r.turns.length})
@@ -62,9 +63,10 @@ export default function ReplayControls({
       </div>
 
       {/* Step controls */}
-      <div className="flex items-center gap-2 flex-wrap">
+      <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
         <Button size="sm" variant="outline" onClick={onSkipToRoundStart}>
-          Round Start
+          <SkipBack className="h-4 w-4 sm:hidden" />
+          <span className="hidden sm:inline">Round Start</span>
         </Button>
         <Button
           size="sm"
@@ -72,10 +74,11 @@ export default function ReplayControls({
           onClick={onPrev}
           disabled={currentStep === 0}
         >
-          Previous
+          <ChevronLeft className="h-4 w-4 sm:hidden" />
+          <span className="hidden sm:inline">Previous</span>
         </Button>
-        <span className="text-sm text-muted-foreground font-mono min-w-24 sm:min-w-32 text-center">
-          Step {currentStep + 1} / {totalSteps}
+        <span className="text-sm text-muted-foreground font-mono min-w-20 sm:min-w-32 text-center">
+          {currentStep + 1} / {totalSteps}
         </span>
         <Button
           size="sm"
@@ -83,10 +86,12 @@ export default function ReplayControls({
           onClick={onNext}
           disabled={currentStep === totalSteps - 1}
         >
-          Next
+          <ChevronRight className="h-4 w-4 sm:hidden" />
+          <span className="hidden sm:inline">Next</span>
         </Button>
         <Button size="sm" variant="outline" onClick={onSkipToRoundEnd}>
-          Round End
+          <SkipForward className="h-4 w-4 sm:hidden" />
+          <span className="hidden sm:inline">Round End</span>
         </Button>
       </div>
 

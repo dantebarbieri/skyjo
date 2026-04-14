@@ -178,9 +178,9 @@ export default function ConfigPanel({
 
         <fieldset className="border rounded-lg p-3">
           <legend className="text-sm font-medium px-1">Player Strategies</legend>
-          <div className="flex items-center gap-2 mb-2 flex-wrap">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 mb-2">
             <Select value={bulkStrategy} onValueChange={setBulkStrategy}>
-              <SelectTrigger className="w-36 sm:w-48">
+              <SelectTrigger className="w-full sm:w-48">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>

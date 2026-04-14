@@ -232,60 +232,65 @@ function GameSetup({
           <label className="text-sm font-medium">Players</label>
           <div className="space-y-2">
             {Array.from({ length: numPlayers }, (_, i) => (
-              <div key={i} className="flex gap-2 items-center">
-                <span className="text-sm text-muted-foreground w-6 shrink-0">{i + 1}.</span>
-                <Select
-                  value={playerTypes[i] || 'Human'}
-                  onValueChange={(v) => handleTypeChange(i, v as PlayerType)}
-                >
-                  <SelectTrigger className="w-28 sm:w-40 shrink-0">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {typeOptions.map((opt) => (
-                      <SelectItem key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {/* Generation picker for Genetic bots */}
-                {playerTypes[i]?.startsWith('Bot:Genetic') && (
+              <div key={i} className="flex flex-col sm:flex-row gap-2">
+                <div className="flex gap-2 items-center">
+                  <span className="text-sm text-muted-foreground w-6 shrink-0">{i + 1}.</span>
                   <Select
-                    value={playerTypes[i] === 'Bot:Genetic' ? '__latest__' : playerTypes[i]?.slice(12) || '__latest__'}
-                    onValueChange={(v) => handleTypeChange(i, v === '__latest__' ? 'Bot:Genetic' : `Bot:Genetic:${v}` as PlayerType)}
+                    value={playerTypes[i] || 'Human'}
+                    onValueChange={(v) => handleTypeChange(i, v as PlayerType)}
                   >
-                    <SelectTrigger className="w-24 sm:w-32 shrink-0 text-xs">
+                    <SelectTrigger className="w-28 sm:w-40 shrink-0">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="__latest__">Latest</SelectItem>
-                      {savedGens.map((sg) => (
-                        <SelectItem key={sg.name} value={sg.name}>
-                          {sg.name}
+                      {typeOptions.map((opt) => (
+                        <SelectItem key={opt.value} value={opt.value}>
+                          {opt.label}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
-                )}
-                <Input
-                  placeholder={
-                    playerTypes[i] === 'Human'
-                      ? `Player ${i + 1}`
-                      : `Bot (${playerTypes[i]?.slice(4) || ''})`
-                  }
-                  value={playerNames[i] || ''}
-                  onChange={(e) => handleNameChange(i, e.target.value)}
-                />
-                {playerTypes[i] !== 'Human' && (
-                  <Link
-                    to={`/rules/strategies/${playerTypes[i]?.slice(4) || ''}`}
-                    className="text-muted-foreground hover:text-primary transition-colors shrink-0"
-                    title={`View ${playerTypes[i]?.slice(4) || ''} strategy guide`}
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
-                  </Link>
-                )}
+                  {/* Generation picker for Genetic bots */}
+                  {playerTypes[i]?.startsWith('Bot:Genetic') && (
+                    <Select
+                      value={playerTypes[i] === 'Bot:Genetic' ? '__latest__' : playerTypes[i]?.slice(12) || '__latest__'}
+                      onValueChange={(v) => handleTypeChange(i, v === '__latest__' ? 'Bot:Genetic' : `Bot:Genetic:${v}` as PlayerType)}
+                    >
+                      <SelectTrigger className="w-24 sm:w-32 shrink-0 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__latest__">Latest</SelectItem>
+                        {savedGens.map((sg) => (
+                          <SelectItem key={sg.name} value={sg.name}>
+                            {sg.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                </div>
+                <div className="flex gap-2 items-center sm:flex-1 min-w-0 pl-8 sm:pl-0">
+                  <Input
+                    placeholder={
+                      playerTypes[i] === 'Human'
+                        ? `Player ${i + 1}`
+                        : `Bot (${playerTypes[i]?.slice(4) || ''})`
+                    }
+                    value={playerNames[i] || ''}
+                    onChange={(e) => handleNameChange(i, e.target.value)}
+                    className="min-w-0"
+                  />
+                  {playerTypes[i] !== 'Human' && (
+                    <Link
+                      to={`/rules/strategies/${playerTypes[i]?.slice(4) || ''}`}
+                      className="text-muted-foreground hover:text-primary transition-colors shrink-0"
+                      title={`View ${playerTypes[i]?.slice(4) || ''} strategy guide`}
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+                    </Link>
+                  )}
+                </div>
               </div>
             ))}
           </div>
@@ -373,11 +378,19 @@ function PlayBoard({
   const { action_needed, boards, num_rows, num_cols, current_player } = state;
   const [wantsFlip, setWantsFlip] = useState(false);
   const cardSizes = useResponsiveCardSize();
+  const activeBoardRef = useRef<HTMLDivElement>(null);
 
   // Get the player whose turn it is for initial flips
   const activePlayer = action_needed.type === 'ChooseInitialFlips'
     ? action_needed.player
     : current_player;
+
+  // Auto-scroll to active player's board on mobile
+  useEffect(() => {
+    if (window.innerWidth < 640 && activeBoardRef.current) {
+      activeBoardRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }, [activePlayer]);
 
   // Disable all UI interactions when it's a bot's turn
   const isBotTurn = playerTypes[activePlayer] !== 'Human';
@@ -545,122 +558,128 @@ function PlayBoard({
 
       {/* Draw area — always rendered during play phase for layout stability */}
       {isPlayPhase && (
-        <div className="flex items-center justify-center gap-3 sm:gap-6 md:gap-8">
-          {/* Deck */}
-          <button
-            onClick={handleDrawDeck}
-            disabled={!isChooseDraw}
-            className={cn(
-              'flex flex-col items-center gap-1 transition-transform',
-              isChooseDraw && 'hover:scale-105 cursor-pointer'
-            )}
-          >
-            <span className="text-xs text-muted-foreground">
-              Deck ({state.deck_remaining})
-            </span>
-            <div
-              className={cn(
-                'rounded-lg',
-                isChooseDraw && 'ring-2 ring-blue-400'
-              )}
-            >
-              <SkyjoCard slot={{ Hidden: 0 }} size={cardSizes.draw} />
-            </div>
-          </button>
-
-          {/* Discard piles */}
-          {state.discard_tops.map((top, pileIdx) => (
+        <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-4 md:gap-8">
+          {/* Deck + Discard piles group */}
+          <div className="flex items-center gap-2 sm:gap-4 md:gap-8">
+            {/* Deck */}
             <button
-              key={pileIdx}
-              onClick={() => handleDrawDiscard(pileIdx)}
-              disabled={
-                !isChooseDraw ||
-                top === null ||
-                !action_needed.drawable_piles?.includes(pileIdx)
-              }
+              onClick={handleDrawDeck}
+              disabled={!isChooseDraw}
               className={cn(
                 'flex flex-col items-center gap-1 transition-transform',
-                isChooseDraw &&
-                  top !== null &&
-                  action_needed.drawable_piles?.includes(pileIdx) &&
-                  'hover:scale-105 cursor-pointer'
+                isChooseDraw && 'hover:scale-105 cursor-pointer'
               )}
             >
               <span className="text-xs text-muted-foreground">
-                Discard ({state.discard_sizes[pileIdx]})
+                Deck ({state.deck_remaining})
               </span>
               <div
                 className={cn(
                   'rounded-lg',
+                  isChooseDraw && 'ring-2 ring-blue-400'
+                )}
+              >
+                <SkyjoCard slot={{ Hidden: 0 }} size={cardSizes.draw} />
+              </div>
+            </button>
+
+            {/* Discard piles */}
+            {state.discard_tops.map((top, pileIdx) => (
+              <button
+                key={pileIdx}
+                onClick={() => handleDrawDiscard(pileIdx)}
+                disabled={
+                  !isChooseDraw ||
+                  top === null ||
+                  !action_needed.drawable_piles?.includes(pileIdx)
+                }
+                className={cn(
+                  'flex flex-col items-center gap-1 transition-transform',
                   isChooseDraw &&
                     top !== null &&
                     action_needed.drawable_piles?.includes(pileIdx) &&
-                    'ring-2 ring-blue-400'
+                    'hover:scale-105 cursor-pointer'
                 )}
               >
-                {top !== null ? (
-                  <SkyjoCard slot={{ Revealed: top }} size={cardSizes.draw} />
-                ) : (
-                  <SkyjoCard slot="Cleared" size={cardSizes.draw} />
-                )}
-              </div>
-            </button>
-          ))}
-
-          {/* Drawn card / placeholder — stable slot */}
-          <div className="flex flex-col items-center gap-1">
-            <span className="text-xs text-muted-foreground">
-              {hasDrawnCard ? 'Drawn' : 'Drawn'}
-            </span>
-            {hasDrawnCard ? (
-              <div className="ring-2 ring-green-400 rounded-lg">
-                <SkyjoCard
-                  slot={{ Revealed: action_needed.drawn_card! }}
-                  size={cardSizes.draw}
-                />
-              </div>
-            ) : (
-              <SkyjoCard slot="Cleared" size={cardSizes.draw} />
-            )}
+                <span className="text-xs text-muted-foreground">
+                  Discard ({state.discard_sizes[pileIdx]})
+                </span>
+                <div
+                  className={cn(
+                    'rounded-lg',
+                    isChooseDraw &&
+                      top !== null &&
+                      action_needed.drawable_piles?.includes(pileIdx) &&
+                      'ring-2 ring-blue-400'
+                  )}
+                >
+                  {top !== null ? (
+                    <SkyjoCard slot={{ Revealed: top }} size={cardSizes.draw} />
+                  ) : (
+                    <SkyjoCard slot="Cleared" size={cardSizes.draw} />
+                  )}
+                </div>
+              </button>
+            ))}
           </div>
 
-          {/* Action icon buttons — always present, enabled/disabled contextually */}
-          <TooltipProvider>
-            <div className="flex flex-col items-center gap-2">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant={wantsFlip ? 'default' : 'outline'}
-                    size="icon"
-                    disabled={!isDeckDrawAction}
-                    onClick={handleToggleFlipMode}
-                    className="h-9 w-9"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="right">
-                  {wantsFlip ? 'Back to Place Mode' : 'Discard & Flip'}
-                </TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    disabled={!isDiscardPlacement}
-                    onClick={() => onAction({ type: 'UndoDrawFromDiscard' })}
-                    className="h-9 w-9"
-                  >
-                    <Undo2 className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="right">
-                  Undo
-                </TooltipContent>
-              </Tooltip>
+          {/* Drawn card + Action buttons group */}
+          <div className="flex items-center gap-2 sm:gap-4 md:gap-8">
+            {/* Drawn card / placeholder — stable slot */}
+            <div className="flex flex-col items-center gap-1">
+              <span className="text-xs text-muted-foreground">
+                {hasDrawnCard ? 'Drawn' : 'Drawn'}
+              </span>
+              {hasDrawnCard ? (
+                <div className="ring-2 ring-green-400 rounded-lg">
+                  <SkyjoCard
+                    slot={{ Revealed: action_needed.drawn_card! }}
+                    size={cardSizes.draw}
+                  />
+                </div>
+              ) : (
+                <SkyjoCard slot="Cleared" size={cardSizes.draw} />
+              )}
             </div>
-          </TooltipProvider>
+
+            {/* Action icon buttons — always present, enabled/disabled contextually */}
+            <TooltipProvider>
+              <div className="flex flex-col items-center gap-2">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant={wantsFlip ? 'default' : 'outline'}
+                      size="icon"
+                      disabled={!isDeckDrawAction}
+                      onClick={handleToggleFlipMode}
+                      className="h-9 w-9"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">
+                    {wantsFlip ? 'Back to Place Mode' : 'Discard & Flip'}
+                  </TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      disabled={!isDiscardPlacement}
+                      onClick={() => onAction({ type: 'UndoDrawFromDiscard' })}
+                      className="h-9 w-9"
+                    >
+                      <Undo2 className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">
+                    Undo
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+            </TooltipProvider>
+          </div>
         </div>
       )}
 
@@ -683,6 +702,7 @@ function PlayBoard({
           return (
             <div
               key={playerIdx}
+              ref={isActive ? activeBoardRef : undefined}
               className={cn(
                 'rounded-lg border p-3 transition-colors',
                 isActive && !state.is_final_turn && 'border-blue-500 border-2',

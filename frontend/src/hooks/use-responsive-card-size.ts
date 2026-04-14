@@ -8,12 +8,15 @@ interface ResponsiveCardSizes {
   draw: CardSize;
 }
 
-const MOBILE: ResponsiveCardSizes = { board: 'sm', boardActive: 'sm', draw: 'md' };
-const TABLET: ResponsiveCardSizes = { board: 'sm', boardActive: 'md', draw: 'lg' };
+const MOBILE: ResponsiveCardSizes = { board: 'sm', boardActive: 'sm', draw: 'sm' };
+const TABLET: ResponsiveCardSizes = { board: 'sm', boardActive: 'md', draw: 'md' };
+const DESKTOP: ResponsiveCardSizes = { board: 'sm', boardActive: 'md', draw: 'lg' };
 
 function getSizes(): ResponsiveCardSizes {
-  if (typeof window === 'undefined') return TABLET;
-  return window.innerWidth >= 480 ? TABLET : MOBILE;
+  if (typeof window === 'undefined') return DESKTOP;
+  if (window.innerWidth >= 768) return DESKTOP;
+  if (window.innerWidth >= 480) return TABLET;
+  return MOBILE;
 }
 
 let listeners: Array<() => void> = [];
@@ -26,12 +29,14 @@ function subscribe(cb: () => void) {
   };
 }
 
+function notify() {
+  current = getSizes();
+  listeners.forEach((l) => l());
+}
+
 if (typeof window !== 'undefined') {
-  const mql = window.matchMedia('(min-width: 480px)');
-  mql.addEventListener('change', () => {
-    current = getSizes();
-    listeners.forEach((l) => l());
-  });
+  window.matchMedia('(min-width: 480px)').addEventListener('change', notify);
+  window.matchMedia('(min-width: 768px)').addEventListener('change', notify);
 }
 
 function getSnapshot() {
@@ -39,5 +44,5 @@ function getSnapshot() {
 }
 
 export function useResponsiveCardSize(): ResponsiveCardSizes {
-  return useSyncExternalStore(subscribe, getSnapshot, () => TABLET);
+  return useSyncExternalStore(subscribe, getSnapshot, () => DESKTOP);
 }
