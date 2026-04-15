@@ -38,6 +38,7 @@ function makeBaseRound(overrides: Partial<RoundHistory> = {}): RoundHistory {
     going_out_player: null,
     end_of_round_clears: [],
     round_scores: [78, 18],
+    raw_round_scores: [78, 18],
     cumulative_scores: [78, 18],
     truncated: false,
     ...overrides,

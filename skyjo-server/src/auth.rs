@@ -13,13 +13,32 @@ use crate::error::ServerError;
 
 // --- Permission Levels ---
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
-#[sqlx(type_name = "permission_level", rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum PermissionLevel {
     Admin,
     Moderator,
     User,
+}
+
+impl PermissionLevel {
+    /// Map from the lookup table ID to the enum.
+    pub fn from_id(id: i32) -> Self {
+        match id {
+            3 => Self::Admin,
+            2 => Self::Moderator,
+            _ => Self::User, // id 1 = user (default)
+        }
+    }
+
+    /// Map to the lookup table ID.
+    pub fn to_id(self) -> i32 {
+        match self {
+            Self::Admin => 3,
+            Self::Moderator => 2,
+            Self::User => 1,
+        }
+    }
 }
 
 impl std::fmt::Display for PermissionLevel {
@@ -34,7 +53,19 @@ impl std::fmt::Display for PermissionLevel {
 
 // --- User Model ---
 
+/// Raw DB row — maps directly to the `users` table columns.
 #[derive(Debug, Clone, sqlx::FromRow)]
+struct UserRow {
+    pub id: Uuid,
+    pub username: String,
+    pub password_hash: String,
+    pub display_name: String,
+    pub permission_level_id: i32,
+    pub created_at: chrono::DateTime<Utc>,
+    pub updated_at: chrono::DateTime<Utc>,
+}
+
+#[derive(Debug, Clone)]
 pub struct User {
     pub id: Uuid,
     pub username: String,
@@ -43,6 +74,20 @@ pub struct User {
     pub permission_level: PermissionLevel,
     pub created_at: chrono::DateTime<Utc>,
     pub updated_at: chrono::DateTime<Utc>,
+}
+
+impl From<UserRow> for User {
+    fn from(row: UserRow) -> Self {
+        Self {
+            id: row.id,
+            username: row.username,
+            password_hash: row.password_hash,
+            display_name: row.display_name,
+            permission_level: PermissionLevel::from_id(row.permission_level_id),
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        }
+    }
 }
 
 // --- JWT Claims ---
@@ -149,9 +194,9 @@ pub async fn find_user_by_username(
     pool: &PgPool,
     username: &str,
 ) -> Result<Option<User>, ServerError> {
-    let row: Option<User> = sqlx::query_as(
+    let row: Option<UserRow> = sqlx::query_as(
         r#"SELECT id, username, password_hash, display_name,
-                  permission_level, created_at, updated_at
+                  permission_level_id, created_at, updated_at
            FROM users WHERE username = $1"#,
     )
     .bind(username)
@@ -159,13 +204,13 @@ pub async fn find_user_by_username(
     .await
     .map_err(|e| ServerError::InternalError(format!("database error: {e}")))?;
 
-    Ok(row)
+    Ok(row.map(User::from))
 }
 
 pub async fn find_user_by_id(pool: &PgPool, id: Uuid) -> Result<Option<User>, ServerError> {
-    let row: Option<User> = sqlx::query_as(
+    let row: Option<UserRow> = sqlx::query_as(
         r#"SELECT id, username, password_hash, display_name,
-                  permission_level, created_at, updated_at
+                  permission_level_id, created_at, updated_at
            FROM users WHERE id = $1"#,
     )
     .bind(id)
@@ -173,7 +218,7 @@ pub async fn find_user_by_id(pool: &PgPool, id: Uuid) -> Result<Option<User>, Se
     .await
     .map_err(|e| ServerError::InternalError(format!("database error: {e}")))?;
 
-    Ok(row)
+    Ok(row.map(User::from))
 }
 
 pub async fn create_user(
@@ -188,14 +233,14 @@ pub async fn create_user(
     let now = Utc::now();
 
     sqlx::query(
-        "INSERT INTO users (id, username, password_hash, display_name, permission_level, created_at, updated_at)
+        "INSERT INTO users (id, username, password_hash, display_name, permission_level_id, created_at, updated_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7)",
     )
     .bind(id)
     .bind(username)
     .bind(&password_hash)
     .bind(display_name)
-    .bind(permission)
+    .bind(permission.to_id())
     .bind(now)
     .bind(now)
     .execute(pool)
@@ -274,16 +319,16 @@ pub async fn revoke_all_user_tokens(pool: &PgPool, user_id: Uuid) -> Result<(), 
 }
 
 pub async fn list_all_users(pool: &PgPool) -> Result<Vec<User>, ServerError> {
-    let rows: Vec<User> = sqlx::query_as(
+    let rows: Vec<UserRow> = sqlx::query_as(
         r#"SELECT id, username, password_hash, display_name,
-                  permission_level, created_at, updated_at
+                  permission_level_id, created_at, updated_at
            FROM users ORDER BY created_at ASC"#,
     )
     .fetch_all(pool)
     .await
     .map_err(|e| ServerError::InternalError(format!("database error: {e}")))?;
 
-    Ok(rows)
+    Ok(rows.into_iter().map(User::from).collect())
 }
 
 pub async fn update_user_permission(
@@ -292,8 +337,8 @@ pub async fn update_user_permission(
     permission: PermissionLevel,
 ) -> Result<(), ServerError> {
     let result =
-        sqlx::query("UPDATE users SET permission_level = $1, updated_at = NOW() WHERE id = $2")
-            .bind(permission)
+        sqlx::query("UPDATE users SET permission_level_id = $1, updated_at = NOW() WHERE id = $2")
+            .bind(permission.to_id())
             .bind(user_id)
             .execute(pool)
             .await
@@ -396,4 +441,37 @@ pub fn generate_random_password() -> String {
         })
         .collect();
     chars.into_iter().collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn permission_level_from_id_maps_correctly() {
+        assert_eq!(PermissionLevel::from_id(1), PermissionLevel::User);
+        assert_eq!(PermissionLevel::from_id(2), PermissionLevel::Moderator);
+        assert_eq!(PermissionLevel::from_id(3), PermissionLevel::Admin);
+        assert_eq!(PermissionLevel::from_id(999), PermissionLevel::User);
+        assert_eq!(PermissionLevel::from_id(0), PermissionLevel::User);
+        assert_eq!(PermissionLevel::from_id(-1), PermissionLevel::User);
+    }
+
+    #[test]
+    fn permission_level_to_id_round_trips() {
+        for level in [
+            PermissionLevel::User,
+            PermissionLevel::Moderator,
+            PermissionLevel::Admin,
+        ] {
+            assert_eq!(PermissionLevel::from_id(level.to_id()), level);
+        }
+    }
+
+    #[test]
+    fn permission_level_display() {
+        assert_eq!(PermissionLevel::Admin.to_string(), "admin");
+        assert_eq!(PermissionLevel::Moderator.to_string(), "moderator");
+        assert_eq!(PermissionLevel::User.to_string(), "user");
+    }
 }

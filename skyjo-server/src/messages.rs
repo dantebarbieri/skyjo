@@ -85,6 +85,8 @@ pub enum ServerMessage {
         player: usize,
         action: PlayerAction,
         state: InteractiveGameState,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        turn_deadline_secs: Option<u64>,
     },
     /// A player joined the room.
     PlayerJoined { player_index: usize, name: String },
@@ -883,5 +885,53 @@ mod tests {
         let bytes = rmp_serde::to_vec_named(&msg).unwrap();
         let decoded: ServerMessage = rmp_serde::from_slice(&bytes).unwrap();
         assert!(matches!(decoded, ServerMessage::ServerShutdown));
+    }
+
+    // --- TimeoutAction turn_deadline_secs tests ---
+
+    #[test]
+    fn timeout_action_serialization_with_deadline() {
+        let state = make_test_state(vec![vec![VisibleSlot::Hidden; 12]; 2], Some(5));
+        let msg = ServerMessage::TimeoutAction {
+            player: 0,
+            action: PlayerAction::DrawFromDeck,
+            state: state.clone(),
+            turn_deadline_secs: Some(30),
+        };
+        let val: serde_json::Value = serde_json::to_value(&msg).unwrap();
+        assert_eq!(val["type"], "TimeoutAction");
+        assert_eq!(val["player"], 0);
+        assert_eq!(val["turn_deadline_secs"], 30);
+
+        let json = serde_json::to_string(&msg).unwrap();
+        let decoded: ServerMessage = serde_json::from_str(&json).unwrap();
+        match decoded {
+            ServerMessage::TimeoutAction {
+                player,
+                turn_deadline_secs,
+                ..
+            } => {
+                assert_eq!(player, 0);
+                assert_eq!(turn_deadline_secs, Some(30));
+            }
+            _ => panic!("Wrong variant"),
+        }
+    }
+
+    #[test]
+    fn timeout_action_without_deadline_skips_field() {
+        let state = make_test_state(vec![vec![VisibleSlot::Hidden; 12]; 2], Some(5));
+        let msg = ServerMessage::TimeoutAction {
+            player: 1,
+            action: PlayerAction::DrawFromDeck,
+            state,
+            turn_deadline_secs: None,
+        };
+        let val: serde_json::Value = serde_json::to_value(&msg).unwrap();
+        assert_eq!(val["type"], "TimeoutAction");
+        assert!(
+            val.get("turn_deadline_secs").is_none(),
+            "None should be skipped via skip_serializing_if"
+        );
     }
 }

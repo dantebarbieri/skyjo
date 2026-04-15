@@ -67,6 +67,7 @@ export const RoundHistorySchema = z.object({
   going_out_player: z.number().int().nonnegative().nullable(),
   end_of_round_clears: z.array(ColumnClearEventSchema),
   round_scores: z.array(z.number()),
+  raw_round_scores: z.array(z.number()).default([]),
   cumulative_scores: z.array(z.number()),
   truncated: z.boolean(),
 });
@@ -317,18 +318,39 @@ export const RoomLobbyStateSchema = z.object({
   genetic_generation: z.number(),
 });
 
+export const SlotUpdateSchema = z.union([
+  z.literal('Hidden'),
+  z.literal('Cleared'),
+  z.object({ Revealed: z.number() }),
+]);
+
+export const StateDeltaSchema = z.object({
+  board_changes: z.array(z.tuple([z.number(), z.number(), SlotUpdateSchema])),
+  discard_tops_changed: z.array(z.tuple([z.number(), z.number().nullable()])).optional().default([]),
+  deck_remaining: z.number(),
+  current_player: z.number(),
+  column_clears: z.array(z.tuple([z.number(), z.number()])).optional().default([]),
+  action_needed: z.string(),
+  turn_deadline_secs: z.number().nullable().optional(),
+  is_final_turn: z.boolean(),
+  going_out_player: z.number().nullable().optional(),
+});
+
 export const ServerMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('RoomState'), state: RoomLobbyStateSchema }),
   z.object({ type: z.literal('GameState'), state: InteractiveGameStateSchema, turn_deadline_secs: z.number().nullable().optional() }),
   z.object({ type: z.literal('ActionApplied'), player: z.number(), action: PlayerActionSchema, state: InteractiveGameStateSchema, turn_deadline_secs: z.number().nullable().optional() }),
+  z.object({ type: z.literal('ActionAppliedDelta'), player: z.number(), action: PlayerActionSchema, delta: StateDeltaSchema }),
   z.object({ type: z.literal('BotAction'), player: z.number(), action: PlayerActionSchema, state: InteractiveGameStateSchema, turn_deadline_secs: z.number().nullable().optional() }),
-  z.object({ type: z.literal('TimeoutAction'), player: z.number(), action: PlayerActionSchema, state: InteractiveGameStateSchema }),
+  z.object({ type: z.literal('TimeoutAction'), player: z.number(), action: PlayerActionSchema, state: InteractiveGameStateSchema, turn_deadline_secs: z.number().nullable().optional() }),
   z.object({ type: z.literal('PlayerJoined'), player_index: z.number(), name: z.string() }),
   z.object({ type: z.literal('PlayerLeft'), player_index: z.number() }),
   z.object({ type: z.literal('PlayerReconnected'), player_index: z.number() }),
+  z.object({ type: z.literal('PlayerConvertedToBot'), slot: z.number(), name: z.string() }),
   z.object({ type: z.literal('Kicked'), reason: z.string() }),
   z.object({ type: z.literal('Error'), code: z.string(), message: z.string() }),
   z.object({ type: z.literal('Pong') }),
+  z.object({ type: z.literal('ServerShutdown') }),
 ]);
 
 // ─── Strategy Description Schemas ───────────────────────────────────
@@ -441,6 +463,66 @@ export const GeneticTrainingStatusSchema = z.object({
   lineage_hash: z.string(),
   current_mutation_rate: z.number().nonnegative().default(0),
   current_mutation_sigma: z.number().nonnegative().default(0),
+});
+
+// ─── Leaderboard / Game History API Schemas ─────────────────────────
+
+export const GamePlayerSummarySchema = z.object({
+  name: z.string(),
+  final_score: z.number(),
+  is_winner: z.boolean(),
+  is_bot: z.boolean(),
+});
+
+export const GameSummarySchema = z.object({
+  id: z.string(),
+  room_code: z.string().nullable(),
+  rules: z.string(),
+  num_players: z.number().int().positive(),
+  num_rounds: z.number().int().positive(),
+  created_at: z.string(),
+  players: z.array(GamePlayerSummarySchema),
+  your_score: z.number().nullable().optional(),
+});
+
+export const GameListResponseSchema = z.object({
+  games: z.array(GameSummarySchema),
+  total: z.number().int().nonnegative(),
+  page: z.number().int().positive(),
+  per_page: z.number().int().positive(),
+});
+
+export const RoundScoreDetailSchema = z.object({
+  player_index: z.number().int().nonnegative(),
+  raw_score: z.number(),
+  adjusted_score: z.number(),
+  cumulative_score: z.number(),
+  went_out: z.boolean(),
+  was_penalized: z.boolean(),
+});
+
+export const RoundDetailSchema = z.object({
+  round_number: z.number().int().positive(),
+  scores: z.array(RoundScoreDetailSchema),
+});
+
+export const GamePlayerDetailSchema = z.object({
+  name: z.string(),
+  final_score: z.number(),
+  is_winner: z.boolean(),
+  is_bot: z.boolean(),
+  user_id: z.string().nullable().optional(),
+});
+
+export const GameDetailSchema = z.object({
+  id: z.string(),
+  room_code: z.string().nullable(),
+  rules: z.string(),
+  num_players: z.number().int().positive(),
+  num_rounds: z.number().int().positive(),
+  created_at: z.string(),
+  players: z.array(GamePlayerDetailSchema),
+  rounds: z.array(RoundDetailSchema),
 });
 
 // ─── WASM Response Wrapper Schemas ──────────────────────────────────

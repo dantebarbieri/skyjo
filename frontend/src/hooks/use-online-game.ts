@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { InteractiveGameState, PlayerAction } from '@/types';
 import { ServerMessageSchema } from '@/schemas';
 import type { PendingColumnClear } from './use-interactive-game';
+import { useAuth } from '@/contexts/auth-context';
+import type { z } from 'zod';
 
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected';
 
@@ -56,18 +58,7 @@ export type PlayerSlotType =
   | { kind: 'Bot'; strategy: string }
   | { kind: 'Empty' };
 
-type ServerMessage =
-  | { type: 'RoomState'; state: RoomLobbyState }
-  | { type: 'GameState'; state: InteractiveGameState; turn_deadline_secs?: number | null }
-  | { type: 'ActionApplied'; player: number; action: PlayerAction; state: InteractiveGameState; turn_deadline_secs?: number | null }
-  | { type: 'BotAction'; player: number; action: PlayerAction; state: InteractiveGameState; turn_deadline_secs?: number | null }
-  | { type: 'TimeoutAction'; player: number; action: PlayerAction; state: InteractiveGameState }
-  | { type: 'PlayerJoined'; player_index: number; name: string }
-  | { type: 'PlayerLeft'; player_index: number }
-  | { type: 'PlayerReconnected'; player_index: number }
-  | { type: 'Kicked'; reason: string }
-  | { type: 'Error'; code: string; message: string }
-  | { type: 'Pong' };
+type ServerMessage = z.infer<typeof ServerMessageSchema>;
 
 interface UseOnlineGameReturn {
   connectionStatus: ConnectionStatus;
@@ -111,6 +102,7 @@ export function useOnlineGame(
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const reconnectAttemptRef = useRef(0);
   const pendingClearTimeoutRef= useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { accessToken } = useAuth();
 
   const send = useCallback((msg: object) => {
     const ws = wsRef.current;
@@ -125,9 +117,11 @@ export function useOnlineGame(
     setConnectionStatus('connecting');
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(
-      `${protocol}//${window.location.host}/api/rooms/${roomCode}/ws?token=${sessionToken}`
-    );
+    let wsUrl = `${protocol}//${window.location.host}/api/rooms/${roomCode}/ws?token=${sessionToken}`;
+    if (accessToken) {
+      wsUrl += `&access_token=${encodeURIComponent(accessToken)}`;
+    }
+    const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
       setConnectionStatus('connected');
@@ -147,6 +141,9 @@ export function useOnlineGame(
 
       const parsedMessage = ServerMessageSchema.safeParse(rawMessage);
       if (!parsedMessage.success) {
+        if (import.meta.env.DEV) {
+          console.error('Invalid server message:', JSON.stringify(rawMessage).slice(0, 500), parsedMessage.error.issues);
+        }
         setLastError('Received invalid server message.');
         return;
       }
@@ -204,7 +201,7 @@ export function useOnlineGame(
             }));
             setPendingClearColumns(clearCols);
             setGameState(preClearState);
-            setTurnDeadlineSecs(null);
+            setTurnDeadlineSecs(msg.turn_deadline_secs ?? null);
             setWasTimeout(true);
             if (pendingClearTimeoutRef.current) clearTimeout(pendingClearTimeoutRef.current);
             pendingClearTimeoutRef.current = setTimeout(() => {
@@ -214,7 +211,7 @@ export function useOnlineGame(
             }, COLUMN_CLEAR_DELAY_MS);
           } else {
             setGameState(msg.state);
-            setTurnDeadlineSecs(null);
+            setTurnDeadlineSecs(msg.turn_deadline_secs ?? null);
             setWasTimeout(true);
           }
           break;
@@ -264,6 +261,24 @@ export function useOnlineGame(
           setLastError(msg.message);
           break;
         case 'Pong':
+        case 'ActionAppliedDelta':
+          // Delta messages are ignored — we use the full state from ActionApplied/BotAction
+          break;
+        case 'PlayerConvertedToBot':
+          setRoomState(prev => {
+            if (!prev) return prev;
+            const players = [...prev.players];
+            players[msg.slot] = {
+              ...players[msg.slot],
+              name: msg.name,
+              player_type: { kind: 'Bot', strategy: 'Random' },
+              connected: false,
+            };
+            return { ...prev, players };
+          });
+          break;
+        case 'ServerShutdown':
+          setLastError('Server is shutting down. Please reconnect shortly.');
           break;
       }
     };
@@ -288,7 +303,7 @@ export function useOnlineGame(
     };
 
     wsRef.current = ws;
-  }, [roomCode, sessionToken]);
+  }, [roomCode, sessionToken, accessToken]);
 
   // Connect when we have room code and token
   useEffect(() => {

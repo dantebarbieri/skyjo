@@ -9,7 +9,8 @@ use std::sync::Arc;
 
 use crate::AppStateInner;
 use crate::error::ServerError;
-use crate::messages::{ClientMessage, ServerMessage, WireFormat};
+use crate::messages::{ClientMessage, PlayerSlotType, ServerMessage, WireFormat};
+use crate::persistence::Persistence;
 use crate::room::SharedRoom;
 
 /// Stable machine-readable error code from variant name (strips data payloads).
@@ -30,6 +31,7 @@ fn error_msg(err: ServerError) -> ServerMessage {
 }
 
 /// Handle a WebSocket connection for a player in a room.
+#[allow(clippy::too_many_arguments)] // WebSocket setup requires all these contextual parameters
 pub async fn handle_ws(
     ws: WebSocket,
     state: Arc<AppStateInner>,
@@ -38,6 +40,7 @@ pub async fn handle_ws(
     player_index: usize,
     client_ip: String,
     initial_format: WireFormat,
+    user_id: Option<uuid::Uuid>,
 ) {
     let (mut ws_tx, mut ws_rx) = ws.split();
 
@@ -57,6 +60,7 @@ pub async fn handle_ws(
         room_guard.players[player_index].connected = true;
         room_guard.players[player_index].ip = Some(client_ip);
         room_guard.players[player_index].disconnected_at = None;
+        room_guard.players[player_index].user_id = user_id;
 
         // Register per-player targeted channel
         room_guard.set_player_tx(player_index, player_msg_tx);
@@ -321,8 +325,10 @@ pub async fn handle_ws(
                             if room_guard.is_current_player_bot() {
                                 drop(room_guard);
                                 let room_clone2 = room_clone.clone();
+                                let persistence = state_ref.persistence.clone();
                                 tokio::spawn(async move {
-                                    run_bot_turns(room_clone2).await;
+                                    run_bot_turns_with_persistence(room_clone2, Some(persistence))
+                                        .await;
                                 });
                             }
                         }
@@ -519,16 +525,44 @@ async fn handle_parsed_message(
                 Ok(()) => {
                     room_guard.broadcast_game_state();
 
+                    // Persist game start
+                    let game_id = room_guard.game_id;
+                    let game_seed = room_guard.game_seed;
+                    let rules_name = room_guard.rules_name.clone();
+                    let room_code_owned = room_code.to_string();
+                    let players = extract_player_data(&room_guard);
+
                     // Schedule bot turns if the first player is a bot
                     if room_guard.is_current_player_bot() {
                         drop(room_guard);
                         let room_clone = room.clone();
+                        let persistence_clone = state.persistence.clone();
                         tokio::spawn(async move {
-                            run_bot_turns(room_clone).await;
+                            run_bot_turns_with_persistence(room_clone, Some(persistence_clone))
+                                .await;
                         });
                     } else {
                         drop(room_guard);
-                        schedule_turn_timeout(room.clone());
+                        schedule_turn_timeout_with_persistence(
+                            room.clone(),
+                            Some(state.persistence.clone()),
+                        );
+                    }
+
+                    // Persist in background (don't block game flow)
+                    if let (Some(gid), Some(seed)) = (game_id, game_seed) {
+                        let persistence = state.persistence.clone();
+                        tokio::spawn(async move {
+                            persist_game_start(
+                                &persistence,
+                                gid,
+                                &room_code_owned,
+                                &rules_name,
+                                seed,
+                                &players,
+                            )
+                            .await;
+                        });
                     }
 
                     None
@@ -566,16 +600,46 @@ async fn handle_parsed_message(
 
                     room_guard.broadcast_action(player_index, &action, false, &delta);
 
+                    // Check if game just ended
+                    let game_over_data = if room_guard.phase == crate::room::RoomPhase::GameOver {
+                        room_guard.game_id.map(|id| {
+                            let history = room_guard.game.as_ref().map(|g| g.build_history());
+                            let players = extract_player_data(&room_guard);
+                            (id, history, players)
+                        })
+                    } else {
+                        None
+                    };
+
                     // Schedule bot turns if the next player is a bot
                     if room_guard.is_current_player_bot() {
                         drop(room_guard);
                         let room_clone = room.clone();
+                        let persistence_clone = state.persistence.clone();
                         tokio::spawn(async move {
-                            run_bot_turns(room_clone).await;
+                            run_bot_turns_with_persistence(room_clone, Some(persistence_clone))
+                                .await;
                         });
                     } else {
                         drop(room_guard);
-                        schedule_turn_timeout(room.clone());
+                        schedule_turn_timeout_with_persistence(
+                            room.clone(),
+                            Some(state.persistence.clone()),
+                        );
+                    }
+
+                    // Persist game completion in background
+                    if let Some((game_id, history, players)) = game_over_data {
+                        let persistence = state.persistence.clone();
+                        tokio::spawn(async move {
+                            persist_game_completion(
+                                &persistence,
+                                game_id,
+                                history.as_ref(),
+                                &players,
+                            )
+                            .await;
+                        });
                     }
 
                     None
@@ -595,12 +659,17 @@ async fn handle_parsed_message(
                     if room_guard.is_current_player_bot() {
                         drop(room_guard);
                         let room_clone = room.clone();
+                        let persistence_clone = state.persistence.clone();
                         tokio::spawn(async move {
-                            run_bot_turns(room_clone).await;
+                            run_bot_turns_with_persistence(room_clone, Some(persistence_clone))
+                                .await;
                         });
                     } else {
                         drop(room_guard);
-                        schedule_turn_timeout(room.clone());
+                        schedule_turn_timeout_with_persistence(
+                            room.clone(),
+                            Some(state.persistence.clone()),
+                        );
                     }
 
                     None
@@ -687,9 +756,8 @@ async fn handle_parsed_message(
     }
 }
 
-/// Schedule a turn timeout check if the turn timer is active.
-/// Spawns a task that sleeps for the timer duration, then checks and applies timeout.
-fn schedule_turn_timeout(room: SharedRoom) {
+/// Schedule a turn timeout check, with optional persistence for game-over handling.
+fn schedule_turn_timeout_with_persistence(room: SharedRoom, persistence: Option<Persistence>) {
     tokio::spawn(async move {
         // Read the timer duration
         let timer_secs = {
@@ -710,17 +778,40 @@ fn schedule_turn_timeout(room: SharedRoom) {
             Ok(Some((player, action, delta))) => {
                 room_guard.broadcast_timeout_action(player, &action, &delta);
 
+                // Check if the timeout action ended the game
+                let game_over_data = if room_guard.phase == crate::room::RoomPhase::GameOver {
+                    room_guard.game_id.map(|id| {
+                        let history = room_guard.game.as_ref().map(|g| g.build_history());
+                        let players = extract_player_data(&room_guard);
+                        (id, history, players)
+                    })
+                } else {
+                    None
+                };
+
                 // If the next player is a bot, run bot turns
                 if room_guard.is_current_player_bot() {
                     drop(room_guard);
                     let room_clone = room.clone();
+                    let p = persistence.clone();
                     tokio::spawn(async move {
-                        run_bot_turns(room_clone).await;
+                        run_bot_turns_with_persistence(room_clone, p).await;
                     });
                 } else {
                     // Schedule next timeout for the next human player
                     drop(room_guard);
-                    schedule_turn_timeout(room.clone());
+                    schedule_turn_timeout_with_persistence(room.clone(), persistence.clone());
+                }
+
+                // Persist game completion if it ended
+                if let Some((game_id, history, players)) = game_over_data
+                    && let Some(persistence) = &persistence
+                {
+                    let persistence = persistence.clone();
+                    tokio::spawn(async move {
+                        persist_game_completion(&persistence, game_id, history.as_ref(), &players)
+                            .await;
+                    });
                 }
             }
             Ok(None) => {
@@ -733,8 +824,8 @@ fn schedule_turn_timeout(room: SharedRoom) {
     });
 }
 
-/// Run consecutive bot turns with delays until a human player's turn or game end.
-async fn run_bot_turns(room: SharedRoom) {
+/// Run consecutive bot turns, optionally persisting game-over.
+async fn run_bot_turns_with_persistence(room: SharedRoom, persistence: Option<Persistence>) {
     loop {
         // Delay for natural pacing
         tokio::time::sleep(Duration::from_millis(500)).await;
@@ -744,13 +835,33 @@ async fn run_bot_turns(room: SharedRoom) {
         if !room_guard.is_current_player_bot() {
             // Human player's turn — schedule timeout
             drop(room_guard);
-            schedule_turn_timeout(room.clone());
+            schedule_turn_timeout_with_persistence(room.clone(), persistence.clone());
             break;
         }
 
         match room_guard.apply_bot_action() {
             Ok((bot_player, action, delta)) => {
                 room_guard.broadcast_action(bot_player, &action, true, &delta);
+
+                // Check if game just ended
+                if room_guard.phase == crate::room::RoomPhase::GameOver {
+                    if let (Some(persistence), Some(game_id)) = (&persistence, room_guard.game_id) {
+                        let history = room_guard.game.as_ref().map(|g| g.build_history());
+                        let players = extract_player_data(&room_guard);
+                        let persistence = persistence.clone();
+                        drop(room_guard);
+                        tokio::spawn(async move {
+                            persist_game_completion(
+                                &persistence,
+                                game_id,
+                                history.as_ref(),
+                                &players,
+                            )
+                            .await;
+                        });
+                    }
+                    break;
+                }
             }
             Err(e) => {
                 tracing::error!("Bot action failed: {e}");
@@ -772,4 +883,80 @@ async fn send_msg(tx: &mut SplitSink<WebSocket, Message>, msg: &ServerMessage, f
         },
     };
     let _ = tx.send(ws_msg).await;
+}
+
+/// Persist a newly started game (in_progress state) with its players atomically.
+async fn persist_game_start(
+    persistence: &Persistence,
+    game_id: uuid::Uuid,
+    room_code: &str,
+    rules_name: &str,
+    seed: u64,
+    players: &[(usize, String, Option<uuid::Uuid>, Option<String>)],
+) {
+    let player_refs: Vec<(usize, &str, Option<uuid::Uuid>, Option<&str>)> = players
+        .iter()
+        .map(|(idx, name, user_id, strategy)| (*idx, name.as_str(), *user_id, strategy.as_deref()))
+        .collect();
+
+    if let Err(e) = persistence
+        .save_game_with_players(
+            game_id,
+            room_code,
+            rules_name,
+            Some(seed as i64),
+            &player_refs,
+        )
+        .await
+    {
+        tracing::error!(game_id = %game_id, "Failed to persist game start: {e}");
+    }
+}
+
+/// Save full game history and mark as completed.
+async fn persist_game_completion(
+    persistence: &Persistence,
+    game_id: uuid::Uuid,
+    history: Option<&skyjo_core::GameHistory>,
+    _players: &[(usize, String, Option<uuid::Uuid>, Option<String>)],
+) {
+    if let Some(history) = history {
+        // Only mark as completed if history save succeeds
+        match persistence
+            .save_game_history(game_id, &history.rules_name, history)
+            .await
+        {
+            Ok(()) => {
+                if let Err(e) = persistence.update_game_state(game_id, "completed").await {
+                    tracing::error!(game_id = %game_id, "Failed to mark game as completed: {e}");
+                }
+            }
+            Err(e) => {
+                tracing::error!(game_id = %game_id, "Failed to persist game history: {e}");
+                // Don't mark as completed — game stays in_progress for retry
+            }
+        }
+    } else {
+        // No history available — game had no rounds; leave as in_progress for investigation
+        tracing::warn!(game_id = %game_id, "persist_game_completion called with no history — leaving as in_progress");
+    }
+}
+
+/// Extract player data from a room for persistence.
+fn extract_player_data(
+    room: &crate::room::Room,
+) -> Vec<(usize, String, Option<uuid::Uuid>, Option<String>)> {
+    room.players
+        .iter()
+        .enumerate()
+        .take(room.num_players)
+        .filter(|(_, p)| p.slot_type != PlayerSlotType::Empty)
+        .map(|(idx, p)| {
+            let strategy = match &p.slot_type {
+                PlayerSlotType::Bot { strategy } => Some(strategy.clone()),
+                _ => None,
+            };
+            (idx, p.name.clone(), p.user_id, strategy)
+        })
+        .collect()
 }

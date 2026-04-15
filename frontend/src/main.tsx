@@ -10,10 +10,14 @@ import PlayOnlineRoute from '@/routes/play-online';
 import RulesRoute from '@/routes/rules';
 import StrategiesRoute from '@/routes/strategies';
 import GeneticManageRoute from '@/routes/genetic-manage';
+import PlayMenuRoute from '@/routes/play-menu';
 import LoginRoute from '@/routes/login';
+import RegisterRoute from '@/routes/register';
 import AdminRoute from '@/routes/admin';
 import SettingsRoute from '@/routes/settings';
 import SetupRoute from '@/routes/setup';
+import LeaderboardRoute from '@/routes/leaderboard';
+import GameDetailRoute from '@/routes/game-detail';
 import './index.css';
 
 createRoot(document.getElementById('root')!).render(
@@ -25,7 +29,8 @@ createRoot(document.getElementById('root')!).render(
             <Route element={<App />}>
               <Route index element={<Navigate to="/rules" replace />} />
               <Route path="simulator" element={<SimulatorRoute />} />
-              <Route path="play" element={<PlayRoute />} />
+              <Route path="play" element={<PlayMenuRoute />} />
+              <Route path="play/local" element={<PlayRoute />} />
               <Route path="play/online" element={<PlayOnlineRoute />} />
               <Route path="play/online/:roomCode" element={<PlayOnlineRoute />} />
               <Route path="rules" element={<RulesRoute />} />
@@ -33,9 +38,12 @@ createRoot(document.getElementById('root')!).render(
               <Route path="rules/strategies/Genetic/manage" element={<GeneticManageRoute />} />
               <Route path="rules/strategies/:strategyName" element={<StrategiesRoute />} />
               <Route path="login" element={<LoginRoute />} />
+              <Route path="register" element={<RegisterRoute />} />
               <Route path="setup" element={<SetupRoute />} />
               <Route path="admin" element={<AdminRoute />} />
               <Route path="settings" element={<SettingsRoute />} />
+              <Route path="leaderboard" element={<LeaderboardRoute />} />
+              <Route path="leaderboard/:gameId" element={<GameDetailRoute />} />
             </Route>
           </Routes>
         </WasmProvider>

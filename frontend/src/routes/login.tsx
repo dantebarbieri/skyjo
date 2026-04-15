@@ -1,12 +1,12 @@
 import { useState, type FormEvent } from 'react';
-import { Navigate, useNavigate, useLocation } from 'react-router-dom';
+import { Navigate, useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/auth-context';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
 
 export default function LoginRoute() {
-  const { login, isAuthenticated, backendAvailable } = useAuth();
+  const { login, isAuthenticated, registrationEnabled, backendAvailable } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [username, setUsername] = useState('');
@@ -81,6 +81,14 @@ export default function LoginRoute() {
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? 'Signing in...' : 'Sign In'}
             </Button>
+            {registrationEnabled && (
+              <p className="text-sm text-center text-muted-foreground">
+                Don't have an account?{' '}
+                <Link to="/register" className="text-primary underline">
+                  Register
+                </Link>
+              </p>
+            )}
           </form>
         </CardContent>
       </Card>

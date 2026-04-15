@@ -152,6 +152,28 @@ async fn main() {
         }
     }
 
+    // Mark any orphaned in-progress games as abandoned (from previous server crashes)
+    // TODO: Once room snapshot restore is re-enabled, this should check against
+    // restored rooms and only mark games as abandoned if their room was not restored.
+    match persistence.find_orphaned_in_progress_games().await {
+        Ok(orphaned) => {
+            if !orphaned.is_empty() {
+                tracing::info!(
+                    "Found {} orphaned in-progress game(s), marking as abandoned",
+                    orphaned.len()
+                );
+                for game_id in orphaned {
+                    if let Err(e) = persistence.update_game_state(game_id, "abandoned").await {
+                        tracing::error!(game_id = %game_id, "Failed to mark orphaned game as abandoned: {e}");
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            tracing::warn!("Failed to find orphaned in-progress games: {e}");
+        }
+    }
+
     // Spawn room cleanup + periodic snapshot task
     let cleanup_state = app_state.clone();
     let cleanup_persistence = persistence.clone();
@@ -159,10 +181,20 @@ async fn main() {
         let mut interval = tokio::time::interval(Duration::from_secs(60));
         loop {
             interval.tick().await;
-            cleanup_state.lobby.cleanup_stale_rooms(
+            let abandoned_game_ids = cleanup_state.lobby.cleanup_stale_rooms(
                 Duration::from_secs(300), // 5 min after game over
                 Duration::from_secs(600), // 10 min after all disconnect
             );
+
+            // Mark abandoned in-progress games
+            for game_id in abandoned_game_ids {
+                if let Err(e) = cleanup_persistence
+                    .update_game_state(game_id, "abandoned")
+                    .await
+                {
+                    tracing::error!(game_id = %game_id, "Failed to mark abandoned game: {e}");
+                }
+            }
 
             // Clean up stale rate limiter entries
             cleanup_state.rate_limiter.cleanup(Duration::from_secs(300));
@@ -234,6 +266,7 @@ async fn main() {
         .route("/auth/logout", post(auth_logout))
         .route("/auth/setup-status", get(auth_setup_status))
         .route("/auth/setup", post(auth_setup))
+        .route("/auth/register", post(auth_register))
         .route(
             "/auth/me",
             get(auth_me).layer(axum::middleware::from_fn_with_state(
@@ -249,6 +282,15 @@ async fn main() {
         .route("/rooms/{code}", get(skyjo_server::room_info))
         .route("/rooms/{code}/join", post(skyjo_server::join_room))
         .route("/rooms/{code}/ws", get(ws_upgrade))
+        .route("/games", get(skyjo_server::leaderboard::list_games))
+        .route(
+            "/games/{id}",
+            get(skyjo_server::leaderboard::get_game_detail),
+        )
+        .route(
+            "/games/{id}/replay",
+            get(skyjo_server::leaderboard::get_game_replay),
+        )
         .route("/genetic/model", get(genetic_model))
         .route("/genetic/status", get(skyjo_server::genetic_status))
         .route("/genetic/saved", get(genetic_saved_list))
@@ -385,6 +427,9 @@ struct WsQuery {
     /// Wire format preference: "json" (default) or "msgpack"
     #[serde(default)]
     format: Option<String>,
+    /// Optional JWT access token for associating the connection with an authenticated user.
+    #[serde(default)]
+    access_token: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -432,6 +477,14 @@ async fn ws_upgrade(
         Some("msgpack" | "messagepack") => skyjo_server::messages::WireFormat::MessagePack,
         _ => skyjo_server::messages::WireFormat::Json,
     };
+
+    // Optionally extract authenticated user_id from JWT access token
+    let user_id = query
+        .access_token
+        .as_deref()
+        .and_then(|token| skyjo_server::auth::validate_access_token(token, &state.jwt_secret).ok())
+        .map(|auth_user| auth_user.id);
+
     Ok(ws.on_upgrade(move |socket| async move {
         ws::handle_ws(
             socket,
@@ -441,6 +494,7 @@ async fn ws_upgrade(
             player_index,
             client_ip,
             initial_format,
+            user_id,
         )
         .await;
     }))
@@ -865,14 +919,19 @@ async fn auth_me(Extension(user): Extension<AuthUser>) -> Json<UserInfo> {
 #[derive(Serialize)]
 struct SetupStatus {
     needs_setup: bool,
+    registration_enabled: bool,
 }
 
 async fn auth_setup_status(
     State(state): State<AppState>,
 ) -> Result<Json<SetupStatus>, ServerError> {
     let count = auth::user_count(state.persistence.pool()).await?;
+    let reg = auth::get_app_setting(state.persistence.pool(), "registration_enabled")
+        .await?
+        .unwrap_or_else(|| "false".to_string());
     Ok(Json(SetupStatus {
         needs_setup: count == 0,
+        registration_enabled: reg == "true",
     }))
 }
 
@@ -932,6 +991,78 @@ async fn auth_setup(
     tracing::info!("Setup complete: created admin account '{}'", user.username);
 
     // Auto-login the new admin
+    let access_token = auth::create_access_token(&user, &state.jwt_secret)?;
+    let refresh_token = auth::generate_refresh_token();
+    let token_hash = auth::hash_refresh_token(&refresh_token);
+    let expires_at = auth::refresh_token_expiry();
+    auth::store_refresh_token(state.persistence.pool(), user.id, &token_hash, expires_at).await?;
+
+    let body = LoginResponse {
+        access_token,
+        user: UserInfo::from(&user),
+    };
+
+    let secure = is_secure_request(&req_headers);
+    let mut response = Json(body).into_response();
+    let cookie = refresh_cookie(&refresh_token, 7 * 24 * 60 * 60, secure);
+    response
+        .headers_mut()
+        .insert(header::SET_COOKIE, HeaderValue::from_str(&cookie).unwrap());
+    Ok(response)
+}
+
+#[derive(Deserialize)]
+struct RegisterRequest {
+    username: String,
+    password: String,
+    confirm_password: String,
+    display_name: Option<String>,
+}
+
+async fn auth_register(
+    State(state): State<AppState>,
+    req_headers: axum::http::HeaderMap,
+    Json(req): Json<RegisterRequest>,
+) -> Result<Response, ServerError> {
+    // Check if registration is enabled
+    let reg = auth::get_app_setting(state.persistence.pool(), "registration_enabled")
+        .await?
+        .unwrap_or_else(|| "false".to_string());
+    if reg != "true" {
+        return Err(ServerError::Forbidden);
+    }
+
+    let username = req.username.trim().to_string();
+    if username.is_empty() {
+        return Err(ServerError::InvalidAction(
+            "Username cannot be empty".to_string(),
+        ));
+    }
+    if req.password.len() < 8 {
+        return Err(ServerError::InvalidAction(
+            "Password must be at least 8 characters".to_string(),
+        ));
+    }
+    if req.password != req.confirm_password {
+        return Err(ServerError::InvalidAction(
+            "Passwords do not match".to_string(),
+        ));
+    }
+
+    let display_name = req.display_name.unwrap_or_else(|| username.clone());
+
+    let user = auth::create_user(
+        state.persistence.pool(),
+        &username,
+        &req.password,
+        &display_name,
+        PermissionLevel::User,
+    )
+    .await?;
+
+    tracing::info!("New user registered: '{}'", user.username);
+
+    // Auto-login the new user
     let access_token = auth::create_access_token(&user, &state.jwt_secret)?;
     let refresh_token = auth::generate_refresh_token();
     let token_hash = auth::hash_refresh_token(&refresh_token);

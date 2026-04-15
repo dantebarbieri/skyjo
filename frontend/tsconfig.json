@@ -13,7 +13,7 @@
     "outDir": "./dist",
     "rootDir": ".",
     "skipLibCheck": true,
-    "types": ["vitest/globals", "vite-plugin-pwa/react"],
+    "types": ["vite/client", "vitest/globals", "vite-plugin-pwa/react"],
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"]

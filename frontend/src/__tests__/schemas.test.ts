@@ -29,6 +29,12 @@ import {
   GeneticModelDataSchema,
   GeneticTrainingStatusSchema,
   GameStatsWithHistorySchema,
+  GamePlayerSummarySchema,
+  GameSummarySchema,
+  GameListResponseSchema,
+  RoundScoreDetailSchema,
+  GameDetailSchema,
+  StateDeltaSchema,
   parseJson,
   safeParseJson,
 } from '@/schemas';
@@ -61,6 +67,7 @@ function makeRoundHistory() {
     going_out_player: 0,
     end_of_round_clears: [],
     round_scores: [10, 20],
+    raw_round_scores: [10, 20],
     cumulative_scores: [10, 20],
     truncated: false,
   };
@@ -671,5 +678,184 @@ describe('Genetic model schemas', () => {
       current_mutation_sigma: 0.3,
     };
     expect(GeneticTrainingStatusSchema.parse(status)).toEqual(status);
+  });
+});
+
+// ─── 10. Leaderboard / Game History API Schemas ─────────────────────
+
+describe('Leaderboard schemas', () => {
+  it('GamePlayerSummarySchema accepts valid data', () => {
+    const data = { name: 'Alice', final_score: 45, is_winner: true, is_bot: false };
+    expect(GamePlayerSummarySchema.parse(data)).toEqual(data);
+  });
+
+  it('GameSummarySchema accepts valid data', () => {
+    const data = {
+      id: 'game-001',
+      room_code: 'ABCDEF',
+      rules: 'Standard',
+      num_players: 3,
+      num_rounds: 4,
+      created_at: '2025-01-15T12:00:00Z',
+      players: [
+        { name: 'Alice', final_score: 45, is_winner: true, is_bot: false },
+        { name: 'Bob', final_score: 60, is_winner: false, is_bot: false },
+        { name: 'Bot 1', final_score: 80, is_winner: false, is_bot: true },
+      ],
+      your_score: 45,
+    };
+    expect(GameSummarySchema.parse(data)).toEqual(data);
+  });
+
+  it('GameSummarySchema accepts null room_code', () => {
+    const data = {
+      id: 'game-002',
+      room_code: null,
+      rules: 'Standard',
+      num_players: 2,
+      num_rounds: 3,
+      created_at: '2025-01-15T12:00:00Z',
+      players: [
+        { name: 'Alice', final_score: 30, is_winner: true, is_bot: false },
+        { name: 'Bob', final_score: 50, is_winner: false, is_bot: false },
+      ],
+    };
+    expect(GameSummarySchema.parse(data)).toEqual(data);
+  });
+
+  it('GameListResponseSchema accepts valid data', () => {
+    const data = {
+      games: [{
+        id: 'game-001',
+        room_code: 'ABCDEF',
+        rules: 'Standard',
+        num_players: 2,
+        num_rounds: 3,
+        created_at: '2025-01-15T12:00:00Z',
+        players: [
+          { name: 'Alice', final_score: 30, is_winner: true, is_bot: false },
+          { name: 'Bob', final_score: 50, is_winner: false, is_bot: false },
+        ],
+      }],
+      total: 1,
+      page: 1,
+      per_page: 25,
+    };
+    expect(GameListResponseSchema.parse(data)).toEqual(data);
+  });
+
+  it('RoundScoreDetailSchema accepts valid data', () => {
+    const data = {
+      player_index: 0,
+      raw_score: 15,
+      adjusted_score: 15,
+      cumulative_score: 15,
+      went_out: true,
+      was_penalized: false,
+    };
+    expect(RoundScoreDetailSchema.parse(data)).toEqual(data);
+  });
+
+  it('GameDetailSchema accepts valid data', () => {
+    const data = {
+      id: 'game-001',
+      room_code: 'ABCDEF',
+      rules: 'Standard',
+      num_players: 2,
+      num_rounds: 2,
+      created_at: '2025-01-15T12:00:00Z',
+      players: [
+        { name: 'Alice', final_score: 30, is_winner: true, is_bot: false, user_id: 'user-1' },
+        { name: 'Bot 1', final_score: 50, is_winner: false, is_bot: true, user_id: null },
+      ],
+      rounds: [
+        {
+          round_number: 1,
+          scores: [
+            { player_index: 0, raw_score: 10, adjusted_score: 10, cumulative_score: 10, went_out: true, was_penalized: false },
+            { player_index: 1, raw_score: 20, adjusted_score: 20, cumulative_score: 20, went_out: false, was_penalized: false },
+          ],
+        },
+        {
+          round_number: 2,
+          scores: [
+            { player_index: 0, raw_score: 20, adjusted_score: 20, cumulative_score: 30, went_out: false, was_penalized: false },
+            { player_index: 1, raw_score: 30, adjusted_score: 30, cumulative_score: 50, went_out: true, was_penalized: false },
+          ],
+        },
+      ],
+    };
+    expect(GameDetailSchema.parse(data)).toEqual(data);
+  });
+
+  it('GameDetailSchema accepts null room_code', () => {
+    const data = {
+      id: 'game-002',
+      room_code: null,
+      rules: 'Standard',
+      num_players: 2,
+      num_rounds: 1,
+      created_at: '2025-01-15T12:00:00Z',
+      players: [
+        { name: 'Alice', final_score: 30, is_winner: true, is_bot: false },
+        { name: 'Bob', final_score: 50, is_winner: false, is_bot: false },
+      ],
+      rounds: [
+        {
+          round_number: 1,
+          scores: [
+            { player_index: 0, raw_score: 30, adjusted_score: 30, cumulative_score: 30, went_out: true, was_penalized: false },
+            { player_index: 1, raw_score: 50, adjusted_score: 50, cumulative_score: 50, went_out: false, was_penalized: false },
+          ],
+        },
+      ],
+    };
+    expect(GameDetailSchema.parse(data)).toEqual(data);
+  });
+
+  it('StateDeltaSchema accepts valid data', () => {
+    const data = {
+      board_changes: [[0, 2, { Revealed: 5 }]],
+      deck_remaining: 100,
+      current_player: 1,
+      action_needed: 'ChooseDraw',
+      is_final_turn: false,
+    };
+    expect(StateDeltaSchema.parse(data)).toEqual({
+      ...data,
+      discard_tops_changed: [],
+      column_clears: [],
+    });
+  });
+});
+
+// ─── 11. New ServerMessage Variants ─────────────────────────────────
+
+describe('New ServerMessage variants', () => {
+  it('parses ActionAppliedDelta', () => {
+    const msg = {
+      type: 'ActionAppliedDelta',
+      player: 0,
+      action: { type: 'DrawFromDeck' },
+      delta: {
+        board_changes: [[0, 3, { Revealed: 7 }]],
+        deck_remaining: 99,
+        current_player: 1,
+        action_needed: 'ChooseDraw',
+        is_final_turn: false,
+      },
+    };
+    const parsed = ServerMessageSchema.parse(msg);
+    expect(parsed.type).toBe('ActionAppliedDelta');
+  });
+
+  it('parses ServerShutdown', () => {
+    const msg = { type: 'ServerShutdown' };
+    expect(ServerMessageSchema.parse(msg)).toEqual(msg);
+  });
+
+  it('parses PlayerConvertedToBot', () => {
+    const msg = { type: 'PlayerConvertedToBot', slot: 0, name: 'Player 1' };
+    expect(ServerMessageSchema.parse(msg)).toEqual(msg);
   });
 });

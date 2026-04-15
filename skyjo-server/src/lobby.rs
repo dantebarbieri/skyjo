@@ -140,10 +140,15 @@ impl Lobby {
         self.rooms.get(code).map(|entry| entry.clone())
     }
 
-    /// Clean up inactive rooms.
-    pub fn cleanup_stale_rooms(&self, game_over_timeout: Duration, disconnect_timeout: Duration) {
+    /// Clean up inactive rooms. Returns game IDs of in-progress games that were abandoned.
+    pub fn cleanup_stale_rooms(
+        &self,
+        game_over_timeout: Duration,
+        disconnect_timeout: Duration,
+    ) -> Vec<uuid::Uuid> {
         let now = Instant::now();
         let mut to_remove = Vec::new();
+        let mut abandoned_game_ids = Vec::new();
 
         // We can't await inside the iteration, so collect codes to check
         // For simplicity, use try_lock to avoid blocking
@@ -164,6 +169,12 @@ impl Lobby {
                     }
                 };
                 if should_remove {
+                    // Track in-progress games being abandoned
+                    if room.phase == crate::room::RoomPhase::InGame
+                        && let Some(game_id) = room.game_id
+                    {
+                        abandoned_game_ids.push(game_id);
+                    }
                     // Collect session tokens to remove
                     for player in &room.players {
                         if let Some(token) = &player.session_token {
@@ -179,6 +190,8 @@ impl Lobby {
             self.rooms.remove(&code);
             tracing::info!("Cleaned up stale room: {code}");
         }
+
+        abandoned_game_ids
     }
 }
 

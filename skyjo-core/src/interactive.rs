@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::board::PlayerBoard;
 use crate::card::{CardValue, Slot, VisibleSlot};
 use crate::error::{Result, SkyjoError};
-use crate::history::ColumnClearEvent;
+use crate::history::{ColumnClearEvent, GameHistory, RoundHistory, TurnAction, TurnRecord};
 use crate::rules::Rules;
 use crate::strategy::{DeckDrawAction, DrawChoice, Strategy, StrategyView};
 
@@ -134,6 +134,15 @@ pub struct InteractiveGame {
     last_round_scores: Vec<i32>,
     last_raw_round_scores: Vec<i32>,
     last_end_of_round_clears: Vec<ColumnClearEvent>,
+
+    // History tracking for persistence
+    seed: u64,
+    rules_name: String,
+    completed_rounds: Vec<RoundHistory>,
+    current_round_deck_order: Vec<CardValue>,
+    current_round_dealt_hands: Vec<Vec<CardValue>>,
+    current_round_setup_flips: Vec<Vec<usize>>,
+    current_round_turns: Vec<TurnRecord>,
 }
 
 impl InteractiveGame {
@@ -149,6 +158,8 @@ impl InteractiveGame {
         if num_players > 8 {
             return Err(SkyjoError::TooManyPlayers);
         }
+
+        let rules_name = rules.name().to_string();
 
         let mut game = InteractiveGame {
             rng: StdRng::seed_from_u64(seed),
@@ -173,6 +184,13 @@ impl InteractiveGame {
             last_raw_round_scores: Vec::new(),
             last_end_of_round_clears: Vec::new(),
             rules,
+            seed,
+            rules_name,
+            completed_rounds: Vec::new(),
+            current_round_deck_order: Vec::new(),
+            current_round_dealt_hands: Vec::new(),
+            current_round_setup_flips: Vec::new(),
+            current_round_turns: Vec::new(),
         };
 
         game.deal_round()?;
@@ -183,6 +201,9 @@ impl InteractiveGame {
         // Build & shuffle deck
         let mut deck = self.rules.build_deck();
         deck.shuffle(&mut self.rng);
+
+        // Record deck order for history before dealing
+        self.current_round_deck_order = deck.clone();
 
         let cards_per_player = self.rules.num_cards_per_player();
         let num_rows = self.rules.num_rows();
@@ -197,6 +218,11 @@ impl InteractiveGame {
             }
             dealt_hands.push(hand);
         }
+
+        // Record dealt hands for history
+        self.current_round_dealt_hands = dealt_hands.clone();
+        self.current_round_setup_flips = vec![Vec::new(); self.num_players];
+        self.current_round_turns.clear();
 
         // Initialize boards (all hidden)
         self.boards = dealt_hands
@@ -291,6 +317,9 @@ impl InteractiveGame {
                 let remaining = *flips_remaining;
                 self.boards[player].flip(position)?;
 
+                // Record setup flip for history
+                self.current_round_setup_flips[player].push(position);
+
                 if remaining > 1 {
                     // Same player, one fewer flip remaining
                     self.phase = Phase::SetupFlips {
@@ -359,6 +388,21 @@ impl InteractiveGame {
                 self.discard_piles[target].push(displaced);
                 self.last_column_clears =
                     self.check_and_clear_columns(self.current_player, Some(displaced));
+
+                // Record turn for history
+                let went_out = self.boards[self.current_player].all_revealed()
+                    && self.going_out_player.is_none();
+                self.current_round_turns.push(TurnRecord {
+                    player_index: self.current_player,
+                    action: TurnAction::DrewFromDeck {
+                        drawn_card: drawn,
+                        action: DeckDrawAction::Keep(position),
+                        displaced_card: Some(displaced),
+                    },
+                    column_clears: self.last_column_clears.clone(),
+                    went_out,
+                });
+
                 self.advance_turn();
             }
 
@@ -371,6 +415,21 @@ impl InteractiveGame {
                 self.discard_piles[target].push(drawn);
                 self.boards[self.current_player].flip(position)?;
                 self.last_column_clears = self.check_and_clear_columns(self.current_player, None);
+
+                // Record turn for history
+                let went_out = self.boards[self.current_player].all_revealed()
+                    && self.going_out_player.is_none();
+                self.current_round_turns.push(TurnRecord {
+                    player_index: self.current_player,
+                    action: TurnAction::DrewFromDeck {
+                        drawn_card: drawn,
+                        action: DeckDrawAction::DiscardAndFlip(position),
+                        displaced_card: None,
+                    },
+                    column_clears: self.last_column_clears.clone(),
+                    went_out,
+                });
+
                 self.advance_turn();
             }
 
@@ -388,15 +447,35 @@ impl InteractiveGame {
             }
 
             (
-                Phase::WaitingForDiscardPlacement { drawn_card, .. },
+                Phase::WaitingForDiscardPlacement {
+                    drawn_card,
+                    source_pile,
+                },
                 PlayerAction::PlaceDiscardDraw { position },
             ) => {
                 let drawn = *drawn_card;
+                let pile_idx = *source_pile;
                 let displaced = self.boards[self.current_player].replace(position, drawn)?;
                 let target = self.rules.discard_target(self.current_player);
                 self.discard_piles[target].push(displaced);
                 self.last_column_clears =
                     self.check_and_clear_columns(self.current_player, Some(displaced));
+
+                // Record turn for history
+                let went_out = self.boards[self.current_player].all_revealed()
+                    && self.going_out_player.is_none();
+                self.current_round_turns.push(TurnRecord {
+                    player_index: self.current_player,
+                    action: TurnAction::DrewFromDiscard {
+                        pile_index: pile_idx,
+                        drawn_card: drawn,
+                        placement: position,
+                        displaced_card: displaced,
+                    },
+                    column_clears: self.last_column_clears.clone(),
+                    went_out,
+                });
+
                 self.advance_turn();
             }
 
@@ -510,9 +589,25 @@ impl InteractiveGame {
         }
 
         self.last_round_goer = self.going_out_player;
-        self.last_round_scores = round_scores;
-        self.last_raw_round_scores = raw_round_scores;
-        self.last_end_of_round_clears = end_of_round_clears;
+        self.last_round_scores = round_scores.clone();
+        self.last_raw_round_scores = raw_round_scores.clone();
+        self.last_end_of_round_clears = end_of_round_clears.clone();
+
+        // Finalize round history
+        self.completed_rounds.push(RoundHistory {
+            round_number: self.round_number,
+            initial_deck_order: std::mem::take(&mut self.current_round_deck_order),
+            dealt_hands: std::mem::take(&mut self.current_round_dealt_hands),
+            setup_flips: std::mem::take(&mut self.current_round_setup_flips),
+            starting_player: self.starter,
+            turns: std::mem::take(&mut self.current_round_turns),
+            going_out_player: self.going_out_player,
+            end_of_round_clears,
+            round_scores: round_scores.clone(),
+            raw_round_scores: raw_round_scores.clone(),
+            cumulative_scores: self.cumulative_scores.clone(),
+            truncated: false,
+        });
 
         // Check if game is over
         if self
@@ -664,6 +759,27 @@ impl InteractiveGame {
             going_out_player: self.going_out_player,
             is_final_turn: self.going_out_player.is_some(),
             last_column_clears: self.last_column_clears.clone(),
+        }
+    }
+
+    /// Build a `GameHistory` from the recorded game data.
+    /// Available at any point — returns completed rounds plus the game's final state.
+    /// At `GameOver`, this is the complete history; during play, it's a partial snapshot.
+    pub fn build_history(&self) -> GameHistory {
+        let winners = if matches!(self.phase, Phase::GameOver) {
+            self.rules.resolve_winners(&self.cumulative_scores)
+        } else {
+            Vec::new()
+        };
+
+        GameHistory {
+            seed: self.seed,
+            num_players: self.num_players,
+            strategy_names: self.player_names.clone(),
+            rules_name: self.rules_name.clone(),
+            rounds: self.completed_rounds.clone(),
+            final_scores: self.cumulative_scores.clone(),
+            winners,
         }
     }
 
@@ -1228,5 +1344,260 @@ mod tests {
         // Now get_bot_action should error
         let result = game.get_bot_action(&strategy);
         assert!(result.is_err());
+    }
+
+    // --- build_history tests ---
+
+    /// Helper: play a full game to GameOver using GreedyStrategy, returning the game.
+    fn play_to_completion(seed: u64, num_players: usize) -> InteractiveGame {
+        use crate::strategies::GreedyStrategy;
+
+        let names: Vec<String> = (0..num_players).map(|i| format!("P{}", i)).collect();
+        let mut game =
+            InteractiveGame::new(Box::new(StandardRules), num_players, names, seed).unwrap();
+
+        let strategy = GreedyStrategy;
+        let mut max_actions = 10_000;
+
+        loop {
+            if matches!(game.get_action_needed(), ActionNeeded::GameOver { .. }) {
+                return game;
+            }
+            let action = game.get_bot_action(&strategy).unwrap();
+            game.apply_action(action).unwrap();
+            max_actions -= 1;
+            assert!(max_actions > 0, "Game did not complete in time");
+        }
+    }
+
+    #[test]
+    fn build_history_returns_empty_rounds_during_setup_flips() {
+        let game = InteractiveGame::new(
+            Box::new(StandardRules),
+            3,
+            vec![
+                "Alice".to_string(),
+                "Bob".to_string(),
+                "Charlie".to_string(),
+            ],
+            42,
+        )
+        .unwrap();
+
+        let history = game.build_history();
+        assert!(history.rounds.is_empty(), "No rounds completed yet");
+        assert_eq!(history.num_players, 3);
+        assert_eq!(history.seed, 42);
+        assert_eq!(history.strategy_names.len(), 3);
+        assert!(history.winners.is_empty(), "No winners during setup");
+    }
+
+    #[test]
+    fn build_history_records_completed_round() {
+        let game = play_to_completion(123, 2);
+        let history = game.build_history();
+
+        assert!(
+            !history.rounds.is_empty(),
+            "Completed game must have at least one round"
+        );
+
+        for round in &history.rounds {
+            assert!(
+                !round.initial_deck_order.is_empty(),
+                "Each round must have initial deck order"
+            );
+            assert_eq!(
+                round.dealt_hands.len(),
+                2,
+                "dealt_hands must match num_players"
+            );
+            assert_eq!(
+                round.setup_flips.len(),
+                2,
+                "setup_flips must match num_players"
+            );
+            assert!(
+                !round.turns.is_empty(),
+                "Each round must have at least one turn"
+            );
+            assert_eq!(
+                round.round_scores.len(),
+                2,
+                "round_scores must match num_players"
+            );
+            assert_eq!(
+                round.cumulative_scores.len(),
+                2,
+                "cumulative_scores must match num_players"
+            );
+        }
+    }
+
+    #[test]
+    fn build_history_records_correct_seed() {
+        let game = InteractiveGame::new(
+            Box::new(StandardRules),
+            2,
+            vec!["A".to_string(), "B".to_string()],
+            42,
+        )
+        .unwrap();
+
+        assert_eq!(game.build_history().seed, 42);
+    }
+
+    #[test]
+    fn build_history_records_rules_name() {
+        let game = InteractiveGame::new(
+            Box::new(StandardRules),
+            2,
+            vec!["A".to_string(), "B".to_string()],
+            1,
+        )
+        .unwrap();
+
+        assert_eq!(game.build_history().rules_name, "Standard");
+    }
+
+    #[test]
+    fn build_history_records_winners_at_game_over() {
+        let game = play_to_completion(42, 2);
+        let history = game.build_history();
+
+        assert!(!history.winners.is_empty(), "Game over must have winners");
+        for &w in &history.winners {
+            assert!(w < 2, "Winner index must be < num_players");
+        }
+    }
+
+    #[test]
+    fn build_history_turn_actions_match_game_flow() {
+        use crate::history::TurnAction;
+        use crate::strategy::DeckDrawAction;
+
+        let mut game = InteractiveGame::new(
+            Box::new(StandardRules),
+            2,
+            vec!["A".to_string(), "B".to_string()],
+            42,
+        )
+        .unwrap();
+
+        // Complete setup flips
+        for _ in 0..4 {
+            let state = game.get_full_state();
+            if let ActionNeeded::ChooseInitialFlips { player, .. } = &state.action_needed {
+                let board = &state.boards[*player];
+                let pos = board
+                    .iter()
+                    .position(|s| matches!(s, VisibleSlot::Hidden))
+                    .unwrap();
+                game.apply_action(PlayerAction::InitialFlip { position: pos })
+                    .unwrap();
+            }
+        }
+
+        // Turn 1: DrawFromDeck → KeepDeckDraw
+        game.apply_action(PlayerAction::DrawFromDeck).unwrap();
+        let state = game.get_full_state();
+        let board = &state.boards[state.current_player];
+        let pos = board
+            .iter()
+            .position(|s| !matches!(s, VisibleSlot::Cleared))
+            .unwrap();
+        game.apply_action(PlayerAction::KeepDeckDraw { position: pos })
+            .unwrap();
+
+        // Turn 2: DrawFromDiscard → PlaceDiscardDraw
+        game.apply_action(PlayerAction::DrawFromDiscard { pile_index: 0 })
+            .unwrap();
+        let state = game.get_full_state();
+        let board = &state.boards[state.current_player];
+        let pos = board
+            .iter()
+            .position(|s| !matches!(s, VisibleSlot::Cleared))
+            .unwrap();
+        game.apply_action(PlayerAction::PlaceDiscardDraw { position: pos })
+            .unwrap();
+
+        // Turn 3: DrawFromDeck → DiscardAndFlip
+        game.apply_action(PlayerAction::DrawFromDeck).unwrap();
+        let state = game.get_full_state();
+        let board = &state.boards[state.current_player];
+        let pos = board
+            .iter()
+            .position(|s| matches!(s, VisibleSlot::Hidden))
+            .unwrap_or_else(|| {
+                board
+                    .iter()
+                    .position(|s| !matches!(s, VisibleSlot::Cleared))
+                    .unwrap()
+            });
+        if matches!(board[pos], VisibleSlot::Hidden) {
+            game.apply_action(PlayerAction::DiscardAndFlip { position: pos })
+                .unwrap();
+        } else {
+            game.apply_action(PlayerAction::KeepDeckDraw { position: pos })
+                .unwrap();
+        }
+
+        // Current round turns aren't in completed_rounds yet (round not over).
+        // Verify via a completed game instead:
+        let game = play_to_completion(42, 2);
+        let history = game.build_history();
+        let round = &history.rounds[0];
+
+        // Every turn must have a valid action type
+        for turn in &round.turns {
+            assert!(turn.player_index < 2);
+            match &turn.action {
+                TurnAction::DrewFromDeck {
+                    action: DeckDrawAction::Keep(_),
+                    displaced_card,
+                    ..
+                } => {
+                    assert!(
+                        displaced_card.is_some(),
+                        "Keep action must have displaced card"
+                    );
+                }
+                TurnAction::DrewFromDeck {
+                    action: DeckDrawAction::DiscardAndFlip(_),
+                    displaced_card,
+                    ..
+                } => {
+                    assert!(
+                        displaced_card.is_none(),
+                        "DiscardAndFlip must not have displaced card"
+                    );
+                }
+                TurnAction::DrewFromDiscard { .. } => {}
+            }
+        }
+    }
+
+    #[test]
+    fn build_history_setup_flips_recorded_correctly() {
+        let game = play_to_completion(99, 3);
+        let history = game.build_history();
+
+        let initial_flips = StandardRules.initial_flips();
+
+        for round in &history.rounds {
+            assert_eq!(round.setup_flips.len(), 3);
+            for player_flips in &round.setup_flips {
+                assert_eq!(
+                    player_flips.len(),
+                    initial_flips,
+                    "Each player should have exactly {} setup flips",
+                    initial_flips
+                );
+                // All flip positions must be valid board indices (< 12 for 3x4)
+                for &pos in player_flips {
+                    assert!(pos < 12, "Flip position {} out of bounds for 3x4 grid", pos);
+                }
+            }
+        }
     }
 }

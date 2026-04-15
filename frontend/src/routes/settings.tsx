@@ -199,13 +199,16 @@ function PasswordForm() {
           required
           minLength={8}
         />
+        {confirmPassword && newPassword !== confirmPassword && (
+          <p className="text-sm text-destructive mt-1">Passwords do not match</p>
+        )}
       </div>
       {message && (
         <p className={`text-sm ${isError ? 'text-destructive' : 'text-muted-foreground'}`}>
           {message}
         </p>
       )}
-      <Button type="submit" size="sm" disabled={loading}>
+      <Button type="submit" size="sm" disabled={loading || (!!confirmPassword && newPassword !== confirmPassword)}>
         {loading ? 'Changing...' : 'Change Password'}
       </Button>
     </form>

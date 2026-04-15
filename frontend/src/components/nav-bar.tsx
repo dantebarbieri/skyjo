@@ -2,11 +2,13 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
 import { Button } from '@/components/ui/button';
+import { Trophy } from 'lucide-react';
 
 const links = [
   { to: '/rules', label: 'Rules' },
   { to: '/play', label: 'Play' },
   { to: '/simulator', label: 'Simulator' },
+  { to: '/leaderboard', label: 'Leaderboard', icon: Trophy },
 ];
 
 export default function NavBar() {
@@ -20,19 +22,20 @@ export default function NavBar() {
           Skyjo
         </NavLink>
         <div className="flex items-center gap-1">
-          {links.map(({ to, label }) => (
+          {links.map(({ to, label, icon: Icon }) => (
             <NavLink
               key={to}
               to={to}
               className={({ isActive }) =>
                 cn(
-                  'px-2 py-1 sm:px-3 sm:py-1.5 rounded-md text-xs sm:text-sm font-medium transition-colors',
+                  'px-2 py-1 sm:px-3 sm:py-1.5 rounded-md text-xs sm:text-sm font-medium transition-colors inline-flex items-center gap-1',
                   isActive
                     ? 'bg-accent text-accent-foreground'
                     : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
                 )
               }
             >
+              {Icon && <Icon className="h-3.5 w-3.5" />}
               {label}
             </NavLink>
           ))}
