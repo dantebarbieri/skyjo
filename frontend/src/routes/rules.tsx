@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import SkyjoCard from '@/components/skyjo-card';
+import SkyjoCard, { PileCard } from '@/components/skyjo-card';
+import { ActionButtons } from '@/components/action-buttons';
 import ScoringSheet from '@/components/scoring-sheet';
 import { cn } from '@/lib/utils';
 import { useDocumentTitle } from '@/hooks/use-document-title';
@@ -450,30 +451,16 @@ function TurnFlowSection() {
               )}
             </div>
 
-            {phase === 'drew_from_deck' && !flipMode && (
-              <div className="flex flex-col sm:flex-row justify-center items-center gap-2">
-                <Button variant="outline" size="sm" onClick={handleDiscardAndFlip}>
-                  Discard & Flip Instead
-                </Button>
-                <Button variant="outline" size="sm" onClick={undoDraw}>
-                  Undo — Draw From Discard Instead
-                </Button>
-              </div>
-            )}
-
-            {phase === 'drew_from_deck' && flipMode && (
+            {/* Action buttons — match real gameplay icons */}
+            {!isDone && drawnCard !== null && (
               <div className="flex justify-center">
-                <Button variant="outline" size="sm" onClick={undoDraw}>
-                  Undo — Choose Again
-                </Button>
-              </div>
-            )}
-
-            {phase === 'drew_from_discard' && (
-              <div className="flex justify-center">
-                <Button variant="outline" size="sm" onClick={undoDraw}>
-                  Undo — Put Back & Choose Again
-                </Button>
+                <ActionButtons
+                  wantsFlip={flipMode}
+                  onToggleFlip={phase === 'drew_from_deck' ? handleDiscardAndFlip : () => {}}
+                  onUndo={undoDraw}
+                  trashEnabled={phase === 'drew_from_deck'}
+                  undoEnabled={phase === 'drew_from_discard' || phase === 'drew_from_deck'}
+                />
               </div>
             )}
 
@@ -532,18 +519,25 @@ function TurnFlowSection() {
 function ColumnClearSection() {
   const numRows = 3;
   const numCols = 4;
-  const [phase, setPhase] = useState<'before' | 'matched' | 'cleared'>('before');
-  // Board where column 1 (indices 3,4,5) has two 5s revealed and one hidden 5
+  const HIGHLIGHT_DURATION_MS = 5000;
+  const [phase, setPhase] = useState<'ready' | 'revealing' | 'cleared'>('ready');
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Column-major board (index = col * numRows + row)
+  // Col 0: [3, 7, -1]  Col 1: [5, 5, 5]  Col 2: [8, 2, 12]  Col 3: [-2, 4, 9]
+  // Col 1 (indices 3,4,5) has two 5s revealed and one hidden 5 at index 5
   const boardValues = [3, 7, -1, 5, 5, 5, 8, 2, 12, -2, 4, 9];
-  const initialRevealed = new Set([0, 3, 4, 6, 9, 10]); // col 1 has idx 3,4 revealed, 5 hidden
+  const initialRevealed = new Set([0, 3, 4, 6, 7, 9, 10]);
+  const targetIdx = 5; // the hidden card that completes the column match
+  const columnIndices = new Set([3, 4, 5]); // col 1
 
   const getBoard = useCallback((): Slot[] => {
     return boardValues.map((v, i) => {
-      if (phase === 'cleared' && (i === 3 || i === 4 || i === 5)) {
+      if (phase === 'cleared' && columnIndices.has(i)) {
         return 'Cleared';
       }
-      if (phase === 'matched' && i === 5) {
-        return { Revealed: v }; // flipped to show match
+      if (phase === 'revealing' && i === targetIdx) {
+        return { Revealed: v };
       }
       return initialRevealed.has(i) ? { Revealed: v } : { Hidden: v };
     });
@@ -551,18 +545,28 @@ function ColumnClearSection() {
 
   const board = getBoard();
 
-  const handleStep = useCallback(() => {
-    if (phase === 'before') setPhase('matched');
-    else if (phase === 'matched') setPhase('cleared');
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  const handleFlipTarget = useCallback(() => {
+    if (phase !== 'ready') return;
+    setPhase('revealing');
+    timerRef.current = setTimeout(() => {
+      setPhase('cleared');
+      timerRef.current = null;
+    }, HIGHLIGHT_DURATION_MS);
   }, [phase]);
 
-  const handleReset = useCallback(() => setPhase('before'), []);
-
-  const stepLabel = phase === 'before'
-    ? 'Flip Hidden Card'
-    : phase === 'matched'
-      ? 'Clear Column'
-      : null;
+  const handleReset = useCallback(() => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    setPhase('ready');
+  }, []);
 
   return (
     <section id="columns" className="scroll-mt-12 lg:scroll-mt-20">
@@ -580,12 +584,25 @@ function ColumnClearSection() {
 
           <div className="border rounded-lg p-4 bg-muted/30 space-y-4">
             <div className="text-sm font-medium text-center">
-              {phase === 'before' && 'Column 2 has two 5s revealed and one hidden. What if the hidden card is also a 5?'}
-              {phase === 'matched' && 'All three cards match! The column will be cleared.'}
-              {phase === 'cleared' && 'Column cleared! Those cards no longer count toward your score.'}
+              {phase === 'ready' && (
+                <>You drew from the deck and discarded. Now flip a hidden card — tap the <strong>pulsing card</strong> in column 2.</>
+              )}
+              {phase === 'revealing' && (
+                <>All three cards in the column are 5s — they match! The column is being cleared…</>
+              )}
+              {phase === 'cleared' && (
+                <>Column cleared! Those 15 points no longer count toward your score.</>
+              )}
             </div>
 
-            <div className="flex flex-col items-center gap-3">
+            <div className="flex items-start justify-center gap-4">
+              {/* Deck and discard piles */}
+              <div className="flex flex-col items-center gap-3 pt-4">
+                <PileCard value={null} label="Deck" count={87} size="md" />
+                <PileCard value={12} label="Discard" count={14} size="md" hint="Just discarded" />
+              </div>
+
+              {/* Board grid */}
               <div
                 className="grid gap-1.5"
                 style={{ gridTemplateColumns: `repeat(${numCols}, 1fr)` }}
@@ -594,32 +611,43 @@ function ColumnClearSection() {
                   Array.from({ length: numCols }, (_, c) => {
                     const idx = c * numRows + r;
                     const slot = board[idx];
-                    const isHighlighted = phase === 'matched' && (idx === 3 || idx === 4 || idx === 5);
+                    const isTarget = idx === targetIdx && phase === 'ready';
+                    const isColumnHighlighted = phase === 'revealing' && columnIndices.has(idx);
                     return (
                       <SkyjoCard
                         key={idx}
                         slot={slot}
                         size="md"
-                        highlight={isHighlighted}
+                        highlight={isColumnHighlighted}
+                        className={cn(
+                          isTarget && 'ring-2 ring-primary animate-pulse cursor-pointer',
+                        )}
+                        onClick={isTarget ? handleFlipTarget : undefined}
                       />
                     );
                   })
                 ).flat()}
               </div>
 
-              <div className="flex gap-2">
-                {stepLabel && (
-                  <Button variant="outline" size="sm" onClick={handleStep}>
-                    {stepLabel}
-                  </Button>
-                )}
-                {phase === 'cleared' && (
-                  <Button variant="outline" size="sm" onClick={handleReset}>
-                    Reset Demo
-                  </Button>
-                )}
+              {/* Action buttons — trash active & disabled, undo disabled */}
+              <div className="pt-4">
+                <ActionButtons
+                  wantsFlip={true}
+                  onToggleFlip={() => {}}
+                  onUndo={() => {}}
+                  trashEnabled={false}
+                  undoEnabled={false}
+                />
               </div>
             </div>
+
+            {phase === 'cleared' && (
+              <div className="flex justify-center">
+                <Button variant="outline" size="sm" onClick={handleReset}>
+                  Reset Demo
+                </Button>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
