@@ -281,6 +281,10 @@ async fn main() {
         .route("/rooms", post(skyjo_server::create_room))
         .route("/rooms/{code}", get(skyjo_server::room_info))
         .route("/rooms/{code}/join", post(skyjo_server::join_room))
+        .route(
+            "/rooms/{code}/validate-session",
+            get(skyjo_server::validate_session),
+        )
         .route("/rooms/{code}/ws", get(ws_upgrade))
         .route("/games", get(skyjo_server::leaderboard::list_games))
         .route(

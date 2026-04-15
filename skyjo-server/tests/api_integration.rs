@@ -41,6 +41,10 @@ async fn test_app() -> Option<Router> {
         .route("/rooms", post(skyjo_server::create_room))
         .route("/rooms/{code}", get(skyjo_server::room_info))
         .route("/rooms/{code}/join", post(skyjo_server::join_room))
+        .route(
+            "/rooms/{code}/validate-session",
+            get(skyjo_server::validate_session),
+        )
         .route("/genetic/status", get(skyjo_server::genetic_status));
 
     Some(Router::new().nest("/api", api_routes).with_state(state))
@@ -327,7 +331,7 @@ async fn test_app_with_auth() -> Option<Router> {
 }
 
 #[tokio::test]
-async fn genetic_train_without_token_returns_403() {
+async fn genetic_train_without_token_returns_401() {
     let Some(app) = test_app_with_auth().await else {
         return;
     };
@@ -344,11 +348,11 @@ async fn genetic_train_without_token_returns_403() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
-async fn genetic_train_with_invalid_token_returns_403() {
+async fn genetic_train_with_invalid_token_returns_401() {
     let Some(app) = test_app_with_auth().await else {
         return;
     };
@@ -366,7 +370,7 @@ async fn genetic_train_with_invalid_token_returns_403() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
@@ -387,4 +391,126 @@ async fn genetic_status_no_auth_required() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
+}
+
+// --- Session validation tests ---
+
+#[tokio::test]
+async fn validate_session_returns_200_for_valid_token() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+
+    // Create a room to get a session token
+    let create_resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/rooms")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"player_name":"Alice","num_players":2}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let create_json = body_json(create_resp).await;
+    let code = create_json["room_code"].as_str().unwrap();
+    let token = create_json["session_token"].as_str().unwrap();
+
+    // Validate the session
+    let validate_resp = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/api/rooms/{code}/validate-session?token={token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(validate_resp.status(), StatusCode::OK);
+    let json = body_json(validate_resp).await;
+    assert_eq!(json["valid"], true);
+}
+
+#[tokio::test]
+async fn validate_session_returns_401_for_invalid_token() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+
+    // Create a room so the room exists
+    let create_resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/rooms")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"player_name":"Alice","num_players":2}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let create_json = body_json(create_resp).await;
+    let code = create_json["room_code"].as_str().unwrap();
+
+    // Try to validate with a fake token (simulates server restart losing sessions)
+    let validate_resp = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!(
+                    "/api/rooms/{code}/validate-session?token=stale-invalid-token"
+                ))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(validate_resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn validate_session_returns_401_for_wrong_room() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+
+    // Create a room to get a valid token
+    let create_resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/rooms")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"player_name":"Alice","num_players":2}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let create_json = body_json(create_resp).await;
+    let token = create_json["session_token"].as_str().unwrap();
+
+    // Try to validate with the token against a different room code
+    let validate_resp = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/api/rooms/ZZZZZZ/validate-session?token={token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Returns 401 because the token is for a different room
+    assert_eq!(validate_resp.status(), StatusCode::UNAUTHORIZED);
 }
