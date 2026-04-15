@@ -110,8 +110,7 @@ export function useOnlineGame(
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const reconnectAttemptRef = useRef(0);
-  const pendingClearRef = useRef(false);
-  const pendingClearTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingClearTimeoutRef= useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const send = useCallback((msg: object) => {
     const ws = wsRef.current;
@@ -160,6 +159,11 @@ export function useOnlineGame(
           setGameState(null);
           break;
         case 'GameState':
+          if (pendingClearTimeoutRef.current) {
+            clearTimeout(pendingClearTimeoutRef.current);
+            pendingClearTimeoutRef.current = null;
+          }
+          setPendingClearColumns(null);
           setGameState(msg.state);
           setTurnDeadlineSecs(msg.turn_deadline_secs ?? null);
           setWasTimeout(false);
@@ -174,14 +178,12 @@ export function useOnlineGame(
               column: c.column,
             }));
             setPendingClearColumns(clearCols);
-            pendingClearRef.current = true;
             setGameState(preClearState);
             setTurnDeadlineSecs(msg.turn_deadline_secs ?? null);
             setWasTimeout(false);
             if (pendingClearTimeoutRef.current) clearTimeout(pendingClearTimeoutRef.current);
             pendingClearTimeoutRef.current = setTimeout(() => {
               setPendingClearColumns(null);
-              pendingClearRef.current = false;
               setGameState(msg.state);
               pendingClearTimeoutRef.current = null;
             }, COLUMN_CLEAR_DELAY_MS);
@@ -201,14 +203,12 @@ export function useOnlineGame(
               column: c.column,
             }));
             setPendingClearColumns(clearCols);
-            pendingClearRef.current = true;
             setGameState(preClearState);
             setTurnDeadlineSecs(null);
             setWasTimeout(true);
             if (pendingClearTimeoutRef.current) clearTimeout(pendingClearTimeoutRef.current);
             pendingClearTimeoutRef.current = setTimeout(() => {
               setPendingClearColumns(null);
-              pendingClearRef.current = false;
               setGameState(msg.state);
               pendingClearTimeoutRef.current = null;
             }, COLUMN_CLEAR_DELAY_MS);
@@ -376,7 +376,6 @@ export function useOnlineGame(
       clearTimeout(pendingClearTimeoutRef.current);
       pendingClearTimeoutRef.current = null;
     }
-    pendingClearRef.current = false;
     if (wsRef.current) {
       wsRef.current.close();
       wsRef.current = null;

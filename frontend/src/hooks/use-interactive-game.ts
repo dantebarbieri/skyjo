@@ -502,6 +502,13 @@ export function useInteractiveGame(): UseInteractiveGame {
   const continueToNextRound = useCallback(() => {
     if (gameIdRef.current === null || !wasmMod) return;
 
+    if (pendingClearTimeoutRef.current !== null) {
+      clearTimeout(pendingClearTimeoutRef.current);
+      pendingClearTimeoutRef.current = null;
+    }
+    pendingClearRef.current = false;
+    setPendingClearColumns(null);
+
     try {
       setError(null);
       const action: PlayerAction = { type: 'ContinueToNextRound' };

@@ -209,6 +209,28 @@ describe('useBotTurns', () => {
     expect(opts.applyBotTurn).toHaveBeenCalledWith('Random');
   });
 
+  it('does not trigger bot turn when pendingColumnClear is true', () => {
+    const opts = makeOptions({
+      gameState: makeGameState('ChooseDraw', 1),
+      phase: 'playing',
+      pendingColumnClear: true,
+    });
+    renderHook(() => useBotTurns(opts));
+    vi.advanceTimersByTime(1000);
+    expect(opts.applyBotTurn).not.toHaveBeenCalled();
+  });
+
+  it('triggers bot turn when pendingColumnClear is false', () => {
+    const opts = makeOptions({
+      gameState: makeGameState('ChooseDraw', 1),
+      phase: 'playing',
+      pendingColumnClear: false,
+    });
+    renderHook(() => useBotTurns(opts));
+    vi.advanceTimersByTime(0);
+    expect(opts.applyBotTurn).toHaveBeenCalledWith('Random');
+  });
+
   it('cleans up timer on unmount', () => {
     const opts = makeOptions({
       gameState: makeGameState('ChooseDraw', 1),

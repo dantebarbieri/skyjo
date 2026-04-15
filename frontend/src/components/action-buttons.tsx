@@ -33,6 +33,8 @@ export function ActionButtons({
               disabled={!trashEnabled}
               onClick={onToggleFlip}
               className="h-9 w-9"
+              aria-label="Discard & Flip"
+              aria-pressed={wantsFlip}
             >
               <Trash2 className="h-4 w-4" />
             </Button>
@@ -49,6 +51,7 @@ export function ActionButtons({
               disabled={!undoEnabled}
               onClick={onUndo}
               className="h-9 w-9"
+              aria-label="Undo Draw"
             >
               <Undo2 className="h-4 w-4" />
             </Button>
