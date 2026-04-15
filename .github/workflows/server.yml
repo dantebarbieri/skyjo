@@ -61,18 +61,18 @@ jobs:
       postgres:
         image: postgres:17-alpine
         env:
-          POSTGRES_DB: skyjo_test
+          POSTGRES_DB: skyjo
           POSTGRES_USER: skyjo
           POSTGRES_PASSWORD: skyjo
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U skyjo"
+          --health-cmd "pg_isready -U skyjo -d skyjo"
           --health-interval 5s
           --health-timeout 3s
           --health-retries 5
     env:
-      DATABASE_URL: postgres://skyjo:skyjo@localhost:5432/skyjo_test
+      DATABASE_URL: postgres://skyjo:skyjo@localhost:5432/skyjo
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
@@ -84,4 +84,4 @@ jobs:
             target
           key: cargo-server-test-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: cargo-server-test-
-      - run: cargo test --locked --manifest-path skyjo-server/Cargo.toml
+      - run: cargo test --locked --manifest-path skyjo-server/Cargo.toml -- --test-threads=1
