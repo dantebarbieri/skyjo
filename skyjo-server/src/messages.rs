@@ -98,6 +98,8 @@ pub enum ServerMessage {
         state: InteractiveGameState,
         #[serde(skip_serializing_if = "Option::is_none")]
         turn_deadline_secs: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        round_ready: Option<Vec<bool>>,
     },
     /// A player joined the room.
     PlayerJoined { player_index: usize, name: String },
@@ -912,6 +914,7 @@ mod tests {
             action: PlayerAction::DrawFromDeck,
             state: state.clone(),
             turn_deadline_secs: Some(30),
+            round_ready: None,
         };
         let val: serde_json::Value = serde_json::to_value(&msg).unwrap();
         assert_eq!(val["type"], "TimeoutAction");
@@ -941,6 +944,7 @@ mod tests {
             action: PlayerAction::DrawFromDeck,
             state,
             turn_deadline_secs: None,
+            round_ready: None,
         };
         let val: serde_json::Value = serde_json::to_value(&msg).unwrap();
         assert_eq!(val["type"], "TimeoutAction");

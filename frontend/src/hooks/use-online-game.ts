@@ -230,6 +230,7 @@ export function useOnlineGame(
               break;
             }
             case 'TimeoutAction': {
+              setRoundReady(msg.round_ready ?? null);
               const isFlipClearTimeout = msg.action.type === 'DiscardAndFlip' && msg.state.last_column_clears.length > 0;
               if (isFlipClearTimeout) {
                 const preClearState = buildPreClearState(msg.state);

@@ -1278,6 +1278,7 @@ impl Room {
         }
 
         let deadline = self.turn_deadline_secs();
+        let round_ready = self.get_round_ready().cloned();
 
         for (i, slot) in self.players.iter().enumerate() {
             if slot.connected && matches!(slot.slot_type, PlayerSlotType::Human) {
@@ -1287,6 +1288,7 @@ impl Room {
                     action: action.clone(),
                     state,
                     turn_deadline_secs: deadline,
+                    round_ready: round_ready.clone(),
                 };
                 let _ = self.broadcast_tx.send((i, msg));
             }

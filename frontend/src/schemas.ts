@@ -343,7 +343,7 @@ export const ServerMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('ActionApplied'), player: z.number(), action: PlayerActionSchema, state: InteractiveGameStateSchema, turn_deadline_secs: z.number().nullable().optional(), round_ready: z.array(z.boolean()).optional() }),
   z.object({ type: z.literal('ActionAppliedDelta'), player: z.number(), action: PlayerActionSchema, delta: StateDeltaSchema }),
   z.object({ type: z.literal('BotAction'), player: z.number(), action: PlayerActionSchema, state: InteractiveGameStateSchema, turn_deadline_secs: z.number().nullable().optional(), round_ready: z.array(z.boolean()).optional() }),
-  z.object({ type: z.literal('TimeoutAction'), player: z.number(), action: PlayerActionSchema, state: InteractiveGameStateSchema, turn_deadline_secs: z.number().nullable().optional() }),
+  z.object({ type: z.literal('TimeoutAction'), player: z.number(), action: PlayerActionSchema, state: InteractiveGameStateSchema, turn_deadline_secs: z.number().nullable().optional(), round_ready: z.array(z.boolean()).optional() }),
   z.object({ type: z.literal('PlayerJoined'), player_index: z.number(), name: z.string() }),
   z.object({ type: z.literal('PlayerLeft'), player_index: z.number() }),
   z.object({ type: z.literal('PlayerReconnected'), player_index: z.number() }),
