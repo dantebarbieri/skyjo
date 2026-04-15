@@ -14,7 +14,7 @@ export interface LeaderboardFilters {
 }
 
 export function useLeaderboard() {
-  const { accessToken } = useAuth();
+  const { accessToken, user } = useAuth();
 
   const [games, setGames] = useState<GameSummary[]>([]);
   const [total, setTotal] = useState(0);
@@ -59,11 +59,12 @@ export function useLeaderboard() {
     if (debouncedPlayerName.trim()) {
       params.set('player_name', debouncedPlayerName.trim());
     }
-    if (filters.myGames) {
-      params.set('my_games', 'true');
+    if (filters.myGames && user?.id) {
+      params.set('user_id', user.id);
     }
     if (filters.numPlayers !== null) {
-      params.set('num_players', String(filters.numPlayers));
+      params.set('min_players', String(filters.numPlayers));
+      params.set('max_players', String(filters.numPlayers));
     }
     if (filters.rules) {
       params.set('rules', filters.rules);
@@ -92,7 +93,7 @@ export function useLeaderboard() {
     } finally {
       setLoading(false);
     }
-  }, [page, perPage, sortBy, sortOrder, debouncedPlayerName, filters.myGames, filters.numPlayers, filters.rules, accessToken]);
+  }, [page, perPage, sortBy, sortOrder, debouncedPlayerName, filters.myGames, filters.numPlayers, filters.rules, accessToken, user?.id]);
 
   useEffect(() => {
     fetchGames();

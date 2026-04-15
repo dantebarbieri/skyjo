@@ -31,6 +31,7 @@ fn error_msg(err: ServerError) -> ServerMessage {
 }
 
 /// Handle a WebSocket connection for a player in a room.
+#[allow(clippy::too_many_arguments)] // WebSocket setup requires all these contextual parameters
 pub async fn handle_ws(
     ws: WebSocket,
     state: Arc<AppStateInner>,
@@ -39,6 +40,7 @@ pub async fn handle_ws(
     player_index: usize,
     client_ip: String,
     initial_format: WireFormat,
+    user_id: Option<uuid::Uuid>,
 ) {
     let (mut ws_tx, mut ws_rx) = ws.split();
 
@@ -58,6 +60,7 @@ pub async fn handle_ws(
         room_guard.players[player_index].connected = true;
         room_guard.players[player_index].ip = Some(client_ip);
         room_guard.players[player_index].disconnected_at = None;
+        room_guard.players[player_index].user_id = user_id;
 
         // Register per-player targeted channel
         room_guard.set_player_tx(player_index, player_msg_tx);
@@ -916,18 +919,27 @@ async fn persist_game_completion(
     history: Option<&skyjo_core::GameHistory>,
     _players: &[(usize, String, Option<uuid::Uuid>, Option<String>)],
 ) {
-    // Save the full game history if available
-    if let Some(history) = history
-        && let Err(e) = persistence
+    if let Some(history) = history {
+        // Only mark as completed if history save succeeds
+        match persistence
             .save_game_history(game_id, &history.rules_name, history)
             .await
-    {
-        tracing::error!(game_id = %game_id, "Failed to persist game history: {e}");
-    }
-
-    // Mark as completed
-    if let Err(e) = persistence.update_game_state(game_id, "completed").await {
-        tracing::error!(game_id = %game_id, "Failed to mark game as completed: {e}");
+        {
+            Ok(()) => {
+                if let Err(e) = persistence.update_game_state(game_id, "completed").await {
+                    tracing::error!(game_id = %game_id, "Failed to mark game as completed: {e}");
+                }
+            }
+            Err(e) => {
+                tracing::error!(game_id = %game_id, "Failed to persist game history: {e}");
+                // Don't mark as completed — game stays in_progress for retry
+            }
+        }
+    } else {
+        // No history available, still mark completed
+        if let Err(e) = persistence.update_game_state(game_id, "completed").await {
+            tracing::error!(game_id = %game_id, "Failed to mark game as completed: {e}");
+        }
     }
 }
 

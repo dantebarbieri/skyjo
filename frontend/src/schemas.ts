@@ -475,7 +475,7 @@ export const GamePlayerSummarySchema = z.object({
 
 export const GameSummarySchema = z.object({
   id: z.string(),
-  room_code: z.string(),
+  room_code: z.string().nullable(),
   rules: z.string(),
   num_players: z.number().int().positive(),
   num_rounds: z.number().int().positive(),
@@ -515,7 +515,7 @@ export const GamePlayerDetailSchema = z.object({
 
 export const GameDetailSchema = z.object({
   id: z.string(),
-  room_code: z.string(),
+  room_code: z.string().nullable(),
   rules: z.string(),
   num_players: z.number().int().positive(),
   num_rounds: z.number().int().positive(),

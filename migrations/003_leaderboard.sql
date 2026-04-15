@@ -7,51 +7,51 @@
 --------------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS permission_levels (
-    id SERIAL PRIMARY KEY,
+    id INT PRIMARY KEY,
     name TEXT UNIQUE NOT NULL
 );
 
-INSERT INTO permission_levels (name) VALUES ('user'), ('moderator'), ('admin')
+INSERT INTO permission_levels (id, name) VALUES (1, 'user'), (2, 'moderator'), (3, 'admin')
 ON CONFLICT (name) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS action_kinds (
-    id SERIAL PRIMARY KEY,
+    id INT PRIMARY KEY,
     name TEXT UNIQUE NOT NULL
 );
 
-INSERT INTO action_kinds (name) VALUES ('drew_deck_kept'), ('drew_deck_flipped'), ('drew_discard')
+INSERT INTO action_kinds (id, name) VALUES (1, 'drew_deck_kept'), (2, 'drew_deck_flipped'), (3, 'drew_discard')
 ON CONFLICT (name) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS clear_kinds (
-    id SERIAL PRIMARY KEY,
+    id INT PRIMARY KEY,
     name TEXT UNIQUE NOT NULL
 );
 
-INSERT INTO clear_kinds (name) VALUES ('turn'), ('round_end')
+INSERT INTO clear_kinds (id, name) VALUES (1, 'turn'), (2, 'round_end')
 ON CONFLICT (name) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS game_states (
-    id SERIAL PRIMARY KEY,
+    id INT PRIMARY KEY,
     name TEXT UNIQUE NOT NULL
 );
 
-INSERT INTO game_states (name) VALUES ('in_progress'), ('completed'), ('abandoned')
+INSERT INTO game_states (id, name) VALUES (1, 'in_progress'), (2, 'completed'), (3, 'abandoned')
 ON CONFLICT (name) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS room_phases (
-    id SERIAL PRIMARY KEY,
+    id INT PRIMARY KEY,
     name TEXT UNIQUE NOT NULL
 );
 
-INSERT INTO room_phases (name) VALUES ('lobby'), ('in_game'), ('game_over')
+INSERT INTO room_phases (id, name) VALUES (1, 'lobby'), (2, 'in_game'), (3, 'game_over')
 ON CONFLICT (name) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS slot_types (
-    id SERIAL PRIMARY KEY,
+    id INT PRIMARY KEY,
     name TEXT UNIQUE NOT NULL
 );
 
-INSERT INTO slot_types (name) VALUES ('human'), ('bot'), ('empty')
+INSERT INTO slot_types (id, name) VALUES (1, 'human'), (2, 'bot'), (3, 'empty')
 ON CONFLICT (name) DO NOTHING;
 
 --------------------------------------------------------------------------------

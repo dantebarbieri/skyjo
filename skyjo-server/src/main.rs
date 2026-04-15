@@ -153,6 +153,8 @@ async fn main() {
     }
 
     // Mark any orphaned in-progress games as abandoned (from previous server crashes)
+    // TODO: Once room snapshot restore is re-enabled, this should check against
+    // restored rooms and only mark games as abandoned if their room was not restored.
     match persistence.find_orphaned_in_progress_games().await {
         Ok(orphaned) => {
             if !orphaned.is_empty() {
@@ -425,6 +427,9 @@ struct WsQuery {
     /// Wire format preference: "json" (default) or "msgpack"
     #[serde(default)]
     format: Option<String>,
+    /// Optional JWT access token for associating the connection with an authenticated user.
+    #[serde(default)]
+    access_token: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -472,6 +477,14 @@ async fn ws_upgrade(
         Some("msgpack" | "messagepack") => skyjo_server::messages::WireFormat::MessagePack,
         _ => skyjo_server::messages::WireFormat::Json,
     };
+
+    // Optionally extract authenticated user_id from JWT access token
+    let user_id = query
+        .access_token
+        .as_deref()
+        .and_then(|token| skyjo_server::auth::validate_access_token(token, &state.jwt_secret).ok())
+        .map(|auth_user| auth_user.id);
+
     Ok(ws.on_upgrade(move |socket| async move {
         ws::handle_ws(
             socket,
@@ -481,6 +494,7 @@ async fn ws_upgrade(
             player_index,
             client_ip,
             initial_format,
+            user_id,
         )
         .await;
     }))

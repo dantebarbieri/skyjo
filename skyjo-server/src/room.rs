@@ -566,7 +566,7 @@ impl Room {
 
         let rules = make_rules(&self.rules_name)?;
         let player_names: Vec<String> = self.players.iter().map(|p| p.name.clone()).collect();
-        let seed: u64 = rand::rng().random();
+        let seed: u64 = rand::rng().random::<i64>().unsigned_abs();
 
         let game = InteractiveGame::new(rules, self.num_players, player_names, seed)
             .map_err(|e| ServerError::InvalidAction(e.to_string()))?;

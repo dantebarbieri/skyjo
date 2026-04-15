@@ -647,6 +647,12 @@ impl Persistence {
             param_idx += 1;
             conditions.push(format!("gs.num_players <= ${param_idx}"));
         }
+        if params.user_id.is_some() {
+            param_idx += 1;
+            conditions.push(format!(
+                "EXISTS (SELECT 1 FROM game_players gp2 WHERE gp2.game_id = gs.game_id AND gp2.user_id = ${param_idx})"
+            ));
+        }
 
         let where_clause = conditions.join(" AND ");
 
@@ -671,6 +677,7 @@ impl Persistence {
             .await?;
 
         // Fetch players for each game
+        // TODO: N+1 query — batch player+room_code fetches into single queries using ANY($1)
         let mut games = Vec::with_capacity(games_rows.len());
         for row in &games_rows {
             let player_rows: Vec<GamePlayerSummaryRow> = sqlx::query_as(
@@ -987,6 +994,18 @@ impl Persistence {
             // Reconstruct turns with their column clears
             let mut boards = build_initial_boards(&dealt_hands);
             let mut turns = Vec::with_capacity(turn_rows.len());
+
+            // went_out is true on the going-out player's last turn in the round
+            // (the turn where all their cards became revealed). After going out,
+            // the player gets no more turns, so their last turn is the going-out turn.
+            let going_out_turn_idx: Option<i32> = going_out_player.and_then(|gop| {
+                turn_rows
+                    .iter()
+                    .rev()
+                    .find(|t| t.player_index == gop)
+                    .map(|t| t.turn_index)
+            });
+
             for turn_row in &turn_rows {
                 let action = reconstruct_turn_action(turn_row, &boards);
 
@@ -1014,11 +1033,8 @@ impl Persistence {
                     mark_column_cleared(&mut boards, clear.player_index, clear.column, num_rows);
                 }
 
-                // The going_out player's first turn matching their index has went_out = true.
-                let is_going_out_turn = going_out_player
-                    .map(|g| g == turn_row.player_index)
-                    .unwrap_or(false)
-                    && !turns.iter().any(|t: &TurnRecord| t.went_out);
+                // The going_out player's last turn in the round has went_out = true.
+                let is_going_out_turn = going_out_turn_idx == Some(turn_row.turn_index);
 
                 turns.push(TurnRecord {
                     player_index: turn_row.player_index as usize,
@@ -1304,6 +1320,8 @@ struct ColumnClearDbRow {
 // ── Helper functions ────────────────────────────────────────────────
 
 /// Map rules name to number of rows per player grid.
+/// NOTE: Currently only StandardRules exists (3 rows). When new rule variants
+/// are added with different grid dimensions, this function must be updated.
 fn num_rows_for_rules(rules_name: &str) -> usize {
     match rules_name {
         "Standard" => 3,
@@ -1491,6 +1509,9 @@ fn bind_game_list_filters<'q>(
     if let Some(max_p) = params.max_players {
         query = query.bind(max_p as i64);
     }
+    if let Some(ref uid) = params.user_id {
+        query = query.bind(*uid);
+    }
     query
 }
 
@@ -1515,6 +1536,9 @@ fn bind_game_list_filters_query_as<'q>(
     }
     if let Some(max_p) = params.max_players {
         query = query.bind(max_p as i64);
+    }
+    if let Some(ref uid) = params.user_id {
+        query = query.bind(*uid);
     }
     query
 }

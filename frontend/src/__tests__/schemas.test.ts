@@ -706,6 +706,22 @@ describe('Leaderboard schemas', () => {
     expect(GameSummarySchema.parse(data)).toEqual(data);
   });
 
+  it('GameSummarySchema accepts null room_code', () => {
+    const data = {
+      id: 'game-002',
+      room_code: null,
+      rules: 'Standard',
+      num_players: 2,
+      num_rounds: 3,
+      created_at: '2025-01-15T12:00:00Z',
+      players: [
+        { name: 'Alice', final_score: 30, is_winner: true, is_bot: false },
+        { name: 'Bob', final_score: 50, is_winner: false, is_bot: false },
+      ],
+    };
+    expect(GameSummarySchema.parse(data)).toEqual(data);
+  });
+
   it('GameListResponseSchema accepts valid data', () => {
     const data = {
       games: [{
@@ -764,6 +780,31 @@ describe('Leaderboard schemas', () => {
           scores: [
             { player_index: 0, raw_score: 20, adjusted_score: 20, cumulative_score: 30, went_out: false, was_penalized: false },
             { player_index: 1, raw_score: 30, adjusted_score: 30, cumulative_score: 50, went_out: true, was_penalized: false },
+          ],
+        },
+      ],
+    };
+    expect(GameDetailSchema.parse(data)).toEqual(data);
+  });
+
+  it('GameDetailSchema accepts null room_code', () => {
+    const data = {
+      id: 'game-002',
+      room_code: null,
+      rules: 'Standard',
+      num_players: 2,
+      num_rounds: 1,
+      created_at: '2025-01-15T12:00:00Z',
+      players: [
+        { name: 'Alice', final_score: 30, is_winner: true, is_bot: false },
+        { name: 'Bob', final_score: 50, is_winner: false, is_bot: false },
+      ],
+      rounds: [
+        {
+          round_number: 1,
+          scores: [
+            { player_index: 0, raw_score: 30, adjusted_score: 30, cumulative_score: 30, went_out: true, was_penalized: false },
+            { player_index: 1, raw_score: 50, adjusted_score: 50, cumulative_score: 50, went_out: false, was_penalized: false },
           ],
         },
       ],
