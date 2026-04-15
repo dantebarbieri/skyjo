@@ -598,8 +598,12 @@ async fn handle_parsed_message(
                     room_guard.broadcast_action(player_index, &action, false, &delta);
 
                     // Check if game just ended
-                    let game_over_id = if room_guard.phase == crate::room::RoomPhase::GameOver {
-                        room_guard.game_id
+                    let game_over_data = if room_guard.phase == crate::room::RoomPhase::GameOver {
+                        room_guard.game_id.map(|id| {
+                            let history = room_guard.game.as_ref().map(|g| g.build_history());
+                            let players = extract_player_data(&room_guard);
+                            (id, history, players)
+                        })
                     } else {
                         None
                     };
@@ -622,10 +626,16 @@ async fn handle_parsed_message(
                     }
 
                     // Persist game completion in background
-                    if let Some(game_id) = game_over_id {
+                    if let Some((game_id, history, players)) = game_over_data {
                         let persistence = state.persistence.clone();
                         tokio::spawn(async move {
-                            persist_game_completion(&persistence, game_id).await;
+                            persist_game_completion(
+                                &persistence,
+                                game_id,
+                                history.as_ref(),
+                                &players,
+                            )
+                            .await;
                         });
                     }
 
@@ -766,8 +776,12 @@ fn schedule_turn_timeout_with_persistence(room: SharedRoom, persistence: Option<
                 room_guard.broadcast_timeout_action(player, &action, &delta);
 
                 // Check if the timeout action ended the game
-                let game_over_id = if room_guard.phase == crate::room::RoomPhase::GameOver {
-                    room_guard.game_id
+                let game_over_data = if room_guard.phase == crate::room::RoomPhase::GameOver {
+                    room_guard.game_id.map(|id| {
+                        let history = room_guard.game.as_ref().map(|g| g.build_history());
+                        let players = extract_player_data(&room_guard);
+                        (id, history, players)
+                    })
                 } else {
                     None
                 };
@@ -787,11 +801,19 @@ fn schedule_turn_timeout_with_persistence(room: SharedRoom, persistence: Option<
                 }
 
                 // Persist game completion if it ended
-                if let (Some(game_id), Some(persistence)) = (game_over_id, &persistence) {
-                    let persistence = persistence.clone();
-                    tokio::spawn(async move {
-                        persist_game_completion(&persistence, game_id).await;
-                    });
+                if let Some((game_id, history, players)) = game_over_data {
+                    if let Some(persistence) = &persistence {
+                        let persistence = persistence.clone();
+                        tokio::spawn(async move {
+                            persist_game_completion(
+                                &persistence,
+                                game_id,
+                                history.as_ref(),
+                                &players,
+                            )
+                            .await;
+                        });
+                    }
                 }
             }
             Ok(None) => {
@@ -826,10 +848,18 @@ async fn run_bot_turns_with_persistence(room: SharedRoom, persistence: Option<Pe
                 // Check if game just ended
                 if room_guard.phase == crate::room::RoomPhase::GameOver {
                     if let (Some(persistence), Some(game_id)) = (&persistence, room_guard.game_id) {
+                        let history = room_guard.game.as_ref().map(|g| g.build_history());
+                        let players = extract_player_data(&room_guard);
                         let persistence = persistence.clone();
                         drop(room_guard);
                         tokio::spawn(async move {
-                            persist_game_completion(&persistence, game_id).await;
+                            persist_game_completion(
+                                &persistence,
+                                game_id,
+                                history.as_ref(),
+                                &players,
+                            )
+                            .await;
                         });
                     }
                     break;
@@ -884,8 +914,24 @@ async fn persist_game_start(
     }
 }
 
-/// Mark a game as completed in the database.
-async fn persist_game_completion(persistence: &Persistence, game_id: uuid::Uuid) {
+/// Save full game history and mark as completed.
+async fn persist_game_completion(
+    persistence: &Persistence,
+    game_id: uuid::Uuid,
+    history: Option<&skyjo_core::GameHistory>,
+    _players: &[(usize, String, Option<uuid::Uuid>, Option<String>)],
+) {
+    // Save the full game history if available
+    if let Some(history) = history {
+        if let Err(e) = persistence
+            .save_game_history(game_id, &history.rules_name, history)
+            .await
+        {
+            tracing::error!(game_id = %game_id, "Failed to persist game history: {e}");
+        }
+    }
+
+    // Mark as completed
     if let Err(e) = persistence.update_game_state(game_id, "completed").await {
         tracing::error!(game_id = %game_id, "Failed to mark game as completed: {e}");
     }

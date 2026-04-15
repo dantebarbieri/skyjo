@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::board::PlayerBoard;
 use crate::card::{CardValue, Slot, VisibleSlot};
 use crate::error::{Result, SkyjoError};
-use crate::history::ColumnClearEvent;
+use crate::history::{ColumnClearEvent, GameHistory, RoundHistory, TurnAction, TurnRecord};
 use crate::rules::Rules;
 use crate::strategy::{DeckDrawAction, DrawChoice, Strategy, StrategyView};
 
@@ -134,6 +134,15 @@ pub struct InteractiveGame {
     last_round_scores: Vec<i32>,
     last_raw_round_scores: Vec<i32>,
     last_end_of_round_clears: Vec<ColumnClearEvent>,
+
+    // History tracking for persistence
+    seed: u64,
+    rules_name: String,
+    completed_rounds: Vec<RoundHistory>,
+    current_round_deck_order: Vec<CardValue>,
+    current_round_dealt_hands: Vec<Vec<CardValue>>,
+    current_round_setup_flips: Vec<Vec<usize>>,
+    current_round_turns: Vec<TurnRecord>,
 }
 
 impl InteractiveGame {
@@ -149,6 +158,8 @@ impl InteractiveGame {
         if num_players > 8 {
             return Err(SkyjoError::TooManyPlayers);
         }
+
+        let rules_name = rules.name().to_string();
 
         let mut game = InteractiveGame {
             rng: StdRng::seed_from_u64(seed),
@@ -173,6 +184,13 @@ impl InteractiveGame {
             last_raw_round_scores: Vec::new(),
             last_end_of_round_clears: Vec::new(),
             rules,
+            seed,
+            rules_name,
+            completed_rounds: Vec::new(),
+            current_round_deck_order: Vec::new(),
+            current_round_dealt_hands: Vec::new(),
+            current_round_setup_flips: Vec::new(),
+            current_round_turns: Vec::new(),
         };
 
         game.deal_round()?;
@@ -183,6 +201,9 @@ impl InteractiveGame {
         // Build & shuffle deck
         let mut deck = self.rules.build_deck();
         deck.shuffle(&mut self.rng);
+
+        // Record deck order for history before dealing
+        self.current_round_deck_order = deck.clone();
 
         let cards_per_player = self.rules.num_cards_per_player();
         let num_rows = self.rules.num_rows();
@@ -197,6 +218,11 @@ impl InteractiveGame {
             }
             dealt_hands.push(hand);
         }
+
+        // Record dealt hands for history
+        self.current_round_dealt_hands = dealt_hands.clone();
+        self.current_round_setup_flips = vec![Vec::new(); self.num_players];
+        self.current_round_turns.clear();
 
         // Initialize boards (all hidden)
         self.boards = dealt_hands
@@ -291,6 +317,9 @@ impl InteractiveGame {
                 let remaining = *flips_remaining;
                 self.boards[player].flip(position)?;
 
+                // Record setup flip for history
+                self.current_round_setup_flips[player].push(position);
+
                 if remaining > 1 {
                     // Same player, one fewer flip remaining
                     self.phase = Phase::SetupFlips {
@@ -359,6 +388,21 @@ impl InteractiveGame {
                 self.discard_piles[target].push(displaced);
                 self.last_column_clears =
                     self.check_and_clear_columns(self.current_player, Some(displaced));
+
+                // Record turn for history
+                let went_out = self.boards[self.current_player].all_revealed()
+                    && self.going_out_player.is_none();
+                self.current_round_turns.push(TurnRecord {
+                    player_index: self.current_player,
+                    action: TurnAction::DrewFromDeck {
+                        drawn_card: drawn,
+                        action: DeckDrawAction::Keep(position),
+                        displaced_card: Some(displaced),
+                    },
+                    column_clears: self.last_column_clears.clone(),
+                    went_out,
+                });
+
                 self.advance_turn();
             }
 
@@ -371,6 +415,21 @@ impl InteractiveGame {
                 self.discard_piles[target].push(drawn);
                 self.boards[self.current_player].flip(position)?;
                 self.last_column_clears = self.check_and_clear_columns(self.current_player, None);
+
+                // Record turn for history
+                let went_out = self.boards[self.current_player].all_revealed()
+                    && self.going_out_player.is_none();
+                self.current_round_turns.push(TurnRecord {
+                    player_index: self.current_player,
+                    action: TurnAction::DrewFromDeck {
+                        drawn_card: drawn,
+                        action: DeckDrawAction::DiscardAndFlip(position),
+                        displaced_card: None,
+                    },
+                    column_clears: self.last_column_clears.clone(),
+                    went_out,
+                });
+
                 self.advance_turn();
             }
 
@@ -388,15 +447,35 @@ impl InteractiveGame {
             }
 
             (
-                Phase::WaitingForDiscardPlacement { drawn_card, .. },
+                Phase::WaitingForDiscardPlacement {
+                    drawn_card,
+                    source_pile,
+                },
                 PlayerAction::PlaceDiscardDraw { position },
             ) => {
                 let drawn = *drawn_card;
+                let pile_idx = *source_pile;
                 let displaced = self.boards[self.current_player].replace(position, drawn)?;
                 let target = self.rules.discard_target(self.current_player);
                 self.discard_piles[target].push(displaced);
                 self.last_column_clears =
                     self.check_and_clear_columns(self.current_player, Some(displaced));
+
+                // Record turn for history
+                let went_out = self.boards[self.current_player].all_revealed()
+                    && self.going_out_player.is_none();
+                self.current_round_turns.push(TurnRecord {
+                    player_index: self.current_player,
+                    action: TurnAction::DrewFromDiscard {
+                        pile_index: pile_idx,
+                        drawn_card: drawn,
+                        placement: position,
+                        displaced_card: displaced,
+                    },
+                    column_clears: self.last_column_clears.clone(),
+                    went_out,
+                });
+
                 self.advance_turn();
             }
 
@@ -510,9 +589,24 @@ impl InteractiveGame {
         }
 
         self.last_round_goer = self.going_out_player;
-        self.last_round_scores = round_scores;
+        self.last_round_scores = round_scores.clone();
         self.last_raw_round_scores = raw_round_scores;
-        self.last_end_of_round_clears = end_of_round_clears;
+        self.last_end_of_round_clears = end_of_round_clears.clone();
+
+        // Finalize round history
+        self.completed_rounds.push(RoundHistory {
+            round_number: self.round_number,
+            initial_deck_order: std::mem::take(&mut self.current_round_deck_order),
+            dealt_hands: std::mem::take(&mut self.current_round_dealt_hands),
+            setup_flips: std::mem::take(&mut self.current_round_setup_flips),
+            starting_player: self.starter,
+            turns: std::mem::take(&mut self.current_round_turns),
+            going_out_player: self.going_out_player,
+            end_of_round_clears,
+            round_scores,
+            cumulative_scores: self.cumulative_scores.clone(),
+            truncated: false,
+        });
 
         // Check if game is over
         if self
@@ -664,6 +758,33 @@ impl InteractiveGame {
             going_out_player: self.going_out_player,
             is_final_turn: self.going_out_player.is_some(),
             last_column_clears: self.last_column_clears.clone(),
+        }
+    }
+
+    /// Build a `GameHistory` from the recorded game data.
+    /// Available at any point — returns completed rounds plus the game's final state.
+    /// At `GameOver`, this is the complete history; during play, it's a partial snapshot.
+    pub fn build_history(&self) -> GameHistory {
+        let winners = if matches!(self.phase, Phase::GameOver) {
+            let min_score = self.cumulative_scores.iter().copied().min().unwrap_or(0);
+            self.cumulative_scores
+                .iter()
+                .enumerate()
+                .filter(|(_, s)| **s == min_score)
+                .map(|(i, _)| i)
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        GameHistory {
+            seed: self.seed,
+            num_players: self.num_players,
+            strategy_names: self.player_names.clone(),
+            rules_name: self.rules_name.clone(),
+            rounds: self.completed_rounds.clone(),
+            final_scores: self.cumulative_scores.clone(),
+            winners,
         }
     }
 

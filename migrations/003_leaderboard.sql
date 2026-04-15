@@ -179,9 +179,9 @@ FROM permission_levels pl
 WHERE pl.name = users.permission_level::TEXT;
 
 -- Set NOT NULL + default after population
+-- permission_levels 'user' = id 1 (first inserted above)
 ALTER TABLE users ALTER COLUMN permission_level_id SET NOT NULL;
-ALTER TABLE users ALTER COLUMN permission_level_id
-    SET DEFAULT (SELECT id FROM permission_levels WHERE name = 'user');
+ALTER TABLE users ALTER COLUMN permission_level_id SET DEFAULT 1;
 
 -- Drop the old ENUM column
 ALTER TABLE users DROP COLUMN permission_level;
