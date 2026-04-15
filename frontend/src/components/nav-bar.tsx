@@ -40,7 +40,7 @@ export default function NavBar() {
 
         {/* Auth section — pushed to the right */}
         <div className="ml-auto flex items-center gap-2">
-          {!backendAvailable ? null : isAuthenticated && user ? (
+          {backendAvailable && isAuthenticated && user && (
             <>
               <NavLink
                 to="/settings"
@@ -75,7 +75,8 @@ export default function NavBar() {
                 Sign Out
               </Button>
             </>
-          ) : (
+          )}
+          {backendAvailable && !isAuthenticated && (
             <Button
               variant="ghost"
               size="sm"

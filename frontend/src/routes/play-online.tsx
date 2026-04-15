@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
@@ -161,7 +161,7 @@ export default function PlayOnlineRoute() {
           <p className="text-lg font-medium mb-2">Server unavailable</p>
           <p>Online play requires a connection to the game server.</p>
           <p className="mt-3">
-            <a href="/play" className="underline">Play locally</a> for offline mode.
+            <Link to="/play" className="underline">Play locally</Link> for offline mode.
           </p>
         </div>
       </div>

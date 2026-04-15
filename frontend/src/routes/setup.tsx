@@ -15,8 +15,8 @@ export default function SetupRoute() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // Redirect away if setup is already complete
-  if (!isLoading && !needsSetup) {
+  // Redirect away if setup is already complete (only when backend confirms)
+  if (!isLoading && backendAvailable && !needsSetup) {
     return <Navigate to="/" replace />;
   }
 

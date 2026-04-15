@@ -143,11 +143,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             return;
           }
         }
-      } catch {
-        // Server unreachable — enter offline mode (simulation & local play still work)
-        setBackendAvailable(false);
-        setIsLoading(false);
-        return;
+      } catch (err) {
+        // Network error (TypeError from fetch) — enter offline mode
+        if (err instanceof TypeError) {
+          setBackendAvailable(false);
+          setIsLoading(false);
+          return;
+        }
+        // Other errors (e.g. JSON parse) — backend may still be reachable
       }
       await refresh();
       setIsLoading(false);

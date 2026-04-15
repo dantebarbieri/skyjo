@@ -30,7 +30,7 @@ function renderWithAuth(initialPath = '/') {
 
 describe('AuthProvider — backend availability', () => {
   afterEach(() => {
-    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it('sets backendAvailable=true when setup-status fetch succeeds', async () => {
