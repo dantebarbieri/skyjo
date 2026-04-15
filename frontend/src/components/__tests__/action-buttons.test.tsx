@@ -1,6 +1,13 @@
+// Polyfill ResizeObserver for Radix UI tooltip in jsdom
+class ResizeObserverMock {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+globalThis.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
+
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { ActionButtons } from '../action-buttons';
 
 function renderButtons(overrides: Partial<Parameters<typeof ActionButtons>[0]> = {}) {
@@ -50,19 +57,17 @@ describe('ActionButtons', () => {
     expect(buttons[1]).toBeDisabled();
   });
 
-  it('calls onToggleFlip when Trash button is clicked', async () => {
-    const user = userEvent.setup();
+  it('calls onToggleFlip when Trash button is clicked', () => {
     const { onToggleFlip } = renderButtons({ trashEnabled: true });
     const buttons = screen.getAllByRole('button');
-    await user.click(buttons[0]);
+    fireEvent.click(buttons[0]);
     expect(onToggleFlip).toHaveBeenCalledOnce();
   });
 
-  it('calls onUndo when Undo button is clicked', async () => {
-    const user = userEvent.setup();
+  it('calls onUndo when Undo button is clicked', () => {
     const { onUndo } = renderButtons({ undoEnabled: true });
     const buttons = screen.getAllByRole('button');
-    await user.click(buttons[1]);
+    fireEvent.click(buttons[1]);
     expect(onUndo).toHaveBeenCalledOnce();
   });
 
