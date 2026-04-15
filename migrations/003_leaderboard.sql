@@ -117,7 +117,14 @@ CREATE TABLE IF NOT EXISTS round_turns (
     target_position INT,
     replaced_card SMALLINT,
     flipped_card SMALLINT,
-    UNIQUE (round_id, turn_index)
+    -- Which discard pile was drawn from (only set for action_kind_id = 3 = 'drew_discard').
+    -- Nullable: NULL for deck-draw actions. Supports multi-discard-pile rulesets.
+    pile_index INT,
+    UNIQUE (round_id, turn_index),
+    CHECK (
+        (action_kind_id = 3 AND pile_index IS NOT NULL)
+        OR (action_kind_id != 3 AND pile_index IS NULL)
+    )
 );
 
 CREATE INDEX IF NOT EXISTS idx_round_turns_round_id ON round_turns(round_id);

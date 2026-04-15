@@ -349,8 +349,8 @@ impl Persistence {
         for t in turns {
             sqlx::query(
                 "INSERT INTO round_turns (round_id, turn_index, player_index, action_kind_id,
-                    drawn_card, target_position, replaced_card, flipped_card)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+                    drawn_card, target_position, replaced_card, flipped_card, pile_index)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
             )
             .bind(round_id)
             .bind(t.turn_index)
@@ -360,6 +360,7 @@ impl Persistence {
             .bind(t.target_position)
             .bind(t.replaced_card)
             .bind(t.flipped_card)
+            .bind(t.pile_index)
             .execute(&self.pool)
             .await?;
         }
@@ -552,22 +553,22 @@ impl Persistence {
         let mut all_clears: Vec<ColumnClearRow> = Vec::new();
 
         for (turn_idx, turn) in round.turns.iter().enumerate() {
-            let (action_kind_id, drawn_card, target_pos, replaced_card, flipped_card) =
-                decompose_turn_action(&turn.action, turn.player_index, &mut boards);
+            let dt = decompose_turn_action(&turn.action, turn.player_index, &mut boards);
 
             sqlx::query(
                 "INSERT INTO round_turns (round_id, turn_index, player_index, action_kind_id,
-                    drawn_card, target_position, replaced_card, flipped_card)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+                    drawn_card, target_position, replaced_card, flipped_card, pile_index)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
             )
             .bind(round_id)
             .bind(turn_idx as i32)
             .bind(turn.player_index as i32)
-            .bind(action_kind_id)
-            .bind(drawn_card)
-            .bind(target_pos)
-            .bind(replaced_card)
-            .bind(flipped_card)
+            .bind(dt.action_kind_id)
+            .bind(dt.drawn_card)
+            .bind(dt.target_position)
+            .bind(dt.replaced_card)
+            .bind(dt.flipped_card)
+            .bind(dt.pile_index)
             .execute(&mut **tx)
             .await?;
 
@@ -1012,7 +1013,7 @@ impl Persistence {
             // Turns
             let turn_rows: Vec<TurnDbRow> = sqlx::query_as(
                 "SELECT turn_index, player_index, action_kind_id, drawn_card,
-                        target_position, replaced_card, flipped_card
+                        target_position, replaced_card, flipped_card, pile_index
                  FROM round_turns WHERE round_id = $1 ORDER BY turn_index",
             )
             .bind(round_id)
@@ -1197,6 +1198,8 @@ pub struct RoundTurnRow {
     pub target_position: Option<i32>,
     pub replaced_card: Option<i16>,
     pub flipped_card: Option<i16>,
+    /// Which discard pile was drawn from (only for `drew_discard` actions).
+    pub pile_index: Option<i32>,
 }
 
 /// Input row for `save_column_clears`.
@@ -1345,6 +1348,7 @@ struct TurnDbRow {
     target_position: Option<i32>,
     replaced_card: Option<i16>,
     flipped_card: Option<i16>,
+    pile_index: Option<i32>,
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -1411,13 +1415,22 @@ fn apply_action_to_boards(action: &TurnAction, player: usize, boards: &mut [Vec<
     }
 }
 
+/// Decomposed relational columns for a turn action.
+struct DecomposedTurn {
+    action_kind_id: i32,
+    drawn_card: Option<i16>,
+    target_position: Option<i32>,
+    replaced_card: Option<i16>,
+    flipped_card: Option<i16>,
+    pile_index: Option<i32>,
+}
+
 /// Decompose a TurnAction into the relational columns, updating board state.
-/// Returns (action_kind_id, drawn_card, target_position, replaced_card, flipped_card).
 fn decompose_turn_action(
     action: &TurnAction,
     player_index: usize,
     boards: &mut [Vec<i16>],
-) -> (i32, Option<i16>, Option<i32>, Option<i16>, Option<i16>) {
+) -> DecomposedTurn {
     match action {
         TurnAction::DrewFromDeck {
             drawn_card,
@@ -1428,41 +1441,44 @@ fn decompose_turn_action(
                 let replaced = displaced_card.map(|c| c as i16);
                 boards[player_index][*pos] = *drawn_card as i16;
                 // action_kind_id = 1 = 'drew_deck_kept'
-                (
-                    1,
-                    Some(*drawn_card as i16),
-                    Some(*pos as i32),
-                    replaced,
-                    None,
-                )
+                DecomposedTurn {
+                    action_kind_id: 1,
+                    drawn_card: Some(*drawn_card as i16),
+                    target_position: Some(*pos as i32),
+                    replaced_card: replaced,
+                    flipped_card: None,
+                    pile_index: None,
+                }
             }
             DeckDrawAction::DiscardAndFlip(pos) => {
                 let flipped = boards[player_index][*pos];
                 // action_kind_id = 2 = 'drew_deck_flipped'
-                (
-                    2,
-                    Some(*drawn_card as i16),
-                    Some(*pos as i32),
-                    None,
-                    Some(flipped),
-                )
+                DecomposedTurn {
+                    action_kind_id: 2,
+                    drawn_card: Some(*drawn_card as i16),
+                    target_position: Some(*pos as i32),
+                    replaced_card: None,
+                    flipped_card: Some(flipped),
+                    pile_index: None,
+                }
             }
         },
         TurnAction::DrewFromDiscard {
+            pile_index,
             drawn_card,
             placement,
             displaced_card,
-            ..
         } => {
             boards[player_index][*placement] = *drawn_card as i16;
             // action_kind_id = 3 = 'drew_discard'
-            (
-                3,
-                Some(*drawn_card as i16),
-                Some(*placement as i32),
-                Some(*displaced_card as i16),
-                None,
-            )
+            DecomposedTurn {
+                action_kind_id: 3,
+                drawn_card: Some(*drawn_card as i16),
+                target_position: Some(*placement as i32),
+                replaced_card: Some(*displaced_card as i16),
+                flipped_card: None,
+                pile_index: Some(*pile_index as i32),
+            }
         }
     }
 }
@@ -1491,7 +1507,7 @@ fn reconstruct_turn_action(row: &TurnDbRow, boards: &[Vec<i16>]) -> TurnAction {
         }
         // 3 = drew_discard
         _ => TurnAction::DrewFromDiscard {
-            pile_index: 0,
+            pile_index: row.pile_index.unwrap_or(0) as usize,
             drawn_card: row.drawn_card.unwrap_or(0) as i8,
             placement: row.target_position.unwrap_or(0) as usize,
             displaced_card: row.replaced_card.unwrap_or(0) as i8,
