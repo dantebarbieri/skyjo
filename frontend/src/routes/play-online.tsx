@@ -12,6 +12,7 @@ import { RoundScorecard } from '@/components/round-scorecard';
 import { useResponsiveCardSize } from '@/hooks/use-responsive-card-size';
 import { cn } from '@/lib/utils';
 import { toSlot, getPlayerName, computeVisibleScore } from '@/lib/game-helpers';
+import { getCardColorGroup, COLUMN_CLEAR_COLORS } from '@/lib/card-styles';
 import { useAuth } from '@/contexts/auth-context';
 import {
   useOnlineGame,
@@ -1195,38 +1196,60 @@ function OnlinePlayBoard({
                   <span className="text-xs font-semibold text-orange-500 ml-1">went out</span>
                 )}
               </h4>
-              <div
-                className="grid gap-0.5 sm:gap-1"
-                style={{ gridTemplateColumns: `repeat(${num_cols}, 1fr)` }}
-              >
-                {Array.from({ length: num_rows }, (_, r) =>
-                  Array.from({ length: num_cols }, (_, c) => {
-                    const idx = c * num_rows + r;
-                    const interactive = getCardInteractive(boardPlayerIdx, idx);
-                    const isColumnClearing = pendingClearColumns?.some(
-                      pc => pc.playerIndex === boardPlayerIdx && pc.column === c
-                    ) ?? false;
+              <div className="flex gap-0.5 sm:gap-1">
+                {Array.from({ length: num_cols }, (_, c) => {
+                  const clearInfo = pendingClearColumns?.find(
+                    pc => pc.playerIndex === boardPlayerIdx && pc.column === c
+                  );
+                  const isColumnClearing = !!clearInfo;
 
-                    return (
-                      <button
-                        key={idx}
-                        onClick={() => interactive && handleCardClick(boardPlayerIdx, idx)}
-                        disabled={!interactive}
-                        className={cn(
-                          'transition-transform',
-                          interactive && 'hover:scale-110 cursor-pointer'
-                        )}
-                      >
-                        <SkyjoCard
-                          slot={toSlot(board[idx])}
-                          size={cardSize}
-                          highlight={interactive}
-                          className={isColumnClearing ? 'ring-2 ring-amber-400 ring-offset-1 animate-pulse' : undefined}
-                        />
-                      </button>
-                    );
-                  })
-                ).flat()}
+                  let clearStyle: React.CSSProperties | undefined;
+                  if (isColumnClearing) {
+                    const firstIdx = c * num_rows;
+                    const slot = board[firstIdx];
+                    const val = typeof slot === 'object' && 'Revealed' in slot ? slot.Revealed : 0;
+                    const colors = COLUMN_CLEAR_COLORS[getCardColorGroup(val as Parameters<typeof getCardColorGroup>[0])];
+                    clearStyle = {
+                      '--clear-color-base': colors.base,
+                      '--clear-color-bright': colors.bright,
+                      '--clear-color-glow': colors.glow,
+                    } as React.CSSProperties;
+                  }
+
+                  return (
+                    <div
+                      key={c}
+                      className={cn(
+                        'flex flex-col gap-0.5 sm:gap-1 rounded-lg transition-all duration-300',
+                        isColumnClearing && 'outline-3 outline animate-[border-pulse_1.5s_ease-in-out_infinite]',
+                      )}
+                      style={clearStyle}
+                    >
+                      {Array.from({ length: num_rows }, (_, r) => {
+                        const idx = c * num_rows + r;
+                        const interactive = getCardInteractive(boardPlayerIdx, idx);
+
+                        return (
+                          <button
+                            key={idx}
+                            onClick={() => interactive && handleCardClick(boardPlayerIdx, idx)}
+                            disabled={!interactive}
+                            className={cn(
+                              'transition-transform',
+                              interactive && 'hover:scale-110 cursor-pointer'
+                            )}
+                          >
+                            <SkyjoCard
+                              slot={toSlot(board[idx])}
+                              size={cardSize}
+                              highlight={interactive}
+                            />
+                          </button>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
               </div>
               <div className="text-xs mt-1 space-y-0.5">
                 <div className="text-muted-foreground">
