@@ -25,6 +25,6 @@ VOLUME ["/var/lib/skyjo"]
 ENV SKYJO_DATA_DIR=/var/lib/skyjo
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8080/api/health || exit 1
+    CMD curl --fail --silent --show-error --max-time 2 http://localhost:8080/api/health || exit 1
 
 CMD ["skyjo-server", "--port", "8080", "--data-dir", "/var/lib/skyjo"]
