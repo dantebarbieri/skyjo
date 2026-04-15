@@ -443,6 +443,66 @@ export const GeneticTrainingStatusSchema = z.object({
   current_mutation_sigma: z.number().nonnegative().default(0),
 });
 
+// ─── Leaderboard / Game History API Schemas ─────────────────────────
+
+export const GamePlayerSummarySchema = z.object({
+  name: z.string(),
+  final_score: z.number(),
+  is_winner: z.boolean(),
+  is_bot: z.boolean(),
+});
+
+export const GameSummarySchema = z.object({
+  id: z.string(),
+  room_code: z.string(),
+  rules: z.string(),
+  num_players: z.number().int().positive(),
+  num_rounds: z.number().int().positive(),
+  created_at: z.string(),
+  players: z.array(GamePlayerSummarySchema),
+  your_score: z.number().nullable().optional(),
+});
+
+export const GameListResponseSchema = z.object({
+  games: z.array(GameSummarySchema),
+  total: z.number().int().nonnegative(),
+  page: z.number().int().positive(),
+  per_page: z.number().int().positive(),
+});
+
+export const RoundScoreDetailSchema = z.object({
+  player_index: z.number().int().nonnegative(),
+  raw_score: z.number(),
+  adjusted_score: z.number(),
+  cumulative_score: z.number(),
+  went_out: z.boolean(),
+  was_penalized: z.boolean(),
+});
+
+export const RoundDetailSchema = z.object({
+  round_number: z.number().int().positive(),
+  scores: z.array(RoundScoreDetailSchema),
+});
+
+export const GamePlayerDetailSchema = z.object({
+  name: z.string(),
+  final_score: z.number(),
+  is_winner: z.boolean(),
+  is_bot: z.boolean(),
+  user_id: z.string().nullable().optional(),
+});
+
+export const GameDetailSchema = z.object({
+  id: z.string(),
+  room_code: z.string(),
+  rules: z.string(),
+  num_players: z.number().int().positive(),
+  num_rounds: z.number().int().positive(),
+  created_at: z.string(),
+  players: z.array(GamePlayerDetailSchema),
+  rounds: z.array(RoundDetailSchema),
+});
+
 // ─── WASM Response Wrapper Schemas ──────────────────────────────────
 // WASM functions return JSON that either has the data or { error: string }
 

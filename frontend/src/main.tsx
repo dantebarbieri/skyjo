@@ -14,6 +14,8 @@ import LoginRoute from '@/routes/login';
 import AdminRoute from '@/routes/admin';
 import SettingsRoute from '@/routes/settings';
 import SetupRoute from '@/routes/setup';
+import LeaderboardRoute from '@/routes/leaderboard';
+import GameDetailRoute from '@/routes/game-detail';
 import './index.css';
 
 createRoot(document.getElementById('root')!).render(
@@ -36,6 +38,8 @@ createRoot(document.getElementById('root')!).render(
               <Route path="setup" element={<SetupRoute />} />
               <Route path="admin" element={<AdminRoute />} />
               <Route path="settings" element={<SettingsRoute />} />
+              <Route path="leaderboard" element={<LeaderboardRoute />} />
+              <Route path="leaderboard/:gameId" element={<GameDetailRoute />} />
             </Route>
           </Routes>
         </WasmProvider>

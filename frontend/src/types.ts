@@ -35,6 +35,13 @@ import {
   GeneticModelDataSchema,
   SavedGenerationInfoSchema,
   GeneticTrainingStatusSchema,
+  GamePlayerSummarySchema,
+  GameSummarySchema,
+  GameListResponseSchema,
+  RoundScoreDetailSchema,
+  RoundDetailSchema,
+  GamePlayerDetailSchema,
+  GameDetailSchema,
 } from './schemas';
 
 // All types are inferred from Zod schemas — single source of truth
@@ -103,3 +110,12 @@ export type StrategyDescriptionsData = z.infer<typeof StrategyDescriptionsDataSc
 export type GeneticModelData = z.infer<typeof GeneticModelDataSchema>;
 export type SavedGenerationInfo = z.infer<typeof SavedGenerationInfoSchema>;
 export type GeneticTrainingStatus = z.infer<typeof GeneticTrainingStatusSchema>;
+
+// Leaderboard / Game History types
+export type GamePlayerSummary = z.infer<typeof GamePlayerSummarySchema>;
+export type GameSummary = z.infer<typeof GameSummarySchema>;
+export type GameListResponse = z.infer<typeof GameListResponseSchema>;
+export type RoundScoreDetail = z.infer<typeof RoundScoreDetailSchema>;
+export type RoundDetail = z.infer<typeof RoundDetailSchema>;
+export type GamePlayerDetail = z.infer<typeof GamePlayerDetailSchema>;
+export type GameDetail = z.infer<typeof GameDetailSchema>;
