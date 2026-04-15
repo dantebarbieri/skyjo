@@ -137,6 +137,7 @@ export function useOnlineGame(
 
       const parsedMessage = ServerMessageSchema.safeParse(rawMessage);
       if (!parsedMessage.success) {
+        console.error('Invalid server message:', JSON.stringify(rawMessage).slice(0, 500), parsedMessage.error.issues);
         setLastError('Received invalid server message.');
         return;
       }
@@ -257,14 +258,14 @@ export function useOnlineGame(
         case 'ActionAppliedDelta':
           // Delta messages are ignored — we use the full state from ActionApplied/BotAction
           break;
-        case 'PlayerConverted':
-          // Player was converted to a bot (after disconnect timeout)
+        case 'PlayerConvertedToBot':
           setRoomState(prev => {
             if (!prev) return prev;
             const players = [...prev.players];
-            players[msg.player_index] = {
-              ...players[msg.player_index],
-              player_type: { kind: 'Bot', strategy: msg.strategy },
+            players[msg.slot] = {
+              ...players[msg.slot],
+              name: msg.name,
+              player_type: { kind: 'Bot', strategy: 'Random' },
               connected: false,
             };
             return { ...prev, players };

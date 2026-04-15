@@ -345,7 +345,7 @@ export const ServerMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('PlayerJoined'), player_index: z.number(), name: z.string() }),
   z.object({ type: z.literal('PlayerLeft'), player_index: z.number() }),
   z.object({ type: z.literal('PlayerReconnected'), player_index: z.number() }),
-  z.object({ type: z.literal('PlayerConverted'), player_index: z.number(), strategy: z.string() }),
+  z.object({ type: z.literal('PlayerConvertedToBot'), slot: z.number(), name: z.string() }),
   z.object({ type: z.literal('Kicked'), reason: z.string() }),
   z.object({ type: z.literal('Error'), code: z.string(), message: z.string() }),
   z.object({ type: z.literal('Pong') }),
