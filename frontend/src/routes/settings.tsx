@@ -137,6 +137,7 @@ function PasswordForm() {
         body: JSON.stringify({
           current_password: currentPassword,
           new_password: newPassword,
+          confirm_password: confirmPassword,
         }),
       });
       if (!res.ok) {
@@ -196,6 +197,7 @@ function PasswordForm() {
           onChange={(e) => setConfirmPassword(e.target.value)}
           autoComplete="new-password"
           required
+          minLength={8}
         />
       </div>
       {message && (
