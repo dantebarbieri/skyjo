@@ -10,6 +10,7 @@ import PlayOnlineRoute from '@/routes/play-online';
 import RulesRoute from '@/routes/rules';
 import StrategiesRoute from '@/routes/strategies';
 import GeneticManageRoute from '@/routes/genetic-manage';
+import PlayMenuRoute from '@/routes/play-menu';
 import LoginRoute from '@/routes/login';
 import RegisterRoute from '@/routes/register';
 import AdminRoute from '@/routes/admin';
@@ -28,7 +29,8 @@ createRoot(document.getElementById('root')!).render(
             <Route element={<App />}>
               <Route index element={<Navigate to="/rules" replace />} />
               <Route path="simulator" element={<SimulatorRoute />} />
-              <Route path="play" element={<PlayRoute />} />
+              <Route path="play" element={<PlayMenuRoute />} />
+              <Route path="play/local" element={<PlayRoute />} />
               <Route path="play/online" element={<PlayOnlineRoute />} />
               <Route path="play/online/:roomCode" element={<PlayOnlineRoute />} />
               <Route path="rules" element={<RulesRoute />} />

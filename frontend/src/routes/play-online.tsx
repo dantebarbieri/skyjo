@@ -233,8 +233,7 @@ function JoinOrCreate({
 }) {
   const [mode, setMode] = useState<'choose' | 'create' | 'join'>(initialRoomCode ? 'join' : 'choose');
   const { user, isAuthenticated } = useAuth();
-  const defaultName = isAuthenticated && user ? user.display_name : '';
-  const [name, setName] = useState(() => sessionStorage.getItem('skyjo-online-name') || defaultName);
+  const [name, setName] = useState(() => sessionStorage.getItem('skyjo-online-name') || '');
   const [numPlayers, setNumPlayers] = useState(2);
   const [rules, setRules] = useState('Standard');
   const [joinCode, setJoinCode] = useState(initialRoomCode);
