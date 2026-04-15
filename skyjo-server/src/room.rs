@@ -812,6 +812,10 @@ impl Room {
                     self.players[i].name.push_str(" (Bot)");
                 }
                 self.players[i].was_human = true;
+                // Bots are auto-ready for round continuation
+                if i < self.round_ready.len() {
+                    self.round_ready[i] = true;
+                }
                 converted.push(i);
             }
         }
@@ -832,6 +836,10 @@ impl Room {
             self.players[player_index].name = name.to_string();
         }
         self.players[player_index].was_human = false;
+        // Reconnected human must re-confirm readiness for round continuation
+        if player_index < self.round_ready.len() {
+            self.round_ready[player_index] = false;
+        }
         self.touch();
         true
     }
@@ -2889,6 +2897,84 @@ mod tests {
         // Humans should not be ready
         assert!(!room.round_ready[0]);
         assert!(!room.round_ready[1]);
+    }
+
+    #[test]
+    fn round_ready_syncs_on_bot_conversion_during_round_over() {
+        let mut room = Room::new("R".to_string(), "A".to_string(), 3, None, 0, 0);
+        for i in 1..3 {
+            room.players[i] = PlayerSlot {
+                name: format!("P{i}"),
+                slot_type: PlayerSlotType::Human,
+                session_token: Some(SessionToken::new()),
+                connected: true,
+                ip: None,
+                disconnected_at: None,
+                was_human: false,
+                latency_ms: None,
+                broadcast_lag_count: 0,
+                user_id: None,
+                ready: true,
+            };
+        }
+        room.start_game().unwrap();
+        play_until_round_over(&mut room);
+        if room.phase == RoomPhase::GameOver {
+            return;
+        }
+
+        // All humans should be not-ready
+        assert!(!room.round_ready[1]);
+        assert!(!room.round_ready[2]);
+
+        // Disconnect player 2 during RoundOver and convert to bot
+        room.players[2].connected = false;
+        room.players[2].disconnected_at = Some(Instant::now() - Duration::from_secs(300));
+        room.convert_disconnected_to_bots(Duration::from_secs(60));
+
+        // Bot-converted player should now be auto-ready in round_ready
+        assert!(room.round_ready[2]);
+        // Other human still not ready
+        assert!(!room.round_ready[1]);
+    }
+
+    #[test]
+    fn round_ready_syncs_on_reconnect_during_round_over() {
+        let mut room = Room::new("R".to_string(), "A".to_string(), 3, None, 0, 0);
+        for i in 1..3 {
+            room.players[i] = PlayerSlot {
+                name: format!("P{i}"),
+                slot_type: PlayerSlotType::Human,
+                session_token: Some(SessionToken::new()),
+                connected: true,
+                ip: None,
+                disconnected_at: None,
+                was_human: false,
+                latency_ms: None,
+                broadcast_lag_count: 0,
+                user_id: None,
+                ready: true,
+            };
+        }
+        room.start_game().unwrap();
+
+        // Disconnect and convert player 2 to bot before round over
+        room.players[2].connected = false;
+        room.players[2].disconnected_at = Some(Instant::now() - Duration::from_secs(300));
+        room.convert_disconnected_to_bots(Duration::from_secs(60));
+
+        play_until_round_over(&mut room);
+        if room.phase == RoomPhase::GameOver {
+            return;
+        }
+
+        // Bot-converted player should be auto-ready
+        assert!(room.round_ready[2]);
+
+        // Reconnect: bot → human during RoundOver
+        room.reconnect_bot_to_human(2);
+        // Reconnected human should NOT be ready (must click ready again)
+        assert!(!room.round_ready[2]);
     }
 
     #[test]
