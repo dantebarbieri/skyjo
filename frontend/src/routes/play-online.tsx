@@ -6,13 +6,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
-import { Undo2, Trash2 } from 'lucide-react';
+import { ActionButtons } from '@/components/action-buttons';
 import SkyjoCard from '@/components/skyjo-card';
 import { RoundScorecard } from '@/components/round-scorecard';
 import { useResponsiveCardSize } from '@/hooks/use-responsive-card-size';
@@ -1149,42 +1143,13 @@ function OnlinePlayBoard({
             </div>
 
             {/* Action icon buttons */}
-            <TooltipProvider>
-              <div className="flex flex-col items-center gap-2">
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant={wantsFlip ? 'default' : 'outline'}
-                      size="icon"
-                      disabled={!isMyTurn || !isDeckDrawAction}
-                      onClick={() => setWantsFlip(!wantsFlip)}
-                      className="h-9 w-9"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="right">
-                    {wantsFlip ? 'Back to Place Mode' : 'Discard & Flip'}
-                  </TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      disabled={!isMyTurn || !isDiscardPlacement}
-                      onClick={() => onAction({ type: 'UndoDrawFromDiscard' })}
-                      className="h-9 w-9"
-                    >
-                      <Undo2 className="h-4 w-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="right">
-                    Undo
-                  </TooltipContent>
-                </Tooltip>
-              </div>
-            </TooltipProvider>
+            <ActionButtons
+              wantsFlip={wantsFlip}
+              onToggleFlip={() => setWantsFlip(!wantsFlip)}
+              onUndo={() => onAction({ type: 'UndoDrawFromDiscard' })}
+              trashEnabled={isMyTurn && isDeckDrawAction}
+              undoEnabled={isMyTurn && isDiscardPlacement}
+            />
           </div>
         </div>
       )}

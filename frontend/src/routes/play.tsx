@@ -18,13 +18,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
-import { Undo2, Trash2 } from 'lucide-react';
+import { ActionButtons } from '@/components/action-buttons';
 import SkyjoCard from '@/components/skyjo-card';
 import { RoundScorecard } from '@/components/round-scorecard';
 import { useWasmContext } from '@/contexts/wasm-context';
@@ -620,42 +614,13 @@ function PlayBoard({
             </div>
 
             {/* Action icon buttons — always present, enabled/disabled contextually */}
-            <TooltipProvider>
-              <div className="flex flex-col items-center gap-2">
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant={wantsFlip ? 'default' : 'outline'}
-                      size="icon"
-                      disabled={!isDeckDrawAction}
-                      onClick={handleToggleFlipMode}
-                      className="h-9 w-9"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="right">
-                    {wantsFlip ? 'Back to Place Mode' : 'Discard & Flip'}
-                  </TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      disabled={!isDiscardPlacement}
-                      onClick={() => onAction({ type: 'UndoDrawFromDiscard' })}
-                      className="h-9 w-9"
-                    >
-                      <Undo2 className="h-4 w-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="right">
-                    Undo
-                  </TooltipContent>
-                </Tooltip>
-              </div>
-            </TooltipProvider>
+            <ActionButtons
+              wantsFlip={wantsFlip}
+              onToggleFlip={handleToggleFlipMode}
+              onUndo={() => onAction({ type: 'UndoDrawFromDiscard' })}
+              trashEnabled={isDeckDrawAction}
+              undoEnabled={isDiscardPlacement}
+            />
           </div>
         </div>
       )}
