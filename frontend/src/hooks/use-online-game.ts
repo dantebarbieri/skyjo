@@ -194,7 +194,7 @@ export function useOnlineGame(
             }));
             setPendingClearColumns(clearCols);
             setGameState(preClearState);
-            setTurnDeadlineSecs(null);
+            setTurnDeadlineSecs(msg.turn_deadline_secs ?? null);
             setWasTimeout(true);
             if (pendingClearTimeoutRef.current) clearTimeout(pendingClearTimeoutRef.current);
             pendingClearTimeoutRef.current = setTimeout(() => {
@@ -204,7 +204,7 @@ export function useOnlineGame(
             }, COLUMN_CLEAR_DELAY_MS);
           } else {
             setGameState(msg.state);
-            setTurnDeadlineSecs(null);
+            setTurnDeadlineSecs(msg.turn_deadline_secs ?? null);
             setWasTimeout(true);
           }
           break;

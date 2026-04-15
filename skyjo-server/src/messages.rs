@@ -85,6 +85,8 @@ pub enum ServerMessage {
         player: usize,
         action: PlayerAction,
         state: InteractiveGameState,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        turn_deadline_secs: Option<u64>,
     },
     /// A player joined the room.
     PlayerJoined { player_index: usize, name: String },
