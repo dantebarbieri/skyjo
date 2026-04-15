@@ -317,18 +317,39 @@ export const RoomLobbyStateSchema = z.object({
   genetic_generation: z.number(),
 });
 
+export const SlotUpdateSchema = z.union([
+  z.literal('Hidden'),
+  z.literal('Cleared'),
+  z.object({ Revealed: z.number() }),
+]);
+
+export const StateDeltaSchema = z.object({
+  board_changes: z.array(z.tuple([z.number(), z.number(), SlotUpdateSchema])),
+  discard_tops_changed: z.array(z.tuple([z.number(), z.number().nullable()])).optional().default([]),
+  deck_remaining: z.number(),
+  current_player: z.number(),
+  column_clears: z.array(z.tuple([z.number(), z.number()])).optional().default([]),
+  action_needed: z.string(),
+  turn_deadline_secs: z.number().nullable().optional(),
+  is_final_turn: z.boolean(),
+  going_out_player: z.number().nullable().optional(),
+});
+
 export const ServerMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('RoomState'), state: RoomLobbyStateSchema }),
   z.object({ type: z.literal('GameState'), state: InteractiveGameStateSchema, turn_deadline_secs: z.number().nullable().optional() }),
   z.object({ type: z.literal('ActionApplied'), player: z.number(), action: PlayerActionSchema, state: InteractiveGameStateSchema, turn_deadline_secs: z.number().nullable().optional() }),
+  z.object({ type: z.literal('ActionAppliedDelta'), player: z.number(), action: PlayerActionSchema, delta: StateDeltaSchema }),
   z.object({ type: z.literal('BotAction'), player: z.number(), action: PlayerActionSchema, state: InteractiveGameStateSchema, turn_deadline_secs: z.number().nullable().optional() }),
   z.object({ type: z.literal('TimeoutAction'), player: z.number(), action: PlayerActionSchema, state: InteractiveGameStateSchema }),
   z.object({ type: z.literal('PlayerJoined'), player_index: z.number(), name: z.string() }),
   z.object({ type: z.literal('PlayerLeft'), player_index: z.number() }),
   z.object({ type: z.literal('PlayerReconnected'), player_index: z.number() }),
+  z.object({ type: z.literal('PlayerConverted'), player_index: z.number(), strategy: z.string() }),
   z.object({ type: z.literal('Kicked'), reason: z.string() }),
   z.object({ type: z.literal('Error'), code: z.string(), message: z.string() }),
   z.object({ type: z.literal('Pong') }),
+  z.object({ type: z.literal('ServerShutdown') }),
 ]);
 
 // ─── Strategy Description Schemas ───────────────────────────────────

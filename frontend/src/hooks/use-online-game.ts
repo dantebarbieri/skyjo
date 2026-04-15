@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { InteractiveGameState, PlayerAction } from '@/types';
 import { ServerMessageSchema } from '@/schemas';
 import type { PendingColumnClear } from './use-interactive-game';
+import type { z } from 'zod';
 
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected';
 
@@ -56,18 +57,7 @@ export type PlayerSlotType =
   | { kind: 'Bot'; strategy: string }
   | { kind: 'Empty' };
 
-type ServerMessage =
-  | { type: 'RoomState'; state: RoomLobbyState }
-  | { type: 'GameState'; state: InteractiveGameState; turn_deadline_secs?: number | null }
-  | { type: 'ActionApplied'; player: number; action: PlayerAction; state: InteractiveGameState; turn_deadline_secs?: number | null }
-  | { type: 'BotAction'; player: number; action: PlayerAction; state: InteractiveGameState; turn_deadline_secs?: number | null }
-  | { type: 'TimeoutAction'; player: number; action: PlayerAction; state: InteractiveGameState }
-  | { type: 'PlayerJoined'; player_index: number; name: string }
-  | { type: 'PlayerLeft'; player_index: number }
-  | { type: 'PlayerReconnected'; player_index: number }
-  | { type: 'Kicked'; reason: string }
-  | { type: 'Error'; code: string; message: string }
-  | { type: 'Pong' };
+type ServerMessage = z.infer<typeof ServerMessageSchema>;
 
 interface UseOnlineGameReturn {
   connectionStatus: ConnectionStatus;
@@ -264,6 +254,24 @@ export function useOnlineGame(
           setLastError(msg.message);
           break;
         case 'Pong':
+        case 'ActionAppliedDelta':
+          // Delta messages are ignored — we use the full state from ActionApplied/BotAction
+          break;
+        case 'PlayerConverted':
+          // Player was converted to a bot (after disconnect timeout)
+          setRoomState(prev => {
+            if (!prev) return prev;
+            const players = [...prev.players];
+            players[msg.player_index] = {
+              ...players[msg.player_index],
+              player_type: { kind: 'Bot', strategy: msg.strategy },
+              connected: false,
+            };
+            return { ...prev, players };
+          });
+          break;
+        case 'ServerShutdown':
+          setLastError('Server is shutting down. Please reconnect shortly.');
           break;
       }
     };
