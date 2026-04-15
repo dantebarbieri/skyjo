@@ -156,7 +156,6 @@ fn persistence_error_to_server_error(e: crate::persistence::PersistenceError) ->
 
 /// For each game in the list, look up the authenticated user's score
 /// (if any) and attach it as `your_score`.
-// TODO: N+1 query — batch into a single query with WHERE game_id = ANY($1)
 async fn annotate_games_with_scores(
     state: &AppState,
     games: Vec<GameSummary>,
@@ -172,17 +171,20 @@ async fn annotate_games_with_scores(
             .collect();
     };
 
-    let mut result = Vec::with_capacity(games.len());
-    for game in games {
-        let your_score = state
-            .persistence
-            .get_user_score_for_game(game.id, uid)
-            .await
-            .ok()
-            .flatten();
-        result.push(GameSummaryWithScore { game, your_score });
-    }
-    result
+    let game_ids: Vec<Uuid> = games.iter().map(|g| g.id).collect();
+    let scores = state
+        .persistence
+        .get_user_scores_for_games(&game_ids, uid)
+        .await
+        .unwrap_or_default();
+
+    games
+        .into_iter()
+        .map(|game| {
+            let your_score = scores.get(&game.id).copied();
+            GameSummaryWithScore { game, your_score }
+        })
+        .collect()
 }
 
 #[cfg(test)]
