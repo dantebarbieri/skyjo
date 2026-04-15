@@ -215,11 +215,12 @@ pub async fn validate_session(
         return Err(ServerError::Unauthorized);
     }
 
-    // Verify the room still exists
+    // Treat a missing room as an invalid session for this endpoint so the
+    // response matches the documented 401-only contract for failed validation.
     state
         .lobby
         .get_room(&code)
-        .ok_or(ServerError::RoomNotFound)?;
+        .ok_or(ServerError::Unauthorized)?;
 
     Ok(Json(serde_json::json!({ "valid": true })))
 }

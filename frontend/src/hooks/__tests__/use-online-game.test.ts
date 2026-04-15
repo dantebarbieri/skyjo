@@ -70,6 +70,10 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllGlobals();
+  // Re-stub for next test (beforeEach runs after afterEach)
+  vi.stubGlobal('WebSocket', MockWebSocket);
+  vi.stubGlobal('fetch', mockFetch);
 });
 
 // --- Tests ---
@@ -118,6 +122,34 @@ describe('useOnlineGame', () => {
 
       // Should never attempt WS
       expect(mockWsInstances.length).toBe(0);
+    });
+
+    it('retries on non-401 validation error (e.g. 500) without setting sessionExpired', async () => {
+      fetchResponses.push({ ok: false, status: 500 });
+      fetchResponses.push({ ok: true, status: 200 });
+
+      const { result } = renderHook(() =>
+        useOnlineGame('ABCDEF', 'valid-token', 0),
+      );
+
+      // Wait for first fetch to complete
+      await waitFor(() => {
+        expect(result.current.connectionStatus).toBe('disconnected');
+      });
+
+      // Should NOT set sessionExpired for 500
+      expect(result.current.sessionExpired).toBe(false);
+      expect(mockWsInstances.length).toBe(0);
+
+      // Advance timer to trigger retry
+      await act(async () => {
+        vi.advanceTimersByTime(1500);
+      });
+
+      // Should have retried
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledTimes(2);
+      });
     });
   });
 
@@ -174,7 +206,7 @@ describe('useOnlineGame', () => {
       });
     });
 
-    it('does not retry on normal WS close code 1000',async () => {
+    it('does not set sessionExpired on normal WS close code 1000', async () => {
       fetchResponses.push({ ok: true, status: 200 });
 
       const { result } = renderHook(() =>
@@ -185,7 +217,6 @@ describe('useOnlineGame', () => {
         expect(mockWsInstances.length).toBe(1);
       });
 
-      // Simulate normal close
       act(() => {
         mockWsInstances[0].onopen?.();
       });
@@ -194,9 +225,9 @@ describe('useOnlineGame', () => {
         mockWsInstances[0].onclose?.({ code: 1000, reason: 'normal' });
       });
 
-      // After normal close, reconnect is attempted (this is existing behavior)
-      // The hook retries on all non-auth close codes when attempt < 10
+      // Normal close still retries (existing behavior) but never sets sessionExpired
       expect(result.current.sessionExpired).toBe(false);
+      expect(result.current.connectionStatus).toBe('disconnected');
     });
   });
 

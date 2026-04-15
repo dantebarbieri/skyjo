@@ -107,6 +107,7 @@ export function useOnlineGame(
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const reconnectAttemptRef = useRef(0);
   const pendingClearTimeoutRef= useRef<ReturnType<typeof setTimeout> | null>(null);
+  const connectAbortRef = useRef<AbortController | null>(null);
   const { accessToken } = useAuth();
 
   const send = useCallback((msg: object) => {
@@ -119,14 +120,24 @@ export function useOnlineGame(
   const connect = useCallback(() => {
     if (!roomCode || !sessionToken) return;
 
+    // Cancel any in-flight validation fetch from a previous connect attempt
+    connectAbortRef.current?.abort();
+    const abortController = new AbortController();
+    connectAbortRef.current = abortController;
+
     setConnectionStatus('connecting');
 
     // Validate the session before attempting WebSocket connection.
     // This detects stale tokens (e.g. after server restart) without relying on
     // browser WebSocket error codes, which don't expose HTTP status.
-    fetch(`/api/rooms/${roomCode}/validate-session?token=${sessionToken}`)
+    const encodedToken = encodeURIComponent(sessionToken);
+    fetch(`/api/rooms/${roomCode}/validate-session?token=${encodedToken}`, {
+      signal: abortController.signal,
+    })
       .then((res) => {
-        if (!res.ok) {
+        if (abortController.signal.aborted) return;
+
+        if (res.status === 401) {
           // Session is invalid — stop reconnecting
           setSessionExpired(true);
           setConnectionStatus('disconnected');
@@ -134,8 +145,24 @@ export function useOnlineGame(
           return;
         }
 
+        if (!res.ok) {
+          // Non-auth error (404, 500, etc.) — treat as transient, retry with backoff
+          setConnectionStatus('disconnected');
+          const attempt = reconnectAttemptRef.current;
+          if (attempt < 10) {
+            const delay = Math.min(1000 * Math.pow(2, attempt), 30000);
+            reconnectTimeoutRef.current = setTimeout(() => {
+              reconnectAttemptRef.current++;
+              connect();
+            }, delay);
+          }
+          return;
+        }
+
+        if (abortController.signal.aborted) return;
+
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        let wsUrl = `${protocol}//${window.location.host}/api/rooms/${roomCode}/ws?token=${sessionToken}`;
+        let wsUrl = `${protocol}//${window.location.host}/api/rooms/${roomCode}/ws?token=${encodedToken}`;
         if (accessToken) {
           wsUrl += `&access_token=${encodeURIComponent(accessToken)}`;
         }
@@ -329,7 +356,9 @@ export function useOnlineGame(
 
         wsRef.current = ws;
       })
-      .catch(() => {
+      .catch((err) => {
+        // Ignore aborted requests (from cleanup/disconnect)
+        if (err instanceof DOMException && err.name === 'AbortError') return;
         // Network error on validation fetch — treat as temporary, retry with backoff
         setConnectionStatus('disconnected');
         const attempt = reconnectAttemptRef.current;
@@ -349,6 +378,7 @@ export function useOnlineGame(
       connect();
     }
     return () => {
+      connectAbortRef.current?.abort();
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
       }
@@ -422,6 +452,7 @@ export function useOnlineGame(
 
   const disconnect = useCallback(() => {
     reconnectAttemptRef.current = 999; // Prevent reconnect
+    connectAbortRef.current?.abort();
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
     }

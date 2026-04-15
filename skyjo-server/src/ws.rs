@@ -13,10 +13,6 @@ use crate::messages::{ClientMessage, PlayerSlotType, ServerMessage, WireFormat};
 use crate::persistence::Persistence;
 use crate::room::SharedRoom;
 
-/// Custom WebSocket close code (4000–4999 range per RFC 6455 §7.4.2)
-/// indicating the client's session token is no longer valid.
-pub const WS_CLOSE_SESSION_EXPIRED: u16 = 4001;
-
 /// Stable machine-readable error code from variant name (strips data payloads).
 fn error_code(err: &ServerError) -> String {
     let debug = format!("{:?}", err);
