@@ -1,9 +1,34 @@
-import { Outlet } from 'react-router-dom';
+import { useEffect } from 'react';
+import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import NavBar from '@/components/nav-bar';
 import PwaUpdatePrompt from '@/components/pwa-update-prompt';
+import { useAuth } from '@/contexts/auth-context';
+import { initApiClient } from '@/lib/api';
 
 export default function App() {
+  const auth = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  // Initialize the API client with auth callbacks
+  useEffect(() => {
+    initApiClient(
+      () => auth.accessToken,
+      () => auth.refresh(),
+      () => {
+        // Auth failure — do nothing (user will see login button in navbar)
+      },
+    );
+  }, [auth.accessToken, auth.refresh]);
+
+  // Redirect to setup when needed
+  useEffect(() => {
+    if (!auth.isLoading && auth.needsSetup && location.pathname !== '/setup') {
+      navigate('/setup', { replace: true });
+    }
+  }, [auth.isLoading, auth.needsSetup, location.pathname, navigate]);
+
   return (
     <TooltipProvider>
       <div className="min-h-screen bg-background text-foreground">

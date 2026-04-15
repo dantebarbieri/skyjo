@@ -1,5 +1,5 @@
 # Stage 1: Build WASM from Rust
-FROM rust:latest AS wasm-build
+FROM rust:1.88 AS wasm-build
 
 RUN curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
@@ -29,12 +29,13 @@ COPY --from=wasm-build /app/frontend/pkg/ pkg/
 RUN pnpm build
 
 # Stage 3: Build server binary
-FROM rust:latest AS server-build
+FROM rust:1.88 AS server-build
 
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 COPY skyjo-core/ skyjo-core/
 COPY skyjo-server/ skyjo-server/
+COPY migrations/ migrations/
 # Stub skyjo-wasm to satisfy workspace
 COPY skyjo-wasm/Cargo.toml skyjo-wasm/Cargo.toml
 RUN mkdir -p skyjo-wasm/src && echo "" > skyjo-wasm/src/lib.rs

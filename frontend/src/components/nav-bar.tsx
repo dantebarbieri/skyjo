@@ -1,5 +1,7 @@
-import { NavLink } from 'react-router-dom';
+import { NavLink, useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/contexts/auth-context';
+import { Button } from '@/components/ui/button';
 
 const links = [
   { to: '/rules', label: 'Rules' },
@@ -8,6 +10,9 @@ const links = [
 ];
 
 export default function NavBar() {
+  const { user, isAuthenticated, logout } = useAuth();
+  const navigate = useNavigate();
+
   return (
     <nav className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="mx-auto max-w-7xl px-4 flex items-center h-14 gap-3 sm:gap-6">
@@ -31,6 +36,55 @@ export default function NavBar() {
               {label}
             </NavLink>
           ))}
+        </div>
+
+        {/* Auth section — pushed to the right */}
+        <div className="ml-auto flex items-center gap-2">
+          {isAuthenticated && user ? (
+            <>
+              <NavLink
+                to="/settings"
+                className="text-xs sm:text-sm text-muted-foreground hover:text-foreground transition-colors"
+              >
+                {user.display_name}
+              </NavLink>
+              {user.permission === 'admin' && (
+                <NavLink
+                  to="/admin"
+                  className={({ isActive }) =>
+                    cn(
+                      'px-2 py-1 rounded-md text-xs sm:text-sm font-medium transition-colors',
+                      isActive
+                        ? 'bg-accent text-accent-foreground'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
+                    )
+                  }
+                >
+                  Admin
+                </NavLink>
+              )}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-xs sm:text-sm"
+                onClick={() => {
+                  logout();
+                  navigate('/');
+                }}
+              >
+                Sign Out
+              </Button>
+            </>
+          ) : (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-xs sm:text-sm"
+              onClick={() => navigate('/login')}
+            >
+              Sign In
+            </Button>
+          )}
         </div>
       </div>
     </nav>

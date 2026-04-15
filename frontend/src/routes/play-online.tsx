@@ -18,6 +18,7 @@ import { RoundScorecard } from '@/components/round-scorecard';
 import { useResponsiveCardSize } from '@/hooks/use-responsive-card-size';
 import { cn } from '@/lib/utils';
 import { toSlot, getPlayerName, computeVisibleScore } from '@/lib/game-helpers';
+import { useAuth } from '@/contexts/auth-context';
 import {
   useOnlineGame,
   type RoomLobbyState,
@@ -219,10 +220,16 @@ function JoinOrCreate({
   error: string | null;
 }) {
   const [mode, setMode] = useState<'choose' | 'create' | 'join'>(initialRoomCode ? 'join' : 'choose');
-  const [name, setName] = useState(() => sessionStorage.getItem('skyjo-online-name') || '');
+  const { user, isAuthenticated } = useAuth();
+  const defaultName = isAuthenticated && user ? user.display_name : '';
+  const [name, setName] = useState(() => sessionStorage.getItem('skyjo-online-name') || defaultName);
   const [numPlayers, setNumPlayers] = useState(2);
   const [rules, setRules] = useState('Standard');
   const [joinCode, setJoinCode] = useState(initialRoomCode);
+
+  // For authenticated users: use display_name as default if input is empty
+  const effectiveName = name.trim() || (isAuthenticated && user ? user.display_name : '');
+  const canSubmit = effectiveName.length > 0;
 
   return (
     <div className="max-w-md mx-auto space-y-6">
@@ -254,7 +261,7 @@ function JoinOrCreate({
               <Input
                 value={name}
                 onChange={e => setName(e.target.value)}
-                placeholder="How others will see you"
+                placeholder={isAuthenticated && user ? user.display_name : 'Your Name'}
                 maxLength={20}
               />
               <p className="text-xs text-muted-foreground mt-1">
@@ -287,9 +294,9 @@ function JoinOrCreate({
             <div className="flex gap-2">
               <Button onClick={() => setMode('choose')} variant="outline">Back</Button>
               <Button
-                onClick={() => onCreate(name.trim() || 'Player 1', numPlayers, rules)}
+                onClick={() => onCreate(effectiveName, numPlayers, rules)}
                 className="flex-1"
-                disabled={!name.trim()}
+                disabled={!canSubmit}
               >
                 Create
               </Button>
@@ -307,7 +314,7 @@ function JoinOrCreate({
               <Input
                 value={name}
                 onChange={e => setName(e.target.value)}
-                placeholder="How others will see you"
+                placeholder={isAuthenticated && user ? user.display_name : 'Your Name'}
                 maxLength={20}
               />
             </div>
@@ -318,9 +325,9 @@ function JoinOrCreate({
             <div className="flex gap-2">
               <Button onClick={() => setMode('choose')} variant="outline">Back</Button>
               <Button
-                onClick={() => onJoin(joinCode, name.trim() || 'Player')}
+                onClick={() => onJoin(joinCode, effectiveName)}
                 className="flex-1"
-                disabled={!name.trim() || joinCode.replace(/[^A-Z0-9]/gi, '').length < 6}
+                disabled={!canSubmit || joinCode.replace(/[^A-Z0-9]/gi, '').length < 6}
               >
                 Join
               </Button>

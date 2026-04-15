@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 import { z } from 'zod';
 import { GeneticModelDataSchema } from '@/schemas';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -14,12 +14,15 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { useDocumentTitle } from '@/hooks/use-document-title';
+import { useAuth } from '@/contexts/auth-context';
+import { apiFetch } from '@/lib/api';
 import type { GeneticModelData, SavedGenerationInfo } from '@/types';
 
 const API_BASE = '/api';
 
 export default function GeneticManageRoute() {
   useDocumentTitle('Manage Genetic Generations');
+  const { user, isAuthenticated, isLoading } = useAuth();
 
   const [model, setModel] = useState<GeneticModelData | null>(null);
   const [saved, setSaved] = useState<SavedGenerationInfo[]>([]);
@@ -29,8 +32,26 @@ export default function GeneticManageRoute() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    fetchAll();
-  }, []);
+    if (!isLoading && isAuthenticated) {
+      fetchAll();
+    }
+  }, [isLoading, isAuthenticated]);
+
+  // Auth gate: require moderator or admin (after all hooks)
+  if (!isLoading && (!isAuthenticated || !user || (user.permission !== 'admin' && user.permission !== 'moderator'))) {
+    if (!isAuthenticated) {
+      return <Navigate to="/login" state={{ from: '/rules/strategies/Genetic/manage' }} replace />;
+    }
+    return (
+      <div className="text-center py-12 text-muted-foreground">
+        You need moderator or admin permissions to access this page.
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return <div className="text-center py-12 text-muted-foreground animate-pulse">Loading...</div>;
+  }
 
   async function fetchAll() {
     try {
@@ -50,7 +71,7 @@ export default function GeneticManageRoute() {
   async function saveLatest() {
     setSaving(true);
     try {
-      const res = await fetch(`${API_BASE}/genetic/saved`, {
+      const res = await apiFetch(`${API_BASE}/genetic/saved`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
@@ -70,7 +91,7 @@ export default function GeneticManageRoute() {
   async function confirmDelete() {
     if (!deleteTarget) return;
     try {
-      const res = await fetch(`${API_BASE}/genetic/saved/${encodeURIComponent(deleteTarget)}`, {
+      const res = await apiFetch(`${API_BASE}/genetic/saved/${encodeURIComponent(deleteTarget)}`, {
         method: 'DELETE',
       });
       if (res.ok) await fetchAll();
@@ -126,7 +147,7 @@ export default function GeneticManageRoute() {
         return;
       }
       const name = file.name.replace(/\.json$/, '').replace(/_/g, ' ');
-      const res = await fetch(`${API_BASE}/genetic/saved/import`, {
+      const res = await apiFetch(`${API_BASE}/genetic/saved/import`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

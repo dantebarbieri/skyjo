@@ -19,15 +19,28 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { useAuth } from '@/contexts/auth-context';
+import { apiFetch } from '@/lib/api';
 import type { GeneticModelData, GeneticTrainingStatus, SavedGenerationInfo } from '@/types';
 
 const API_BASE = '/api';
+
+async function extractErrorMessage(res: Response): Promise<string> {
+  try {
+    const body = await res.json();
+    return body?.error?.message || body?.message || `Request failed (HTTP ${res.status})`;
+  } catch {
+    return `Request failed (HTTP ${res.status})`;
+  }
+}
 
 interface NeuralNetworkVizProps {
   className?: string;
 }
 
 export function NeuralNetworkViz({ className }: NeuralNetworkVizProps) {
+  const { user, isAuthenticated } = useAuth();
+  const canManage = isAuthenticated && user && (user.permission === 'admin' || user.permission === 'moderator');
   const [model, setModel] = useState<GeneticModelData | null>(null);
   const [status, setStatus] = useState<GeneticTrainingStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -40,7 +53,7 @@ export function NeuralNetworkViz({ className }: NeuralNetworkVizProps) {
   const elapsedAnchorRef = useRef<{ serverMs: number; localTs: number } | null>(null);
   const [clientElapsedMs, setClientElapsedMs] = useState(0);
   const elapsedRafRef = useRef<number | null>(null);
-  const [trainGenCount, setTrainGenCount] = useState('100');
+  const [trainGenCount, setTrainGenCount] = useState('50');
   const [trainTargetGen, setTrainTargetGen] = useState('');
   const [trainTargetFitness, setTrainTargetFitness] = useState('-30');
   const [trainError, setTrainError] = useState<string | null>(null);
@@ -178,13 +191,13 @@ export function NeuralNetworkViz({ className }: NeuralNetworkVizProps) {
   async function startTraining(request: Record<string, unknown>) {
     setTrainError(null);
     try {
-      const res = await fetch(`${API_BASE}/genetic/train`, {
+      const res = await apiFetch(`${API_BASE}/genetic/train`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(request),
       });
       if (!res.ok) {
-        setTrainError(await res.text());
+        setTrainError(await extractErrorMessage(res));
         return;
       }
       const s: GeneticTrainingStatus = await res.json();
@@ -218,7 +231,7 @@ export function NeuralNetworkViz({ className }: NeuralNetworkVizProps) {
 
   async function handleCancel() {
     try {
-      const res = await fetch(`${API_BASE}/genetic/stop`, { method: 'POST' });
+      const res = await apiFetch(`${API_BASE}/genetic/stop`, { method: 'POST' });
       if (res.ok) {
         const s: GeneticTrainingStatus = await res.json();
         setStatus(s);
@@ -231,14 +244,14 @@ export function NeuralNetworkViz({ className }: NeuralNetworkVizProps) {
   async function handleReset() {
     setShowResetDialog(false);
     try {
-      const res = await fetch(`${API_BASE}/genetic/reset`, { method: 'POST' });
+      const res = await apiFetch(`${API_BASE}/genetic/reset`, { method: 'POST' });
       if (res.ok) {
         const s: GeneticTrainingStatus = await res.json();
         setStatus(s);
         await fetchModel();
         await fetchSaved();
       } else {
-        setTrainError(await res.text());
+        setTrainError(await extractErrorMessage(res));
       }
     } catch {
       setTrainError('Failed to connect to server');
@@ -249,7 +262,7 @@ export function NeuralNetworkViz({ className }: NeuralNetworkVizProps) {
     if (name === '__current__') return;
     setTrainError(null);
     try {
-      const res = await fetch(`${API_BASE}/genetic/load`, {
+      const res = await apiFetch(`${API_BASE}/genetic/load`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name }),
@@ -259,7 +272,7 @@ export function NeuralNetworkViz({ className }: NeuralNetworkVizProps) {
         setStatus(s);
         await fetchModel();
       } else {
-        setTrainError(await res.text());
+        setTrainError(await extractErrorMessage(res));
       }
     } catch {
       setTrainError('Failed to connect to server');
@@ -276,6 +289,39 @@ export function NeuralNetworkViz({ className }: NeuralNetworkVizProps) {
 
   // Training progress calculations (all timing from server)
   const isTraining = status?.is_training ?? false;
+  const [hasSeenTraining, setHasSeenTraining] = useState(false);
+  const [wasCancelled, setWasCancelled] = useState(false);
+  const wasTrainingRef = useRef(false);
+  // Snapshot last training stats so we can display them after completion
+  const lastTrainingStatsRef = useRef<{
+    elapsedSec: number;
+    gensPerSec: number;
+    mutationRate: number;
+    mutationSigma: number;
+    gensDone: number;
+    targetGen: number;
+    targetFitness: number;
+    mode: string;
+    finalFitness: number;
+  } | null>(null);
+  useEffect(() => {
+    if (isTraining) {
+      setHasSeenTraining(true);
+      setWasCancelled(false);
+      wasTrainingRef.current = true;
+    } else if (wasTrainingRef.current) {
+      // Training just stopped — determine if cancelled or completed
+      wasTrainingRef.current = false;
+      if (status) {
+        const reachedGenTarget = status.generation >= status.training_target_generation;
+        const reachedFitnessTarget = status.training_mode === 'until_fitness'
+          && status.best_fitness >= status.training_target_fitness;
+        if (!reachedGenTarget && !reachedFitnessTarget) {
+          setWasCancelled(true);
+        }
+      }
+    }
+  }, [isTraining, status]);
   const trainingMode = status?.training_mode ?? 'generations';
   const isFitnessMode = trainingMode === 'until_fitness';
   const gensDone = isTraining ? (status!.generation - status!.training_start_generation) : 0;
@@ -300,6 +346,22 @@ export function NeuralNetworkViz({ className }: NeuralNetworkVizProps) {
   const etaSec = isFitnessMode
     ? (fitnessEtaSec > 0 ? Math.min(fitnessEtaSec, genEtaSec) : genEtaSec)
     : genEtaSec;
+
+  // Snapshot training stats while active so we can show them after completion
+  if (isTraining && status) {
+    lastTrainingStatsRef.current = {
+      elapsedSec,
+      gensPerSec,
+      mutationRate: status.current_mutation_rate,
+      mutationSigma: status.current_mutation_sigma,
+      gensDone,
+      targetGen: status.training_target_generation,
+      targetFitness: status.training_target_fitness,
+      mode: status.training_mode,
+      finalFitness: status.best_fitness,
+    };
+  }
+  const completedStats = lastTrainingStatsRef.current;
 
   function formatTime(sec: number): string {
     if (sec < 60) return `${Math.round(sec)}s`;
@@ -348,7 +410,8 @@ export function NeuralNetworkViz({ className }: NeuralNetworkVizProps) {
 
   return (
     <div className={`space-y-4 ${className ?? ''}`}>
-      {/* 1. Training controls */}
+      {/* 1. Training controls — only shown to moderator+ */}
+      {canManage && (
       <Card>
         <CardContent className="py-3 px-4 space-y-3">
           {/* Lineage selector */}
@@ -390,24 +453,27 @@ export function NeuralNetworkViz({ className }: NeuralNetworkVizProps) {
               <TabsTrigger value="until-fitness" disabled={isTraining}>Until fitness X</TabsTrigger>
             </TabsList>
 
-            <TabsContent value="for-generations" className="flex items-center gap-2 mt-2">
+            <TabsContent value="for-generations" className="flex items-center gap-2 mt-2 flex-wrap">
               <Input
                 type="number" min={1} value={trainGenCount}
                 onChange={e => setTrainGenCount(e.target.value)}
-                className="w-28" placeholder="100"
+                className="w-28" placeholder="50"
                 disabled={isTraining}
               />
               <Button size="sm" onClick={handleTrainForGenerations} disabled={isTraining}>
                 Train
               </Button>
+              <p className="text-xs text-muted-foreground w-full">
+                Each generation takes ~20–30s. 50 gens ≈ 15–25 min.
+              </p>
             </TabsContent>
 
-            <TabsContent value="until-generation" className="flex items-center gap-2 mt-2">
+            <TabsContent value="until-generation" className="flex items-center gap-2 mt-2 flex-wrap">
               <span className="text-sm text-muted-foreground shrink-0">Target:</span>
               <Input
                 type="number" min={1} value={trainTargetGen}
                 onChange={e => setTrainTargetGen(e.target.value)}
-                className="w-28" placeholder={String((status?.generation ?? model?.generation ?? 0) + 100)}
+                className="w-28" placeholder={String((status?.generation ?? model?.generation ?? 0) + 50)}
                 disabled={isTraining}
               />
               <Button size="sm" onClick={handleTrainUntilGeneration} disabled={isTraining}>
@@ -416,9 +482,12 @@ export function NeuralNetworkViz({ className }: NeuralNetworkVizProps) {
               <span className="text-xs text-muted-foreground shrink-0">
                 Current: {status?.generation ?? model?.generation ?? 0}
               </span>
+              <p className="text-xs text-muted-foreground w-full">
+                Each generation takes ~20–30s. Target should be current + desired training count.
+              </p>
             </TabsContent>
 
-            <TabsContent value="until-fitness" className="flex items-center gap-2 mt-2">
+            <TabsContent value="until-fitness" className="flex items-center gap-2 mt-2 flex-wrap">
               <span className="text-sm text-muted-foreground shrink-0">Target:</span>
               <Input
                 type="number" step="0.1" value={trainTargetFitness}
@@ -430,6 +499,9 @@ export function NeuralNetworkViz({ className }: NeuralNetworkVizProps) {
                 Train
               </Button>
               <span className="text-xs text-muted-foreground shrink-0">(50k gen cap)</span>
+              <p className="text-xs text-muted-foreground w-full">
+                Random starts ≈ −200. After training: −80 is decent, −50 is good, −30 is strong. Less negative = better.
+              </p>
             </TabsContent>
           </Tabs>
           {trainError && <p className="text-sm text-destructive">{trainError}</p>}
@@ -463,55 +535,96 @@ export function NeuralNetworkViz({ className }: NeuralNetworkVizProps) {
           </div>
         </CardContent>
       </Card>
+      )}
 
-      {/* 2. Training progress */}
-      {isTraining && (
+      {/* 2. Training progress — shown to all users once training is observed */}
+      {hasSeenTraining && status && (
         <Card>
           <CardContent className="py-3 px-4 space-y-2">
-            <div className="flex items-center justify-between text-sm">
-              {isFitnessMode ? (
-                <>
-                  <span className="font-medium">
-                    Training: Gen {status!.generation} | Fitness {status!.best_fitness.toFixed(1)} / {status!.training_target_fitness.toFixed(1)}
-                  </span>
+            {isTraining ? (
+              <>
+                <div className="flex items-center justify-between text-sm">
+                  {isFitnessMode ? (
+                    <>
+                      <span className="font-medium">
+                        Training: Gen {status.generation} | Fitness {status.best_fitness.toFixed(1)} / {status.training_target_fitness.toFixed(1)}
+                      </span>
+                      <span className="text-muted-foreground text-xs">
+                        {gensDone} generations (max {gensTotal})
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="font-medium">
+                        Training: Gen {status.generation} / {status.training_target_generation}
+                      </span>
+                      <span className="text-muted-foreground text-xs">
+                        {gensDone} of {gensTotal} generations
+                      </span>
+                    </>
+                  )}
+                </div>
+                <div className="h-2 bg-muted rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-primary rounded-full transition-all duration-300"
+                    style={{ width: gensTotal > 0 ? `${(gensDone / gensTotal) * 100}%` : '0%' }}
+                  />
+                </div>
+                <div className="flex justify-between items-center text-xs text-muted-foreground">
+                  <span>Elapsed: {formatTime(elapsedSec)}</span>
+                  {gensPerSec > 0 && <span>{gensPerSec.toFixed(2)} gen/s</span>}
+                  {status.current_mutation_rate > 0 && (
+                    <span title="Adaptive mutation rate / sigma">
+                      μ: {(status.current_mutation_rate * 100).toFixed(1)}% σ: {status.current_mutation_sigma.toFixed(2)}
+                    </span>
+                  )}
+                  {etaSec > 0 && (
+                    <span title={isFitnessMode ? (fitnessEtaSec > 0 ? 'Based on fitness improvement rate' : 'Based on generation safety cap') : undefined}>
+                      {isFitnessMode ? '~' : ''}ETA: {formatTime(etaSec)}
+                    </span>
+                  )}
+                  {canManage && (
+                    <Button size="sm" variant="ghost" className="h-6 px-2 text-xs text-destructive hover:text-destructive" onClick={handleCancel}>
+                      Cancel
+                    </Button>
+                  )}
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex items-center justify-between text-sm">
+                  {wasCancelled ? (
+                    <span className="font-medium text-amber-600 dark:text-amber-400">
+                      Training cancelled — Gen {status.generation}
+                    </span>
+                  ) : (
+                    <span className="font-medium text-green-600 dark:text-green-400">
+                      Training complete — Gen {status.generation}
+                    </span>
+                  )}
                   <span className="text-muted-foreground text-xs">
-                    {gensDone} generations (max {gensTotal})
+                    Fitness: {status.best_fitness !== 0 ? status.best_fitness.toFixed(1) : 'N/A'}
                   </span>
-                </>
-              ) : (
-                <>
-                  <span className="font-medium">
-                    Training: Gen {status!.generation} / {status!.training_target_generation}
-                  </span>
-                  <span className="text-muted-foreground text-xs">
-                    {gensDone} of {gensTotal} generations
-                  </span>
-                </>
-              )}
-            </div>
-            <div className="h-2 bg-muted rounded-full overflow-hidden">
-              <div
-                className="h-full bg-primary rounded-full transition-all duration-300"
-                style={{ width: gensTotal > 0 ? `${(gensDone / gensTotal) * 100}%` : '0%' }}
-              />
-            </div>
-            <div className="flex justify-between items-center text-xs text-muted-foreground">
-              <span>Elapsed: {formatTime(elapsedSec)}</span>
-              {gensPerSec > 0 && <span>{gensPerSec.toFixed(2)} gen/s</span>}
-              {status!.current_mutation_rate > 0 && (
-                <span title="Adaptive mutation rate / sigma">
-                  μ: {(status!.current_mutation_rate * 100).toFixed(1)}% σ: {status!.current_mutation_sigma.toFixed(2)}
-                </span>
-              )}
-              {etaSec > 0 && (
-                <span title={isFitnessMode ? (fitnessEtaSec > 0 ? 'Based on fitness improvement rate' : 'Based on generation safety cap') : undefined}>
-                  {isFitnessMode ? '~' : ''}ETA: {formatTime(etaSec)}
-                </span>
-              )}
-              <Button size="sm" variant="ghost" className="h-6 px-2 text-xs text-destructive hover:text-destructive" onClick={handleCancel}>
-                Cancel
-              </Button>
-            </div>
+                </div>
+                <div className="h-2 bg-muted rounded-full overflow-hidden">
+                  <div className={`h-full rounded-full ${wasCancelled ? 'bg-amber-500' : 'bg-green-500'}`}
+                    style={{ width: wasCancelled && completedStats
+                      ? `${Math.min(100, completedStats.gensDone / Math.max(1, completedStats.targetGen - (status.generation - completedStats.gensDone)) * 100)}%`
+                      : '100%' }}
+                  />
+                </div>
+                {completedStats && (
+                  <div className="flex justify-between items-center text-xs text-muted-foreground">
+                    <span>Elapsed: {formatTime(completedStats.elapsedSec)}</span>
+                    {completedStats.gensPerSec > 0 && <span>{completedStats.gensPerSec.toFixed(2)} gen/s</span>}
+                    {completedStats.mutationRate > 0 && (
+                      <span>μ: {(completedStats.mutationRate * 100).toFixed(1)}% σ: {completedStats.mutationSigma.toFixed(2)}</span>
+                    )}
+                    <span>{completedStats.gensDone} generations</span>
+                  </div>
+                )}
+              </>
+            )}
           </CardContent>
         </Card>
       )}
@@ -524,14 +637,9 @@ export function NeuralNetworkViz({ className }: NeuralNetworkVizProps) {
         <Badge variant="outline" className="text-xs">
           Games Trained: {model.total_games_trained.toLocaleString()}
         </Badge>
-        {status && status.best_fitness !== 0 && (
-          <Badge variant="outline" className="text-xs">
-            Fitness: {status.best_fitness.toFixed(1)} {status.best_fitness >= 0 ? '✓' : ''}
-          </Badge>
-        )}
-        {status && status.best_fitness !== 0 && (
-          <span className="text-muted-foreground text-[9px]">(less negative = better)</span>
-        )}
+        <Badge variant="outline" className="text-xs">
+          Fitness: {status && status.best_fitness !== 0 ? status.best_fitness.toFixed(1) : 'N/A'}
+        </Badge>
         {lineageHash && (
           <Badge variant="outline" className="text-xs">
             Lineage: <span className="font-mono">{lineageHash}</span>

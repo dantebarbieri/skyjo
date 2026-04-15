@@ -11,6 +11,7 @@ use tokio::sync::Mutex;
 use tower::ServiceExt;
 
 use skyjo_server::error::ServerError;
+use skyjo_server::persistence::Persistence;
 use skyjo_server::rate_limit::{RateLimitConfig, RateLimiter};
 use skyjo_server::{AppState, AppStateInner};
 
@@ -18,7 +19,19 @@ use skyjo_server::{AppState, AppStateInner};
 // Test helpers (mirrors api_integration.rs)
 // ========================================================================
 
-fn test_app() -> Router {
+async fn test_app() -> Option<Router> {
+    let database_url = match std::env::var("DATABASE_URL") {
+        Ok(url) => url,
+        Err(_) => {
+            eprintln!("Skipping test: DATABASE_URL not set");
+            return None;
+        }
+    };
+
+    let persistence = Persistence::connect(&database_url)
+        .await
+        .expect("Failed to connect to test database");
+
     let model_path =
         std::env::temp_dir().join(format!("skyjo_test_security_{}.json", std::process::id()));
     let genetic_state = Arc::new(Mutex::new(
@@ -27,9 +40,9 @@ fn test_app() -> Router {
     let state: AppState = Arc::new(AppStateInner {
         lobby: skyjo_server::lobby::Lobby::new(100),
         genetic: genetic_state,
-        genetic_api_key: None,
-        persistence: None,
+        persistence,
         rate_limiter: Arc::new(skyjo_server::rate_limit::RateLimiter::new()),
+        jwt_secret: "test-secret".to_string(),
     });
 
     let api_routes = Router::new()
@@ -38,10 +51,22 @@ fn test_app() -> Router {
         .route("/rooms/{code}/join", post(skyjo_server::join_room))
         .route("/genetic/status", get(skyjo_server::genetic_status));
 
-    Router::new().nest("/api", api_routes).with_state(state)
+    Some(Router::new().nest("/api", api_routes).with_state(state))
 }
 
-fn test_app_with_api_key(api_key: Option<String>) -> Router {
+async fn test_app_with_auth() -> Option<Router> {
+    let database_url = match std::env::var("DATABASE_URL") {
+        Ok(url) => url,
+        Err(_) => {
+            eprintln!("Skipping test: DATABASE_URL not set");
+            return None;
+        }
+    };
+
+    let persistence = Persistence::connect(&database_url)
+        .await
+        .expect("Failed to connect to test database");
+
     let model_path = std::env::temp_dir().join(format!(
         "skyjo_test_security_auth_{}.json",
         std::process::id()
@@ -52,23 +77,23 @@ fn test_app_with_api_key(api_key: Option<String>) -> Router {
     let state: AppState = Arc::new(AppStateInner {
         lobby: skyjo_server::lobby::Lobby::new(100),
         genetic: genetic_state,
-        genetic_api_key: api_key,
-        persistence: None,
+        persistence,
         rate_limiter: Arc::new(skyjo_server::rate_limit::RateLimiter::new()),
+        jwt_secret: "test-secret".to_string(),
     });
 
     let genetic_mutation_routes = Router::new()
         .route("/genetic/train", post(skyjo_server::genetic_status))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
-            skyjo_server::genetic_auth_middleware,
+            skyjo_server::require_moderator_middleware,
         ));
 
     let api_routes = Router::new()
         .route("/genetic/status", get(skyjo_server::genetic_status))
         .merge(genetic_mutation_routes);
 
-    Router::new().nest("/api", api_routes).with_state(state)
+    Some(Router::new().nest("/api", api_routes).with_state(state))
 }
 
 async fn body_json(response: axum::http::Response<Body>) -> serde_json::Value {
@@ -147,7 +172,9 @@ fn rate_limiter_different_ips_independent() {
 
 #[tokio::test]
 async fn genetic_train_without_auth_header_returns_403() {
-    let app = test_app_with_api_key(Some("my-secret-key".to_string()));
+    let Some(app) = test_app_with_auth().await else {
+        return;
+    };
 
     let response = app
         .oneshot(
@@ -166,7 +193,9 @@ async fn genetic_train_without_auth_header_returns_403() {
 
 #[tokio::test]
 async fn genetic_train_with_wrong_bearer_token_returns_403() {
-    let app = test_app_with_api_key(Some("correct-key".to_string()));
+    let Some(app) = test_app_with_auth().await else {
+        return;
+    };
 
     let response = app
         .oneshot(
@@ -185,9 +214,10 @@ async fn genetic_train_with_wrong_bearer_token_returns_403() {
 }
 
 #[tokio::test]
-async fn genetic_train_with_no_configured_key_returns_403() {
-    // When no API key is configured, all mutation requests are rejected.
-    let app = test_app_with_api_key(None);
+async fn genetic_train_with_invalid_jwt_returns_403() {
+    let Some(app) = test_app_with_auth().await else {
+        return;
+    };
 
     let response = app
         .oneshot(
@@ -211,68 +241,54 @@ async fn genetic_train_with_no_configured_key_returns_403() {
 
 #[tokio::test]
 async fn session_token_invalid_after_kick() {
-    let app = test_app();
-
-    // Create a room (Alice is host, slot 0)
-    let (code, _alice_token) = create_room_via_api(&app, "Alice", 2).await;
-
-    // Bob joins
-    let join_resp = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri(format!("/api/rooms/{code}/join"))
-                .header("content-type", "application/json")
-                .body(Body::from(r#"{"player_name":"Bob"}"#))
-                .unwrap(),
-        )
+    let database_url = match std::env::var("DATABASE_URL") {
+        Ok(url) => url,
+        Err(_) => {
+            eprintln!("Skipping test: DATABASE_URL not set");
+            return;
+        }
+    };
+    let persistence = Persistence::connect(&database_url)
         .await
+        .expect("Failed to connect to test database");
+
+    let state: AppState = Arc::new(AppStateInner {
+        lobby: skyjo_server::lobby::Lobby::new(100),
+        genetic: Arc::new(Mutex::new(
+            skyjo_server::genetic::GeneticTrainingState::load_or_new(
+                std::env::temp_dir().join("skyjo_test_kick.json"),
+            ),
+        )),
+        persistence,
+        rate_limiter: Arc::new(skyjo_server::rate_limit::RateLimiter::new()),
+        jwt_secret: "test-secret".to_string(),
+    });
+
+    // Create room directly in lobby
+    let (code, _host_token, _) = state
+        .lobby
+        .create_room("Host".into(), 2, None, 0, 0)
         .unwrap();
-    assert_eq!(join_resp.status(), StatusCode::OK);
-    let join_json = body_json(join_resp).await;
-    let bob_token = join_json["session_token"].as_str().unwrap().to_string();
+    let (bob_token, bob_idx) = state.lobby.join_room(&code, "Bob".into()).await.unwrap();
 
-    // Kick Bob via Room method (we test the lobby-level session invalidation)
-    {
-        let state: AppState = Arc::new(AppStateInner {
-            lobby: skyjo_server::lobby::Lobby::new(100),
-            genetic: Arc::new(Mutex::new(
-                skyjo_server::genetic::GeneticTrainingState::load_or_new(
-                    std::env::temp_dir().join("skyjo_test_kick.json"),
-                ),
-            )),
-            genetic_api_key: None,
-            persistence: None,
-            rate_limiter: Arc::new(skyjo_server::rate_limit::RateLimiter::new()),
-        });
+    // Kick Bob: removes session token from room slot
+    let room_ref = state.lobby.get_room(&code).unwrap();
+    let kicked_token = {
+        let mut room = room_ref.lock().await;
+        room.kick_player(bob_idx).unwrap()
+    };
 
-        // Create room directly in lobby
-        let (code, _host_token, _) = state
-            .lobby
-            .create_room("Host".into(), 2, None, 0, 0)
-            .unwrap();
-        let (bob_token, bob_idx) = state.lobby.join_room(&code, "Bob".into()).await.unwrap();
+    // The kicked token should match Bob's token
+    assert!(kicked_token.is_some());
+    assert_eq!(kicked_token.as_deref(), Some(bob_token.as_str()));
+    // Remove from lobby sessions (mirrors what ws.rs does)
+    state.lobby.sessions.remove(bob_token.as_str());
 
-        // Kick Bob: removes session token from room slot
-        let room_ref = state.lobby.get_room(&code).unwrap();
-        let kicked_token = {
-            let mut room = room_ref.lock().await;
-            room.kick_player(bob_idx).unwrap()
-        };
-
-        // The kicked token should match Bob's token
-        assert!(kicked_token.is_some());
-        assert_eq!(kicked_token.as_deref(), Some(bob_token.as_str()));
-        // Remove from lobby sessions (mirrors what ws.rs does)
-        state.lobby.sessions.remove(bob_token.as_str());
-
-        // Verify the kicked token is truly gone from this lobby
-        assert!(
-            state.lobby.get_session(bob_token.as_str()).is_none(),
-            "kicked player's session token should be invalidated"
-        );
-    }
+    // Verify the kicked token is truly gone from this lobby
+    assert!(
+        state.lobby.get_session(bob_token.as_str()).is_none(),
+        "kicked player's session token should be invalidated"
+    );
 }
 
 // ========================================================================
@@ -319,7 +335,9 @@ async fn ban_player_adds_ip_and_kicks() {
 
 #[tokio::test]
 async fn join_with_lowercase_room_code_returns_400() {
-    let app = test_app();
+    let Some(app) = test_app().await else {
+        return;
+    };
 
     let response = app
         .oneshot(
@@ -338,7 +356,9 @@ async fn join_with_lowercase_room_code_returns_400() {
 
 #[tokio::test]
 async fn join_with_too_short_room_code_returns_400() {
-    let app = test_app();
+    let Some(app) = test_app().await else {
+        return;
+    };
 
     let response = app
         .oneshot(
@@ -357,7 +377,9 @@ async fn join_with_too_short_room_code_returns_400() {
 
 #[tokio::test]
 async fn join_with_excluded_chars_room_code_returns_400() {
-    let app = test_app();
+    let Some(app) = test_app().await else {
+        return;
+    };
 
     // 'I' and 'O' are excluded from the room code charset
     let response = app
@@ -381,7 +403,9 @@ async fn join_with_excluded_chars_room_code_returns_400() {
 
 #[tokio::test]
 async fn join_with_too_long_name_returns_400() {
-    let app = test_app();
+    let Some(app) = test_app().await else {
+        return;
+    };
     let (code, _) = create_room_via_api(&app, "Alice", 2).await;
 
     let long_name = "A".repeat(33);
@@ -402,7 +426,9 @@ async fn join_with_too_long_name_returns_400() {
 
 #[tokio::test]
 async fn join_with_empty_name_returns_400() {
-    let app = test_app();
+    let Some(app) = test_app().await else {
+        return;
+    };
     let (code, _) = create_room_via_api(&app, "Alice", 2).await;
 
     let response = app
@@ -422,7 +448,9 @@ async fn join_with_empty_name_returns_400() {
 
 #[tokio::test]
 async fn join_with_whitespace_only_name_returns_400() {
-    let app = test_app();
+    let Some(app) = test_app().await else {
+        return;
+    };
     let (code, _) = create_room_via_api(&app, "Alice", 2).await;
 
     let response = app
@@ -442,7 +470,9 @@ async fn join_with_whitespace_only_name_returns_400() {
 
 #[tokio::test]
 async fn create_room_with_empty_name_returns_400() {
-    let app = test_app();
+    let Some(app) = test_app().await else {
+        return;
+    };
 
     let response = app
         .oneshot(
@@ -461,7 +491,9 @@ async fn create_room_with_empty_name_returns_400() {
 
 #[tokio::test]
 async fn create_room_with_too_long_name_returns_400() {
-    let app = test_app();
+    let Some(app) = test_app().await else {
+        return;
+    };
 
     let long_name = "B".repeat(33);
     let response = app
