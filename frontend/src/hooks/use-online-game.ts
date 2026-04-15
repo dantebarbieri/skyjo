@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { InteractiveGameState, PlayerAction } from '@/types';
-import { ServerMessageSchema } from '@/schemas';
+import {
+  ServerMessageSchema,
+  RoomLobbyStateSchema,
+  LobbyPlayerSchema,
+  PlayerSlotTypeSchema,
+} from '@/schemas';
 import type { PendingColumnClear } from './use-interactive-game';
 import { useAuth } from '@/contexts/auth-context';
 import type { z } from 'zod';
@@ -38,34 +43,9 @@ function buildPreClearState(state: InteractiveGameState): InteractiveGameState {
   return { ...state, boards, last_column_clears: [] };
 }
 
-export interface RoomLobbyState {
-  room_code: string;
-  players: LobbyPlayer[];
-  num_players: number;
-  rules: string;
-  creator: number;
-  available_strategies: string[];
-  available_rules: string[];
-  idle_timeout_secs: number | null;
-  turn_timer_secs: number | null;
-  last_winners: number[];
-  genetic_games_trained: number;
-  genetic_generation: number;
-}
-
-export interface LobbyPlayer {
-  slot: number;
-  name: string;
-  player_type: PlayerSlotType;
-  connected: boolean;
-  shares_ip_with_host?: boolean;
-  disconnect_secs?: number;
-}
-
-export type PlayerSlotType =
-  | { kind: 'Human' }
-  | { kind: 'Bot'; strategy: string }
-  | { kind: 'Empty' };
+export type RoomLobbyState = z.infer<typeof RoomLobbyStateSchema>;
+export type LobbyPlayer = z.infer<typeof LobbyPlayerSchema>;
+export type PlayerSlotType = z.infer<typeof PlayerSlotTypeSchema>;
 
 type ServerMessage = z.infer<typeof ServerMessageSchema>;
 
