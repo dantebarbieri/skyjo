@@ -170,15 +170,19 @@ async fn main() {
             // Periodic snapshot of active in-game rooms
             for entry in cleanup_state.lobby.rooms.iter() {
                 let code = entry.key().clone();
-                if let Ok(room) = entry.value().try_lock()
+                // Capture snapshot while holding the lock, then drop before awaiting
+                let json = if let Ok(room) = entry.value().try_lock()
                     && room.phase == skyjo_server::room::RoomPhase::InGame
                 {
                     let snapshot = room.to_snapshot();
-                    if let Ok(json) = serde_json::to_string(&snapshot)
-                        && let Err(e) = cleanup_persistence.save_room_snapshot(&code, &json).await
-                    {
-                        tracing::warn!(room = %code, "Failed to save snapshot: {e}");
-                    }
+                    serde_json::to_string(&snapshot).ok()
+                } else {
+                    None
+                };
+                if let Some(json) = json
+                    && let Err(e) = cleanup_persistence.save_room_snapshot(&code, &json).await
+                {
+                    tracing::warn!(room = %code, "Failed to save snapshot: {e}");
                 }
             }
         }
@@ -985,7 +989,16 @@ async fn admin_create_user(
     }
 
     let password = auth::generate_random_password();
-    let display_name = req.display_name.unwrap_or_else(|| username.clone());
+    let display_name = req
+        .display_name
+        .map(|d| d.trim().to_string())
+        .filter(|d| !d.is_empty())
+        .unwrap_or_else(|| username.clone());
+    if display_name.len() > 32 {
+        return Err(ServerError::InvalidAction(
+            "Display name must be 32 characters or fewer".to_string(),
+        ));
+    }
     let permission = req.permission.unwrap_or(PermissionLevel::User);
 
     let user = auth::create_user(

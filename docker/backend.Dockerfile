@@ -1,5 +1,5 @@
 # Stage 1: Build server binary
-FROM rust:latest AS server-build
+FROM rust:1.87 AS server-build
 
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./

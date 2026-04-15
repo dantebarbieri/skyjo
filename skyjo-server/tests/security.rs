@@ -241,73 +241,54 @@ async fn genetic_train_with_invalid_jwt_returns_403() {
 
 #[tokio::test]
 async fn session_token_invalid_after_kick() {
-    let Some(app) = test_app().await else {
-        return;
+    let database_url = match std::env::var("DATABASE_URL") {
+        Ok(url) => url,
+        Err(_) => {
+            eprintln!("Skipping test: DATABASE_URL not set");
+            return;
+        }
+    };
+    let persistence = Persistence::connect(&database_url)
+        .await
+        .expect("Failed to connect to test database");
+
+    let state: AppState = Arc::new(AppStateInner {
+        lobby: skyjo_server::lobby::Lobby::new(100),
+        genetic: Arc::new(Mutex::new(
+            skyjo_server::genetic::GeneticTrainingState::load_or_new(
+                std::env::temp_dir().join("skyjo_test_kick.json"),
+            ),
+        )),
+        persistence,
+        rate_limiter: Arc::new(skyjo_server::rate_limit::RateLimiter::new()),
+        jwt_secret: "test-secret".to_string(),
+    });
+
+    // Create room directly in lobby
+    let (code, _host_token, _) = state
+        .lobby
+        .create_room("Host".into(), 2, None, 0, 0)
+        .unwrap();
+    let (bob_token, bob_idx) = state.lobby.join_room(&code, "Bob".into()).await.unwrap();
+
+    // Kick Bob: removes session token from room slot
+    let room_ref = state.lobby.get_room(&code).unwrap();
+    let kicked_token = {
+        let mut room = room_ref.lock().await;
+        room.kick_player(bob_idx).unwrap()
     };
 
-    // Create a room (Alice is host, slot 0)
-    let (code, _alice_token) = create_room_via_api(&app, "Alice", 2).await;
+    // The kicked token should match Bob's token
+    assert!(kicked_token.is_some());
+    assert_eq!(kicked_token.as_deref(), Some(bob_token.as_str()));
+    // Remove from lobby sessions (mirrors what ws.rs does)
+    state.lobby.sessions.remove(bob_token.as_str());
 
-    // Bob joins
-    let join_resp = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri(format!("/api/rooms/{code}/join"))
-                .header("content-type", "application/json")
-                .body(Body::from(r#"{"player_name":"Bob"}"#))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(join_resp.status(), StatusCode::OK);
-    let join_json = body_json(join_resp).await;
-    let _bob_token = join_json["session_token"].as_str().unwrap().to_string();
-
-    // Kick Bob via Room method (we test the lobby-level session invalidation)
-    {
-        let database_url = std::env::var("DATABASE_URL").unwrap();
-        let persistence = Persistence::connect(&database_url).await.unwrap();
-
-        let state: AppState = Arc::new(AppStateInner {
-            lobby: skyjo_server::lobby::Lobby::new(100),
-            genetic: Arc::new(Mutex::new(
-                skyjo_server::genetic::GeneticTrainingState::load_or_new(
-                    std::env::temp_dir().join("skyjo_test_kick.json"),
-                ),
-            )),
-            persistence,
-            rate_limiter: Arc::new(skyjo_server::rate_limit::RateLimiter::new()),
-            jwt_secret: "test-secret".to_string(),
-        });
-
-        // Create room directly in lobby
-        let (code, _host_token, _) = state
-            .lobby
-            .create_room("Host".into(), 2, None, 0, 0)
-            .unwrap();
-        let (bob_token, bob_idx) = state.lobby.join_room(&code, "Bob".into()).await.unwrap();
-
-        // Kick Bob: removes session token from room slot
-        let room_ref = state.lobby.get_room(&code).unwrap();
-        let kicked_token = {
-            let mut room = room_ref.lock().await;
-            room.kick_player(bob_idx).unwrap()
-        };
-
-        // The kicked token should match Bob's token
-        assert!(kicked_token.is_some());
-        assert_eq!(kicked_token.as_deref(), Some(bob_token.as_str()));
-        // Remove from lobby sessions (mirrors what ws.rs does)
-        state.lobby.sessions.remove(bob_token.as_str());
-
-        // Verify the kicked token is truly gone from this lobby
-        assert!(
-            state.lobby.get_session(bob_token.as_str()).is_none(),
-            "kicked player's session token should be invalidated"
-        );
-    }
+    // Verify the kicked token is truly gone from this lobby
+    assert!(
+        state.lobby.get_session(bob_token.as_str()).is_none(),
+        "kicked player's session token should be invalidated"
+    );
 }
 
 // ========================================================================

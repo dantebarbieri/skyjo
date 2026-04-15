@@ -1,5 +1,5 @@
 # Stage 1: Build WASM from Rust
-FROM rust:latest AS wasm-build
+FROM rust:1.87 AS wasm-build
 
 RUN curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 

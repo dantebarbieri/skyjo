@@ -1,5 +1,5 @@
 # Stage 1: Build WASM from Rust
-FROM rust:latest AS wasm-build
+FROM rust:1.87 AS wasm-build
 
 RUN curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
@@ -29,7 +29,7 @@ COPY --from=wasm-build /app/frontend/pkg/ pkg/
 RUN pnpm build
 
 # Stage 3: Build server binary
-FROM rust:latest AS server-build
+FROM rust:1.87 AS server-build
 
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./

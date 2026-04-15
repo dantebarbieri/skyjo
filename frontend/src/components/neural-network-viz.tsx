@@ -638,11 +638,7 @@ export function NeuralNetworkViz({ className }: NeuralNetworkVizProps) {
           Games Trained: {model.total_games_trained.toLocaleString()}
         </Badge>
         <Badge variant="outline" className="text-xs">
-          Fitness: {(() => {
-            const f = (status && status.best_fitness !== 0) ? status.best_fitness : (model as Record<string, unknown>).best_fitness as number | undefined;
-            if (f == null || f === 0) return 'N/A';
-            return f.toFixed(1);
-          })()}
+          Fitness: {status && status.best_fitness !== 0 ? status.best_fitness.toFixed(1) : 'N/A'}
         </Badge>
         {lineageHash && (
           <Badge variant="outline" className="text-xs">
