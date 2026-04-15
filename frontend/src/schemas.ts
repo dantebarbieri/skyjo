@@ -67,6 +67,7 @@ export const RoundHistorySchema = z.object({
   going_out_player: z.number().int().nonnegative().nullable(),
   end_of_round_clears: z.array(ColumnClearEventSchema),
   round_scores: z.array(z.number()),
+  raw_round_scores: z.array(z.number()).default([]),
   cumulative_scores: z.array(z.number()),
   truncated: z.boolean(),
 });

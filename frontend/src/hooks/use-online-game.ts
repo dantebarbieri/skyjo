@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { InteractiveGameState, PlayerAction } from '@/types';
 import { ServerMessageSchema } from '@/schemas';
 import type { PendingColumnClear } from './use-interactive-game';
+import { useAuth } from '@/contexts/auth-context';
 import type { z } from 'zod';
 
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected';
@@ -101,6 +102,7 @@ export function useOnlineGame(
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const reconnectAttemptRef = useRef(0);
   const pendingClearTimeoutRef= useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { accessToken } = useAuth();
 
   const send = useCallback((msg: object) => {
     const ws = wsRef.current;
@@ -115,9 +117,11 @@ export function useOnlineGame(
     setConnectionStatus('connecting');
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(
-      `${protocol}//${window.location.host}/api/rooms/${roomCode}/ws?token=${sessionToken}`
-    );
+    let wsUrl = `${protocol}//${window.location.host}/api/rooms/${roomCode}/ws?token=${sessionToken}`;
+    if (accessToken) {
+      wsUrl += `&access_token=${encodeURIComponent(accessToken)}`;
+    }
+    const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
       setConnectionStatus('connected');
@@ -137,7 +141,9 @@ export function useOnlineGame(
 
       const parsedMessage = ServerMessageSchema.safeParse(rawMessage);
       if (!parsedMessage.success) {
-        console.error('Invalid server message:', JSON.stringify(rawMessage).slice(0, 500), parsedMessage.error.issues);
+        if (import.meta.env.DEV) {
+          console.error('Invalid server message:', JSON.stringify(rawMessage).slice(0, 500), parsedMessage.error.issues);
+        }
         setLastError('Received invalid server message.');
         return;
       }
@@ -297,7 +303,7 @@ export function useOnlineGame(
     };
 
     wsRef.current = ws;
-  }, [roomCode, sessionToken]);
+  }, [roomCode, sessionToken, accessToken]);
 
   // Connect when we have room code and token
   useEffect(() => {

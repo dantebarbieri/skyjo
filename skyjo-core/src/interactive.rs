@@ -590,7 +590,7 @@ impl InteractiveGame {
 
         self.last_round_goer = self.going_out_player;
         self.last_round_scores = round_scores.clone();
-        self.last_raw_round_scores = raw_round_scores;
+        self.last_raw_round_scores = raw_round_scores.clone();
         self.last_end_of_round_clears = end_of_round_clears.clone();
 
         // Finalize round history
@@ -603,7 +603,8 @@ impl InteractiveGame {
             turns: std::mem::take(&mut self.current_round_turns),
             going_out_player: self.going_out_player,
             end_of_round_clears,
-            round_scores,
+            round_scores: round_scores.clone(),
+            raw_round_scores: raw_round_scores.clone(),
             cumulative_scores: self.cumulative_scores.clone(),
             truncated: false,
         });
@@ -766,13 +767,7 @@ impl InteractiveGame {
     /// At `GameOver`, this is the complete history; during play, it's a partial snapshot.
     pub fn build_history(&self) -> GameHistory {
         let winners = if matches!(self.phase, Phase::GameOver) {
-            let min_score = self.cumulative_scores.iter().copied().min().unwrap_or(0);
-            self.cumulative_scores
-                .iter()
-                .enumerate()
-                .filter(|(_, s)| **s == min_score)
-                .map(|(i, _)| i)
-                .collect()
+            self.rules.resolve_winners(&self.cumulative_scores)
         } else {
             Vec::new()
         };

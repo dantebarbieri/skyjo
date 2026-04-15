@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS permission_levels (
 );
 
 INSERT INTO permission_levels (id, name) VALUES (1, 'user'), (2, 'moderator'), (3, 'admin')
-ON CONFLICT (name) DO NOTHING;
+ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name;
 
 CREATE TABLE IF NOT EXISTS action_kinds (
     id INT PRIMARY KEY,
@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS action_kinds (
 );
 
 INSERT INTO action_kinds (id, name) VALUES (1, 'drew_deck_kept'), (2, 'drew_deck_flipped'), (3, 'drew_discard')
-ON CONFLICT (name) DO NOTHING;
+ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name;
 
 CREATE TABLE IF NOT EXISTS clear_kinds (
     id INT PRIMARY KEY,
@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS clear_kinds (
 );
 
 INSERT INTO clear_kinds (id, name) VALUES (1, 'turn'), (2, 'round_end')
-ON CONFLICT (name) DO NOTHING;
+ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name;
 
 CREATE TABLE IF NOT EXISTS game_states (
     id INT PRIMARY KEY,
@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS game_states (
 );
 
 INSERT INTO game_states (id, name) VALUES (1, 'in_progress'), (2, 'completed'), (3, 'abandoned')
-ON CONFLICT (name) DO NOTHING;
+ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name;
 
 CREATE TABLE IF NOT EXISTS room_phases (
     id INT PRIMARY KEY,
@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS room_phases (
 );
 
 INSERT INTO room_phases (id, name) VALUES (1, 'lobby'), (2, 'in_game'), (3, 'game_over')
-ON CONFLICT (name) DO NOTHING;
+ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name;
 
 CREATE TABLE IF NOT EXISTS slot_types (
     id INT PRIMARY KEY,
@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS slot_types (
 );
 
 INSERT INTO slot_types (id, name) VALUES (1, 'human'), (2, 'bot'), (3, 'empty')
-ON CONFLICT (name) DO NOTHING;
+ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name;
 
 --------------------------------------------------------------------------------
 -- 2. Core game tables

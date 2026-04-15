@@ -885,7 +885,7 @@ async fn send_msg(tx: &mut SplitSink<WebSocket, Message>, msg: &ServerMessage, f
     let _ = tx.send(ws_msg).await;
 }
 
-/// Persist a newly started game (in_progress state) with its players.
+/// Persist a newly started game (in_progress state) with its players atomically.
 async fn persist_game_start(
     persistence: &Persistence,
     game_id: uuid::Uuid,
@@ -894,21 +894,22 @@ async fn persist_game_start(
     seed: u64,
     players: &[(usize, String, Option<uuid::Uuid>, Option<String>)],
 ) {
-    if let Err(e) = persistence
-        .save_game(game_id, room_code, rules_name, Some(seed as i64))
-        .await
-    {
-        tracing::error!(game_id = %game_id, "Failed to persist game start: {e}");
-        return;
-    }
-
     let player_refs: Vec<(usize, &str, Option<uuid::Uuid>, Option<&str>)> = players
         .iter()
         .map(|(idx, name, user_id, strategy)| (*idx, name.as_str(), *user_id, strategy.as_deref()))
         .collect();
 
-    if let Err(e) = persistence.save_game_players(game_id, &player_refs).await {
-        tracing::error!(game_id = %game_id, "Failed to persist game players: {e}");
+    if let Err(e) = persistence
+        .save_game_with_players(
+            game_id,
+            room_code,
+            rules_name,
+            Some(seed as i64),
+            &player_refs,
+        )
+        .await
+    {
+        tracing::error!(game_id = %game_id, "Failed to persist game start: {e}");
     }
 }
 
@@ -936,10 +937,8 @@ async fn persist_game_completion(
             }
         }
     } else {
-        // No history available, still mark completed
-        if let Err(e) = persistence.update_game_state(game_id, "completed").await {
-            tracing::error!(game_id = %game_id, "Failed to mark game as completed: {e}");
-        }
+        // No history available — game had no rounds; leave as in_progress for investigation
+        tracing::warn!(game_id = %game_id, "persist_game_completion called with no history — leaving as in_progress");
     }
 }
 

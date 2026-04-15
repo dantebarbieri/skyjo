@@ -246,6 +246,7 @@ impl Game {
 
         // 9. Compute raw scores
         let mut round_scores: Vec<i32> = self.boards.iter().map(|b| b.score()).collect();
+        let raw_round_scores = round_scores.clone();
 
         // 10. Apply going-out penalty
         if let Some(goer) = going_out_player {
@@ -284,6 +285,7 @@ impl Game {
             going_out_player,
             end_of_round_clears,
             round_scores,
+            raw_round_scores,
             cumulative_scores: self.cumulative_scores.clone(),
             truncated,
         });

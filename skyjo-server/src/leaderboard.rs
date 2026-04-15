@@ -74,13 +74,25 @@ pub async fn list_games(
     optional_auth: OptionalAuth,
     Query(query): Query<ListGamesQuery>,
 ) -> Result<Json<GameListApiResponse>, ServerError> {
+    // user_id filtering requires authentication and is restricted to the caller's own ID.
+    let user_id_filter = match query.user_id {
+        Some(requested_id) => {
+            let auth_user = optional_auth.0.as_ref().ok_or(ServerError::Unauthorized)?;
+            if auth_user.id != requested_id {
+                return Err(ServerError::Forbidden);
+            }
+            Some(requested_id)
+        }
+        None => None,
+    };
+
     let params = GameListParams {
         page: query.page,
         per_page: query.per_page,
         sort_by: query.sort_by,
         sort_order: query.sort_order,
         player_name: query.player_name,
-        user_id: query.user_id,
+        user_id: user_id_filter,
         min_players: query.min_players,
         max_players: query.max_players,
         rules: query.rules,

@@ -26,6 +26,9 @@ pub struct RoundHistory {
     /// Column clears that happened during end-of-round reveal.
     pub end_of_round_clears: Vec<ColumnClearEvent>,
     pub round_scores: Vec<i32>,
+    /// Pre-penalty scores for each player (before going-out penalty).
+    #[serde(default)]
+    pub raw_round_scores: Vec<i32>,
     pub cumulative_scores: Vec<i32>,
     /// True if this round was forcefully ended by the turn limit safety valve.
     #[serde(default)]
@@ -130,6 +133,7 @@ mod tests {
         let history = play_game(4, 42);
         for round in &history.rounds {
             assert_eq!(round.round_scores.len(), 4);
+            assert_eq!(round.raw_round_scores.len(), 4);
             assert_eq!(round.cumulative_scores.len(), 4);
             assert_eq!(round.dealt_hands.len(), 4);
             assert_eq!(round.setup_flips.len(), 4);

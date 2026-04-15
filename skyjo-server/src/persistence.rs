@@ -206,6 +206,46 @@ impl Persistence {
         Ok(())
     }
 
+    /// Insert a game row and its players atomically in a single transaction.
+    pub async fn save_game_with_players(
+        &self,
+        game_id: Uuid,
+        room_code: &str,
+        rules_name: &str,
+        seed: Option<i64>,
+        players: &[(usize, &str, Option<Uuid>, Option<&str>)],
+    ) -> Result<(), PersistenceError> {
+        let mut tx = self.pool.begin().await?;
+
+        sqlx::query(
+            "INSERT INTO games (id, room_code, rules_name, seed, game_state_id)
+             VALUES ($1, $2, $3, $4, (SELECT id FROM game_states WHERE name = 'in_progress'))",
+        )
+        .bind(game_id)
+        .bind(room_code)
+        .bind(rules_name)
+        .bind(seed)
+        .execute(&mut *tx)
+        .await?;
+
+        for &(idx, name, user_id, strategy) in players {
+            sqlx::query(
+                "INSERT INTO game_players (game_id, player_index, player_name, user_id, strategy_name)
+                 VALUES ($1, $2, $3, $4, $5)",
+            )
+            .bind(game_id)
+            .bind(idx as i32)
+            .bind(name)
+            .bind(user_id)
+            .bind(strategy)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        tx.commit().await?;
+        Ok(())
+    }
+
     /// Insert a round and its associated initial deck, dealt cards, and setup flips.
     /// Returns the auto-generated round_id.
     ///
@@ -575,16 +615,13 @@ impl Persistence {
             .await?;
         }
 
-        // Round scores: GameHistory stores post-penalty scores in round_scores.
-        // We store them as both raw_score and adjusted_score.
-        // The going-out penalty is already applied in round_scores.
-        for (player_idx, &score) in round.round_scores.iter().enumerate() {
-            let (raw, adjusted) = compute_raw_adjusted(
-                score,
-                player_idx,
-                round.going_out_player,
-                &round.round_scores,
-            );
+        // Round scores: use raw_round_scores if available, fall back to inference.
+        for (player_idx, &adjusted) in round.round_scores.iter().enumerate() {
+            let raw = round
+                .raw_round_scores
+                .get(player_idx)
+                .copied()
+                .unwrap_or(adjusted);
             sqlx::query(
                 "INSERT INTO round_scores (round_id, player_index, raw_score, adjusted_score)
                  VALUES ($1, $2, $3, $4)",
@@ -612,13 +649,13 @@ impl Persistence {
         let offset = (page - 1) * per_page;
 
         let sort_col = match params.sort_by.as_deref() {
-            Some("num_players") => "gs.num_players",
-            Some("num_rounds") => "gs.num_rounds",
+            Some("num_players") => "num_players",
+            Some("num_rounds") => "num_rounds",
             Some("best_winner") => "best_winner_score",
             Some("worst_winner") => "worst_winner_score",
             Some("best_loser") => "best_loser_score",
             Some("worst_loser") => "worst_loser_score",
-            _ => "gs.created_at",
+            _ => "created_at",
         };
         let sort_dir = match params.sort_order.as_deref() {
             Some("asc") => "ASC",
@@ -1057,14 +1094,15 @@ impl Persistence {
                 .collect();
 
             // Scores
-            let score_rows: Vec<(i32, i32)> = sqlx::query_as(
-                "SELECT player_index, adjusted_score FROM round_scores
+            let score_rows: Vec<(i32, i32, i32)> = sqlx::query_as(
+                "SELECT player_index, raw_score, adjusted_score FROM round_scores
                  WHERE round_id = $1 ORDER BY player_index",
             )
             .bind(round_id)
             .fetch_all(&self.pool)
             .await?;
-            let round_scores: Vec<i32> = score_rows.iter().map(|(_, s)| *s).collect();
+            let raw_round_scores: Vec<i32> = score_rows.iter().map(|(_, r, _)| *r).collect();
+            let round_scores: Vec<i32> = score_rows.iter().map(|(_, _, s)| *s).collect();
 
             for (i, &s) in round_scores.iter().enumerate() {
                 if i < cumulative_scores.len() {
@@ -1082,6 +1120,7 @@ impl Persistence {
                 going_out_player: going_out_player.map(|p| p as usize),
                 end_of_round_clears,
                 round_scores,
+                raw_round_scores,
                 cumulative_scores: cumulative_scores.clone(),
                 truncated: *truncated,
             });
@@ -1457,38 +1496,6 @@ fn reconstruct_turn_action(row: &TurnDbRow, boards: &[Vec<i16>]) -> TurnAction {
             placement: row.target_position.unwrap_or(0) as usize,
             displaced_card: row.replaced_card.unwrap_or(0) as i8,
         },
-    }
-}
-
-/// Compute raw and adjusted scores for a player.
-/// `round_scores` from GameHistory already has penalties baked in.
-/// For the going-out player with a positive score that was penalized,
-/// raw = adjusted / 2. For everyone else, raw = adjusted.
-fn compute_raw_adjusted(
-    adjusted: i32,
-    player_idx: usize,
-    going_out_player: Option<usize>,
-    all_scores: &[i32],
-) -> (i32, i32) {
-    let is_goer = going_out_player == Some(player_idx);
-    if !is_goer || adjusted <= 0 {
-        return (adjusted, adjusted);
-    }
-
-    // Check if the goer's score might have been doubled.
-    // If adjusted/2 would NOT be solo lowest among other players, then penalty was applied.
-    let half = adjusted / 2;
-    let is_half_solo_lowest = all_scores
-        .iter()
-        .enumerate()
-        .all(|(i, &s)| i == player_idx || s > half);
-
-    if is_half_solo_lowest {
-        // goer was solo lowest at half → no penalty was applied → raw = adjusted
-        (adjusted, adjusted)
-    } else {
-        // goer was NOT solo lowest → penalty was applied → raw = adjusted/2
-        (half, adjusted)
     }
 }
 

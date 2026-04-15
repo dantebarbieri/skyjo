@@ -1029,9 +1029,7 @@ async fn auth_register(
         .await?
         .unwrap_or_else(|| "false".to_string());
     if reg != "true" {
-        return Err(ServerError::InvalidAction(
-            "Public registration is not enabled".to_string(),
-        ));
+        return Err(ServerError::Forbidden);
     }
 
     let username = req.username.trim().to_string();

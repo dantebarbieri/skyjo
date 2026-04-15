@@ -67,6 +67,7 @@ function makeRoundHistory() {
     going_out_player: 0,
     end_of_round_clears: [],
     round_scores: [10, 20],
+    raw_round_scores: [10, 20],
     cumulative_scores: [10, 20],
     truncated: false,
   };
