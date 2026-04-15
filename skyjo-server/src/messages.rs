@@ -33,6 +33,10 @@ pub enum ClientMessage {
     Action { action: PlayerAction },
     /// Continue to next round (any player can trigger).
     ContinueRound,
+    /// Signal readiness for the next round (per-player).
+    ReadyForNextRound,
+    /// Set lobby ready state (any human player).
+    SetReady { ready: bool },
     /// Start a new game after game over (creator only).
     PlayAgain,
     /// Set the turn timer (creator only, lobby phase).
@@ -63,6 +67,9 @@ pub enum ServerMessage {
         /// Seconds remaining for the current player's turn (None if unlimited or not their turn).
         #[serde(skip_serializing_if = "Option::is_none")]
         turn_deadline_secs: Option<u64>,
+        /// Per-player ready state for round continuation (present only during RoundOver).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        round_ready: Option<Vec<bool>>,
     },
     /// A player's action was applied (includes who and what for animation).
     ActionApplied {
@@ -71,6 +78,8 @@ pub enum ServerMessage {
         state: InteractiveGameState,
         #[serde(skip_serializing_if = "Option::is_none")]
         turn_deadline_secs: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        round_ready: Option<Vec<bool>>,
     },
     /// A bot action was applied.
     BotAction {
@@ -79,6 +88,8 @@ pub enum ServerMessage {
         state: InteractiveGameState,
         #[serde(skip_serializing_if = "Option::is_none")]
         turn_deadline_secs: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        round_ready: Option<Vec<bool>>,
     },
     /// A timeout-triggered random action was applied.
     TimeoutAction {
@@ -87,6 +98,8 @@ pub enum ServerMessage {
         state: InteractiveGameState,
         #[serde(skip_serializing_if = "Option::is_none")]
         turn_deadline_secs: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        round_ready: Option<Vec<bool>>,
     },
     /// A player joined the room.
     PlayerJoined { player_index: usize, name: String },
@@ -172,6 +185,8 @@ pub struct LobbyPlayer {
     pub name: String,
     pub player_type: PlayerSlotType,
     pub connected: bool,
+    /// Whether this player is ready (host and bots are always ready).
+    pub ready: bool,
     /// True if this player shares an IP with the room creator (shown only to creator).
     /// Used to warn before banning. Never reveals the actual IP.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -183,7 +198,7 @@ pub struct LobbyPlayer {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub latency_ms: Option<u32>,
     /// Number of broadcast lag events (channel overflow).
-    #[serde(skip_serializing_if = "is_zero")]
+    #[serde(default, skip_serializing_if = "is_zero")]
     pub broadcast_lag_count: u32,
 }
 
@@ -607,6 +622,7 @@ mod tests {
             name: "Bob".to_string(),
             player_type: PlayerSlotType::Human,
             connected: true,
+            ready: true,
             shares_ip_with_host: None,
             disconnect_secs: None,
             latency_ms: None,
@@ -628,6 +644,7 @@ mod tests {
                 strategy: "Smart".to_string(),
             },
             connected: false,
+            ready: true,
             shares_ip_with_host: Some(true),
             disconnect_secs: Some(45),
             latency_ms: Some(42),
@@ -897,6 +914,7 @@ mod tests {
             action: PlayerAction::DrawFromDeck,
             state: state.clone(),
             turn_deadline_secs: Some(30),
+            round_ready: None,
         };
         let val: serde_json::Value = serde_json::to_value(&msg).unwrap();
         assert_eq!(val["type"], "TimeoutAction");
@@ -926,6 +944,7 @@ mod tests {
             action: PlayerAction::DrawFromDeck,
             state,
             turn_deadline_secs: None,
+            round_ready: None,
         };
         let val: serde_json::Value = serde_json::to_value(&msg).unwrap();
         assert_eq!(val["type"], "TimeoutAction");

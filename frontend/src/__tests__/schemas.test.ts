@@ -349,7 +349,7 @@ describe('Discriminated unions', () => {
     it('parses RoomState variant', () => {
       const roomState = {
         room_code: 'ABCD',
-        players: [{ slot: 0, name: 'Alice', player_type: { kind: 'Human' }, connected: true }],
+        players: [{ slot: 0, name: 'Alice', player_type: { kind: 'Human' }, connected: true, ready: true }],
         num_players: 2,
         rules: 'Standard',
         creator: 0,
@@ -376,6 +376,108 @@ describe('Discriminated unions', () => {
 
     it('rejects unknown message type', () => {
       expect(() => ServerMessageSchema.parse({ type: 'Unknown' })).toThrow();
+    });
+
+    it('rejects RoomState with missing ready field', () => {
+      const roomState = {
+        room_code: 'ABCD',
+        players: [{ slot: 0, name: 'Alice', player_type: { kind: 'Human' }, connected: true }],
+        num_players: 2,
+        rules: 'Standard',
+        creator: 0,
+        available_strategies: ['Random'],
+        available_rules: ['Standard'],
+        idle_timeout_secs: null,
+        turn_timer_secs: 30,
+        last_winners: [],
+        genetic_games_trained: 0,
+        genetic_generation: 0,
+      };
+      expect(() => ServerMessageSchema.parse({ type: 'RoomState', state: roomState })).toThrow();
+    });
+
+    it('parses RoomState with not-ready player', () => {
+      const roomState = {
+        room_code: 'ABCD',
+        players: [
+          { slot: 0, name: 'Alice', player_type: { kind: 'Human' }, connected: true, ready: true },
+          { slot: 1, name: 'Bob', player_type: { kind: 'Human' }, connected: true, ready: false },
+        ],
+        num_players: 2,
+        rules: 'Standard',
+        creator: 0,
+        available_strategies: ['Random'],
+        available_rules: ['Standard'],
+        idle_timeout_secs: null,
+        turn_timer_secs: 30,
+        last_winners: [],
+        genetic_games_trained: 0,
+        genetic_generation: 0,
+      };
+      const msg = { type: 'RoomState', state: roomState };
+      const parsed = ServerMessageSchema.parse(msg);
+      expect(parsed).toEqual(msg);
+      if (parsed.type === 'RoomState') {
+        expect(parsed.state.players[0].ready).toBe(true);
+        expect(parsed.state.players[1].ready).toBe(false);
+      }
+    });
+
+    it('parses GameState with round_ready', () => {
+      const msg = {
+        type: 'GameState',
+        state: {
+          num_players: 2,
+          player_names: ['Alice', 'Bob'],
+          num_rows: 3,
+          num_cols: 4,
+          round_number: 0,
+          current_player: 0,
+          action_needed: { type: 'ChooseDraw', player: 0, drawable_piles: [0] },
+          boards: [[{ Revealed: 5 }], [{ Revealed: 3 }]],
+          discard_tops: [3],
+          discard_sizes: [1],
+          deck_remaining: 100,
+          cumulative_scores: [0, 0],
+          going_out_player: null,
+          is_final_turn: false,
+          last_column_clears: [],
+        },
+        turn_deadline_secs: 30,
+        round_ready: [true, false],
+      };
+      const parsed = ServerMessageSchema.parse(msg);
+      if (parsed.type === 'GameState') {
+        expect(parsed.round_ready).toEqual([true, false]);
+      }
+    });
+
+    it('parses GameState without round_ready', () => {
+      const msg = {
+        type: 'GameState',
+        state: {
+          num_players: 2,
+          player_names: ['Alice', 'Bob'],
+          num_rows: 3,
+          num_cols: 4,
+          round_number: 0,
+          current_player: 0,
+          action_needed: { type: 'ChooseDraw', player: 0, drawable_piles: [0] },
+          boards: [[{ Revealed: 5 }], [{ Revealed: 3 }]],
+          discard_tops: [3],
+          discard_sizes: [1],
+          deck_remaining: 100,
+          cumulative_scores: [0, 0],
+          going_out_player: null,
+          is_final_turn: false,
+          last_column_clears: [],
+        },
+        turn_deadline_secs: null,
+      };
+      const parsed = ServerMessageSchema.parse(msg);
+      if (parsed.type === 'GameState') {
+        expect(parsed.round_ready).toBeUndefined();
+      }
     });
   });
 });

@@ -16,6 +16,9 @@ fn all_client_messages_json_round_trip() {
         ClientMessage::ReturnToLobby,
         ClientMessage::PlayAgain,
         ClientMessage::ContinueRound,
+        ClientMessage::ReadyForNextRound,
+        ClientMessage::SetReady { ready: true },
+        ClientMessage::SetReady { ready: false },
         ClientMessage::RequestFullState,
         ClientMessage::SetNumPlayers { num_players: 4 },
         ClientMessage::SetRules {
@@ -78,6 +81,9 @@ fn all_client_messages_msgpack_round_trip() {
         ClientMessage::ReturnToLobby,
         ClientMessage::PlayAgain,
         ClientMessage::ContinueRound,
+        ClientMessage::ReadyForNextRound,
+        ClientMessage::SetReady { ready: true },
+        ClientMessage::SetReady { ready: false },
         ClientMessage::RequestFullState,
         ClientMessage::SetNumPlayers { num_players: 4 },
         ClientMessage::SetRules {
@@ -135,6 +141,48 @@ fn all_server_messages_json_round_trip() {
         ServerMessage::Kicked {
             reason: "You were kicked by the room host".into(),
         },
+        ServerMessage::RoomState {
+            state: RoomLobbyState {
+                room_code: "ABCD".into(),
+                players: vec![
+                    LobbyPlayer {
+                        slot: 0,
+                        name: "Alice".into(),
+                        player_type: PlayerSlotType::Human,
+                        connected: true,
+                        ready: true,
+                        shares_ip_with_host: None,
+                        disconnect_secs: None,
+                        latency_ms: None,
+                        broadcast_lag_count: 0,
+                    },
+                    LobbyPlayer {
+                        slot: 1,
+                        name: "Bot (Random)".into(),
+                        player_type: PlayerSlotType::Bot {
+                            strategy: "Random".into(),
+                        },
+                        connected: false,
+                        ready: true,
+                        shares_ip_with_host: None,
+                        disconnect_secs: None,
+                        latency_ms: None,
+                        broadcast_lag_count: 0,
+                    },
+                ],
+                num_players: 2,
+                rules: "Standard".into(),
+                creator: 0,
+                available_strategies: vec!["Random".into()],
+                available_rules: vec!["Standard".into()],
+                idle_timeout_secs: Some(1800),
+                turn_timer_secs: Some(60),
+                disconnect_bot_timeout_secs: None,
+                last_winners: vec![],
+                genetic_games_trained: 0,
+                genetic_generation: 0,
+            },
+        },
     ];
 
     for msg in &messages {
@@ -169,6 +217,33 @@ fn all_server_messages_msgpack_round_trip() {
         },
         ServerMessage::Kicked {
             reason: "You were kicked by the room host".into(),
+        },
+        ServerMessage::RoomState {
+            state: RoomLobbyState {
+                room_code: "ABCD".into(),
+                players: vec![LobbyPlayer {
+                    slot: 0,
+                    name: "Alice".into(),
+                    player_type: PlayerSlotType::Human,
+                    connected: true,
+                    ready: false,
+                    shares_ip_with_host: None,
+                    disconnect_secs: None,
+                    latency_ms: None,
+                    broadcast_lag_count: 0,
+                }],
+                num_players: 2,
+                rules: "Standard".into(),
+                creator: 0,
+                available_strategies: vec![],
+                available_rules: vec!["Standard".into()],
+                idle_timeout_secs: None,
+                turn_timer_secs: None,
+                disconnect_bot_timeout_secs: None,
+                last_winners: vec![],
+                genetic_games_trained: 0,
+                genetic_generation: 0,
+            },
         },
     ];
 

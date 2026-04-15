@@ -80,9 +80,11 @@ pub async fn handle_ws(
             crate::room::RoomPhase::InGame => match room_guard.get_player_state(player_index) {
                 Ok(state) => {
                     let turn_deadline_secs = room_guard.turn_deadline_secs();
+                    let round_ready = room_guard.get_round_ready().cloned();
                     ServerMessage::GameState {
                         state,
                         turn_deadline_secs,
+                        round_ready,
                     }
                 }
                 Err(_) => ServerMessage::RoomState {
@@ -221,8 +223,9 @@ pub async fn handle_ws(
                         let room_guard = room.lock().await;
                         if let Ok(state) = room_guard.get_player_state(player_index) {
                             let turn_deadline_secs = room_guard.turn_deadline_secs();
+                            let round_ready = room_guard.get_round_ready().cloned();
                             drop(room_guard);
-                            send_msg(&mut ws_tx, &ServerMessage::GameState { state, turn_deadline_secs }, wire_format).await;
+                            send_msg(&mut ws_tx, &ServerMessage::GameState { state, turn_deadline_secs, round_ready }, wire_format).await;
                         }
                     }
                     Err(broadcast::error::RecvError::Closed) => {
@@ -388,9 +391,11 @@ async fn handle_parsed_message(
             match room_guard.get_player_state(player_index) {
                 Ok(state) => {
                     let turn_deadline_secs = room_guard.turn_deadline_secs();
+                    let round_ready = room_guard.get_round_ready().cloned();
                     Some(ServerMessage::GameState {
                         state,
                         turn_deadline_secs,
+                        round_ready,
                     })
                 }
                 Err(e) => Some(error_msg(e)),
@@ -648,34 +653,20 @@ async fn handle_parsed_message(
             }
         }
 
-        ClientMessage::ContinueRound => {
+        ClientMessage::SetReady { ready } => {
             let mut room_guard = room.lock().await;
 
-            match room_guard.continue_round() {
+            match room_guard.set_ready(player_index, ready) {
                 Ok(()) => {
-                    room_guard.broadcast_game_state();
-
-                    // Schedule bot turns if the first player of the new round is a bot
-                    if room_guard.is_current_player_bot() {
-                        drop(room_guard);
-                        let room_clone = room.clone();
-                        let persistence_clone = state.persistence.clone();
-                        tokio::spawn(async move {
-                            run_bot_turns_with_persistence(room_clone, Some(persistence_clone))
-                                .await;
-                        });
-                    } else {
-                        drop(room_guard);
-                        schedule_turn_timeout_with_persistence(
-                            room.clone(),
-                            Some(state.persistence.clone()),
-                        );
-                    }
-
+                    room_guard.broadcast_lobby_state();
                     None
                 }
                 Err(e) => Some(error_msg(e)),
             }
+        }
+
+        ClientMessage::ReadyForNextRound | ClientMessage::ContinueRound => {
+            handle_round_ready(player_index, state, room).await
         }
 
         ClientMessage::PlayAgain => {
@@ -753,6 +744,52 @@ async fn handle_parsed_message(
                 Err(e) => Some(error_msg(e)),
             }
         }
+    }
+}
+
+/// Handle a player signaling readiness for the next round.
+/// Shared by `ReadyForNextRound` and `ContinueRound` (backward compat).
+async fn handle_round_ready(
+    player_index: usize,
+    state: &Arc<AppStateInner>,
+    room: &SharedRoom,
+) -> Option<ServerMessage> {
+    let mut room_guard = room.lock().await;
+
+    match room_guard.set_round_ready(player_index) {
+        Ok(all_ready) => {
+            if all_ready {
+                match room_guard.continue_round() {
+                    Ok(()) => {
+                        room_guard.broadcast_game_state();
+
+                        if room_guard.is_current_player_bot() {
+                            drop(room_guard);
+                            let room_clone = room.clone();
+                            let persistence_clone = state.persistence.clone();
+                            tokio::spawn(async move {
+                                run_bot_turns_with_persistence(room_clone, Some(persistence_clone))
+                                    .await;
+                            });
+                        } else {
+                            drop(room_guard);
+                            schedule_turn_timeout_with_persistence(
+                                room.clone(),
+                                Some(state.persistence.clone()),
+                            );
+                        }
+
+                        None
+                    }
+                    Err(e) => Some(error_msg(e)),
+                }
+            } else {
+                // Not all ready yet — broadcast updated round_ready state
+                room_guard.broadcast_game_state();
+                None
+            }
+        }
+        Err(e) => Some(error_msg(e)),
     }
 }
 

@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use skyjo_server::messages::PlayerSlotType;
 use skyjo_server::persistence::Persistence;
-use skyjo_server::room::{Room, RoomPhase};
+use skyjo_server::room::{PlayerSlot, Room, RoomPhase};
 use skyjo_server::session::SessionToken;
 
 // ========================================================================
@@ -112,6 +112,9 @@ fn convert_disconnected_to_bot_preserves_integrity() {
     room.players[1].connected = false;
     room.players[1].disconnected_at = Some(Instant::now() - Duration::from_secs(120));
 
+    // Ready up players before starting
+    room.players[1].ready = true;
+
     // Start game (need all slots filled as human or bot)
     room.start_game().unwrap();
     assert_eq!(room.phase, RoomPhase::InGame);
@@ -145,6 +148,9 @@ fn reconnect_bot_to_human_restores_player() {
     room.players[1].session_token = Some(SessionToken::new());
     room.players[1].connected = false;
     room.players[1].disconnected_at = Some(Instant::now() - Duration::from_secs(120));
+
+    // Ready up players before starting
+    room.players[1].ready = true;
 
     // Start game
     room.start_game().unwrap();
@@ -287,4 +293,82 @@ fn snapshot_preserves_turn_timer_and_disconnect_timeout() {
     let restored = Room::from_snapshot(snapshot);
     assert_eq!(restored.turn_timer_secs, Some(30));
     assert_eq!(restored.disconnect_bot_timeout_secs, Some(120));
+}
+
+// ========================================================================
+// Ready state resilience
+// ========================================================================
+
+#[test]
+fn ready_state_resets_on_snapshot_restore() {
+    // Ready state is not persisted in snapshots — restored rooms start with ready=false
+    let mut room = test_room();
+    room.players[1] = PlayerSlot {
+        name: "Bob".to_string(),
+        slot_type: PlayerSlotType::Human,
+        session_token: Some(SessionToken::new()),
+        connected: true,
+        ip: None,
+        disconnected_at: None,
+        was_human: false,
+        latency_ms: None,
+        broadcast_lag_count: 0,
+        user_id: None,
+        ready: true,
+    };
+
+    let snapshot = room.to_snapshot();
+    let restored = Room::from_snapshot(snapshot);
+    // Restored players should have ready=false (default)
+    assert!(!restored.players[0].ready);
+    assert!(!restored.players[1].ready);
+    assert!(restored.round_ready.is_empty());
+}
+
+#[test]
+fn ready_state_preserved_through_bot_conversion_and_rejoin() {
+    let mut room = Room::new("READY".to_string(), "Alice".to_string(), 3, None, 0, 0);
+    room.players[1] = PlayerSlot {
+        name: "Bob".to_string(),
+        slot_type: PlayerSlotType::Human,
+        session_token: Some(SessionToken::new()),
+        connected: true,
+        ip: None,
+        disconnected_at: None,
+        was_human: false,
+        latency_ms: None,
+        broadcast_lag_count: 0,
+        user_id: None,
+        ready: true,
+    };
+    room.players[2] = PlayerSlot {
+        name: "Charlie".to_string(),
+        slot_type: PlayerSlotType::Human,
+        session_token: Some(SessionToken::new()),
+        connected: true,
+        ip: None,
+        disconnected_at: None,
+        was_human: false,
+        latency_ms: None,
+        broadcast_lag_count: 0,
+        user_id: None,
+        ready: true,
+    };
+
+    // Start game (all ready)
+    room.start_game().unwrap();
+    assert_eq!(room.phase, RoomPhase::InGame);
+
+    // Disconnect player 1 and convert to bot
+    room.players[1].connected = false;
+    room.players[1].disconnected_at = Some(Instant::now() - Duration::from_secs(300));
+    let converted = room.convert_disconnected_to_bots(Duration::from_secs(60));
+    assert_eq!(converted, vec![1]);
+
+    // Rejoin: bot → human
+    let reconverted = room.reconnect_bot_to_human(1);
+    assert!(reconverted);
+    assert_eq!(room.players[1].slot_type, PlayerSlotType::Human);
+    // ready state is still true (was set before game start)
+    assert!(room.players[1].ready);
 }

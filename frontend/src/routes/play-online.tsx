@@ -210,6 +210,7 @@ export default function PlayOnlineRoute() {
           onBanPlayer={game.banPlayer}
           onPromoteHost={game.promoteHost}
           onStartGame={game.startGame}
+          onSetReady={game.setReady}
           onLeave={handleLeave}
         />
       )}
@@ -221,11 +222,12 @@ export default function PlayOnlineRoute() {
           turnDeadlineSecs={game.turnDeadlineSecs}
           wasTimeout={game.wasTimeout}
           onAction={game.applyAction}
-          onContinueRound={game.continueRound}
+          onContinueRound={game.readyForNextRound}
           onPlayAgain={game.playAgain}
           onReturnToLobby={game.returnToLobby}
           onLeave={handleLeave}
           pendingClearColumns={game.pendingClearColumns}
+          roundReady={game.roundReady}
         />
       )}
     </div>
@@ -534,6 +536,7 @@ function Lobby({
   onBanPlayer,
   onPromoteHost,
   onStartGame,
+  onSetReady,
   onLeave,
 }: {
   state: RoomLobbyState;
@@ -546,6 +549,7 @@ function Lobby({
   onBanPlayer: (slot: number) => void;
   onPromoteHost: (slot: number) => void;
   onStartGame: () => void;
+  onSetReady: (ready: boolean) => void;
   onLeave: () => void;
 }) {
   const isCreator = playerIndex === state.creator;
@@ -553,7 +557,8 @@ function Lobby({
   const hasDisconnectedHuman = state.players.some(
     p => p.player_type.kind === 'Human' && !p.connected
   );
-  const cantStart = hasEmptySlots || hasDisconnectedHuman;
+  const notAllReady = state.players.some(p => p.player_type.kind !== 'Empty' && !p.ready);
+  const cantStart = hasEmptySlots || hasDisconnectedHuman || notAllReady;
   const [banConfirmSlot, setBanConfirmSlot] = useState<number | null>(null);
 
   return (
@@ -644,8 +649,14 @@ function Lobby({
                 'w-2 h-2 rounded-full shrink-0',
                 player.player_type.kind === 'Bot' ? 'bg-blue-500' :
                 player.player_type.kind === 'Empty' ? 'bg-gray-300' :
-                player.connected ? 'bg-green-500' : 'bg-red-500',
-              )} />
+                !player.connected ? 'bg-red-500' :
+                player.ready ? 'bg-green-500' : 'bg-purple-500',
+              )} title={
+                player.player_type.kind === 'Bot' ? 'Bot' :
+                player.player_type.kind === 'Empty' ? 'Empty slot' :
+                !player.connected ? 'Disconnected' :
+                player.ready ? 'Ready' : 'Not ready'
+              } />
 
               <span className="flex-1 text-sm min-w-0 flex items-center gap-1 flex-wrap">
                 {player.player_type.kind === 'Empty' ? (
@@ -736,6 +747,22 @@ function Lobby({
           ))}
         </div>
 
+        {/* Ready toggle for non-host human players */}
+        {!isCreator && state.players[playerIndex]?.player_type.kind === 'Human' && (
+          <div className="flex justify-center">
+            <Button
+              variant={state.players[playerIndex].ready ? 'default' : 'outline'}
+              className={cn(
+                'w-full',
+                state.players[playerIndex].ready && 'bg-green-600 hover:bg-green-700',
+              )}
+              onClick={() => onSetReady(!state.players[playerIndex].ready)}
+            >
+              {state.players[playerIndex].ready ? '✓ Ready' : 'Ready Up'}
+            </Button>
+          </div>
+        )}
+
         <div className="flex gap-2">
           <Button variant="outline" onClick={onLeave}>Leave</Button>
           {isCreator && (
@@ -746,11 +773,13 @@ function Lobby({
               title={
                 hasEmptySlots ? 'Fill empty slots with bots or wait for players' :
                 hasDisconnectedHuman ? 'A player is disconnected — wait for them or kick/replace' :
+                notAllReady ? 'Waiting for all players to ready up' :
                 undefined
               }
             >
               {hasEmptySlots ? 'Fill all slots to start' :
                hasDisconnectedHuman ? 'Waiting for players to connect' :
+               notAllReady ? 'Waiting for players to ready up' :
                'Start Game'}
             </Button>
           )}
@@ -853,6 +882,7 @@ function OnlinePlayBoard({
   onReturnToLobby,
   onLeave,
   pendingClearColumns,
+  roundReady,
 }: {
   state: InteractiveGameState;
   playerIndex: number;
@@ -864,6 +894,7 @@ function OnlinePlayBoard({
   onReturnToLobby: () => void;
   onLeave: () => void;
   pendingClearColumns: PendingColumnClear[] | null;
+  roundReady: boolean[] | null;
 }) {
   const { action_needed, boards, num_rows, num_cols, current_player } = state;
   const [wantsFlip, setWantsFlip] = useState(false);
@@ -895,6 +926,8 @@ function OnlinePlayBoard({
         state={state}
         actionNeeded={action_needed}
         onContinue={onContinueRound}
+        roundReady={roundReady}
+        playerIndex={playerIndex}
       />
     );
   }
@@ -1296,12 +1329,19 @@ function OnlineRoundSummary({
   state,
   actionNeeded,
   onContinue,
+  roundReady,
+  playerIndex,
 }: {
   state: InteractiveGameState;
   actionNeeded: ActionNeeded & { type: 'RoundOver' };
   onContinue: () => void;
+  roundReady: boolean[] | null;
+  playerIndex: number;
 }) {
   const { round_scores, raw_round_scores, cumulative_scores, going_out_player, end_of_round_clears } = actionNeeded;
+  const isPlayerReady = roundReady?.[playerIndex] ?? false;
+  const readyCount = roundReady?.filter(Boolean).length ?? 0;
+  const totalPlayers = roundReady?.length ?? state.player_names.length;
 
   return (
     <Card>
@@ -1328,10 +1368,18 @@ function OnlineRoundSummary({
                 playerIdx === going_out_player && 'border-orange-400 border-2'
               )}
             >
-              <h4 className="text-sm font-medium mb-2">
+              <h4 className="text-sm font-medium mb-2 flex items-center gap-1">
                 {getPlayerName(state, playerIdx)}
                 {playerIdx === going_out_player && (
-                  <span className="text-xs text-orange-500 ml-1">(went out)</span>
+                  <span className="text-xs text-orange-500">(went out)</span>
+                )}
+                {roundReady && (
+                  <span className={cn(
+                    'ml-auto text-xs',
+                    roundReady[playerIdx] ? 'text-green-600' : 'text-muted-foreground',
+                  )}>
+                    {roundReady[playerIdx] ? '✓' : '…'}
+                  </span>
                 )}
               </h4>
               <div
@@ -1383,7 +1431,19 @@ function OnlineRoundSummary({
           </table>
         </div>
 
-        <Button onClick={onContinue} className="w-full">Next Round</Button>
+        {roundReady && (
+          <p className="text-xs text-center text-muted-foreground">
+            {readyCount}/{totalPlayers} players ready
+          </p>
+        )}
+
+        <Button
+          onClick={onContinue}
+          className={cn('w-full', isPlayerReady && 'bg-green-600 hover:bg-green-700')}
+          disabled={isPlayerReady}
+        >
+          {isPlayerReady ? '✓ Waiting for others...' : 'Ready for Next Round'}
+        </Button>
       </CardContent>
     </Card>
   );

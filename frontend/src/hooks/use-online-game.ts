@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { InteractiveGameState, PlayerAction } from '@/types';
-import { ServerMessageSchema } from '@/schemas';
+import {
+  ServerMessageSchema,
+  RoomLobbyStateSchema,
+  LobbyPlayerSchema,
+  PlayerSlotTypeSchema,
+} from '@/schemas';
 import type { PendingColumnClear } from './use-interactive-game';
 import { useAuth } from '@/contexts/auth-context';
 import type { z } from 'zod';
@@ -38,34 +43,9 @@ function buildPreClearState(state: InteractiveGameState): InteractiveGameState {
   return { ...state, boards, last_column_clears: [] };
 }
 
-export interface RoomLobbyState {
-  room_code: string;
-  players: LobbyPlayer[];
-  num_players: number;
-  rules: string;
-  creator: number;
-  available_strategies: string[];
-  available_rules: string[];
-  idle_timeout_secs: number | null;
-  turn_timer_secs: number | null;
-  last_winners: number[];
-  genetic_games_trained: number;
-  genetic_generation: number;
-}
-
-export interface LobbyPlayer {
-  slot: number;
-  name: string;
-  player_type: PlayerSlotType;
-  connected: boolean;
-  shares_ip_with_host?: boolean;
-  disconnect_secs?: number;
-}
-
-export type PlayerSlotType =
-  | { kind: 'Human' }
-  | { kind: 'Bot'; strategy: string }
-  | { kind: 'Empty' };
+export type RoomLobbyState = z.infer<typeof RoomLobbyStateSchema>;
+export type LobbyPlayer = z.infer<typeof LobbyPlayerSchema>;
+export type PlayerSlotType = z.infer<typeof PlayerSlotTypeSchema>;
 
 type ServerMessage = z.infer<typeof ServerMessageSchema>;
 
@@ -80,6 +60,7 @@ interface UseOnlineGameReturn {
   kicked: boolean;
   sessionExpired: boolean;
   pendingClearColumns: PendingColumnClear[] | null;
+  roundReady: boolean[] | null;
   applyAction: (action: PlayerAction) => void;
   configureSlot: (slot: number, playerType: string) => void;
   setNumPlayers: (numPlayers: number) => void;
@@ -90,6 +71,8 @@ interface UseOnlineGameReturn {
   promoteHost: (slot: number) => void;
   startGame: () => void;
   continueRound: () => void;
+  readyForNextRound: () => void;
+  setReady: (ready: boolean) => void;
   playAgain: () => void;
   returnToLobby: () => void;
   disconnect: () => void;
@@ -109,6 +92,7 @@ export function useOnlineGame(
   const [kicked, setKicked] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
   const [pendingClearColumns, setPendingClearColumns] = useState<PendingColumnClear[] | null>(null);
+  const [roundReady, setRoundReady] = useState<boolean[] | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const reconnectAttemptRef = useRef(0);
@@ -205,6 +189,7 @@ export function useOnlineGame(
             case 'RoomState':
               setRoomState(msg.state);
               setGameState(null);
+              setRoundReady(null);
               break;
             case 'GameState':
               if (pendingClearTimeoutRef.current) {
@@ -214,10 +199,12 @@ export function useOnlineGame(
               setPendingClearColumns(null);
               setGameState(msg.state);
               setTurnDeadlineSecs(msg.turn_deadline_secs ?? null);
+              setRoundReady(msg.round_ready ?? null);
               setWasTimeout(false);
               break;
             case 'ActionApplied':
             case 'BotAction': {
+              setRoundReady(msg.round_ready ?? null);
               const isFlipClear = msg.action.type === 'DiscardAndFlip' && msg.state.last_column_clears.length > 0;
               if (isFlipClear) {
                 const preClearState = buildPreClearState(msg.state);
@@ -243,6 +230,7 @@ export function useOnlineGame(
               break;
             }
             case 'TimeoutAction': {
+              setRoundReady(msg.round_ready ?? null);
               const isFlipClearTimeout = msg.action.type === 'DiscardAndFlip' && msg.state.last_column_clears.length > 0;
               if (isFlipClearTimeout) {
                 const preClearState = buildPreClearState(msg.state);
@@ -448,6 +436,14 @@ export function useOnlineGame(
     send({ type: 'ContinueRound' });
   }, [send]);
 
+  const readyForNextRound = useCallback(() => {
+    send({ type: 'ReadyForNextRound' });
+  }, [send]);
+
+  const setReady = useCallback((ready: boolean) => {
+    send({ type: 'SetReady', ready });
+  }, [send]);
+
   const playAgain = useCallback(() => {
     send({ type: 'PlayAgain' });
   }, [send]);
@@ -477,6 +473,7 @@ export function useOnlineGame(
     setKicked(false);
     setSessionExpired(false);
     setPendingClearColumns(null);
+    setRoundReady(null);
   }, []);
 
   return {
@@ -490,6 +487,7 @@ export function useOnlineGame(
     kicked,
     sessionExpired,
     pendingClearColumns,
+    roundReady,
     applyAction,
     configureSlot,
     setNumPlayers,
@@ -500,6 +498,8 @@ export function useOnlineGame(
     promoteHost,
     startGame,
     continueRound,
+    readyForNextRound,
+    setReady,
     playAgain,
     returnToLobby,
     disconnect,

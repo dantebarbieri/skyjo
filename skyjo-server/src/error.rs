@@ -32,6 +32,7 @@ pub enum ServerError {
     GameNotStarted,
     GameAlreadyStarted,
     NotAllSlotsFilled,
+    NotAllReady,
 
     // Action errors
     InvalidAction(String),
@@ -93,6 +94,7 @@ impl ServerError {
             Self::GameNotStarted => "Game has not started".into(),
             Self::GameAlreadyStarted => "Game has already started".into(),
             Self::NotAllSlotsFilled => "Not all player slots are filled".into(),
+            Self::NotAllReady => "All players must be ready to start".into(),
             Self::InvalidAction(msg) => format!("Invalid action: {msg}"),
             Self::InvalidPosition(p) => format!("Invalid position: {p}"),
             Self::NotHost => "Only the host can perform this action".into(),
@@ -171,6 +173,10 @@ mod tests {
             ServerError::GameNotFound.status_code(),
             StatusCode::NOT_FOUND
         );
+        assert_eq!(
+            ServerError::NotAllReady.status_code(),
+            StatusCode::BAD_REQUEST
+        );
     }
 
     #[test]
@@ -184,6 +190,8 @@ mod tests {
             ServerError::RateLimited,
             ServerError::PlayerNameTooLong,
             ServerError::InvalidAction("test".into()),
+            ServerError::NotAllReady,
+            ServerError::NotAllSlotsFilled,
         ];
         for err in errors {
             assert!(!err.message().is_empty(), "Empty message for {:?}", err);
@@ -193,6 +201,13 @@ mod tests {
     #[test]
     fn error_display_matches_message() {
         let err = ServerError::RoomNotFound;
+        assert_eq!(format!("{err}"), err.message());
+    }
+
+    #[test]
+    fn not_all_ready_error_has_descriptive_message() {
+        let err = ServerError::NotAllReady;
+        assert!(err.message().contains("ready"));
         assert_eq!(format!("{err}"), err.message());
     }
 }
