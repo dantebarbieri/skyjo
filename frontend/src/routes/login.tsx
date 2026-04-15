@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
 
 export default function LoginRoute() {
-  const { login, isAuthenticated } = useAuth();
+  const { login, isAuthenticated, backendAvailable } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [username, setUsername] = useState('');
@@ -18,6 +18,15 @@ export default function LoginRoute() {
   const from = (location.state as { from?: string })?.from || '/';
   if (isAuthenticated) {
     return <Navigate to={from} replace />;
+  }
+
+  if (!backendAvailable) {
+    return (
+      <div className="text-center py-12 text-muted-foreground">
+        <p className="text-lg font-medium mb-2">Server unavailable</p>
+        <p>Sign in requires a connection to the game server. Simulation and local play are still available.</p>
+      </div>
+    );
   }
 
   const handleSubmit = async (e: FormEvent) => {

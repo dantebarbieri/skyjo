@@ -24,6 +24,8 @@ interface AuthState {
   isAuthenticated: boolean;
   isLoading: boolean;
   needsSetup: boolean;
+  /** Whether the backend server is reachable. Starts `true` (optimistic); set `false` on network error. */
+  backendAvailable: boolean;
   login: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<boolean>;
@@ -39,6 +41,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [needsSetup, setNeedsSetup] = useState(false);
+  const [backendAvailable, setBackendAvailable] = useState(true);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const scheduleRefresh = useCallback((token: string) => {
@@ -131,6 +134,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async function init() {
       try {
         const setupRes = await fetch('/api/auth/setup-status');
+        setBackendAvailable(true);
         if (setupRes.ok) {
           const { needs_setup } = await setupRes.json();
           setNeedsSetup(needs_setup);
@@ -139,8 +143,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             return;
           }
         }
-      } catch {
-        // Server may be unreachable — proceed without setup check
+      } catch (err) {
+        // Network error (TypeError from fetch) — enter offline mode
+        if (err instanceof TypeError) {
+          setBackendAvailable(false);
+          setIsLoading(false);
+          return;
+        }
+        // Other errors (e.g. JSON parse) — backend may still be reachable
       }
       await refresh();
       setIsLoading(false);
@@ -158,6 +168,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isAuthenticated: user !== null,
         isLoading,
         needsSetup,
+        backendAvailable,
         login,
         logout,
         refresh,

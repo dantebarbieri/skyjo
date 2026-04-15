@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
 
 export default function SetupRoute() {
-  const { refresh, needsSetup, isLoading } = useAuth();
+  const { refresh, needsSetup, isLoading, backendAvailable } = useAuth();
   const navigate = useNavigate();
   const [username, setUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
@@ -15,9 +15,18 @@ export default function SetupRoute() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // Redirect away if setup is already complete
-  if (!isLoading && !needsSetup) {
+  // Redirect away if setup is already complete (only when backend confirms)
+  if (!isLoading && backendAvailable && !needsSetup) {
     return <Navigate to="/" replace />;
+  }
+
+  if (!backendAvailable) {
+    return (
+      <div className="text-center py-12 text-muted-foreground">
+        <p className="text-lg font-medium mb-2">Server unavailable</p>
+        <p>Initial setup requires a connection to the game server. Simulation and local play are still available.</p>
+      </div>
+    );
   }
 
   const handleSubmit = async (e: FormEvent) => {

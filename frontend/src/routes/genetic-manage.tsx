@@ -22,7 +22,7 @@ const API_BASE = '/api';
 
 export default function GeneticManageRoute() {
   useDocumentTitle('Manage Genetic Generations');
-  const { user, isAuthenticated, isLoading } = useAuth();
+  const { user, isAuthenticated, isLoading, backendAvailable } = useAuth();
 
   const [model, setModel] = useState<GeneticModelData | null>(null);
   const [saved, setSaved] = useState<SavedGenerationInfo[]>([]);
@@ -36,6 +36,15 @@ export default function GeneticManageRoute() {
       fetchAll();
     }
   }, [isLoading, isAuthenticated]);
+
+  if (!backendAvailable) {
+    return (
+      <div className="text-center py-12 text-muted-foreground">
+        <p className="text-lg font-medium mb-2">Server unavailable</p>
+        <p>Genetic model management requires a connection to the game server.</p>
+      </div>
+    );
+  }
 
   // Auth gate: require moderator or admin (after all hooks)
   if (!isLoading && (!isAuthenticated || !user || (user.permission !== 'admin' && user.permission !== 'moderator'))) {
