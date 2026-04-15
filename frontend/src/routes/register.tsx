@@ -1,12 +1,12 @@
 import { useState, type FormEvent } from 'react';
-import { Navigate, useNavigate } from 'react-router-dom';
+import { Navigate, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/auth-context';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
 
-export default function SetupRoute() {
-  const { refresh, needsSetup, isLoading, backendAvailable } = useAuth();
+export default function RegisterRoute() {
+  const { refresh, registrationEnabled, isAuthenticated, isLoading, backendAvailable } = useAuth();
   const navigate = useNavigate();
   const [username, setUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
@@ -15,8 +15,7 @@ export default function SetupRoute() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // Redirect away if setup is already complete (only when backend confirms)
-  if (!isLoading && backendAvailable && !needsSetup) {
+  if (!isLoading && isAuthenticated) {
     return <Navigate to="/" replace />;
   }
 
@@ -24,10 +23,24 @@ export default function SetupRoute() {
     return (
       <div className="text-center py-12 text-muted-foreground">
         <p className="text-lg font-medium mb-2">Server unavailable</p>
-        <p>Initial setup requires a connection to the game server. Simulation and local play are still available.</p>
+        <p>Registration requires a connection to the game server.</p>
       </div>
     );
   }
+
+  if (!isLoading && !registrationEnabled) {
+    return (
+      <div className="text-center py-12 text-muted-foreground">
+        <p className="text-lg font-medium mb-2">Registration is disabled</p>
+        <p>Public registration has not been enabled by the administrator.</p>
+        <Link to="/login" className="text-primary underline mt-4 inline-block">
+          Sign in instead
+        </Link>
+      </div>
+    );
+  }
+
+  const passwordsMatch = !confirmPassword || password === confirmPassword;
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -44,7 +57,7 @@ export default function SetupRoute() {
 
     setLoading(true);
     try {
-      const res = await fetch('/api/auth/setup', {
+      const res = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
@@ -58,14 +71,13 @@ export default function SetupRoute() {
 
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        throw new Error(body?.error?.message || 'Setup failed');
+        throw new Error(body?.error?.message || 'Registration failed');
       }
 
-      // The setup endpoint auto-logs us in (sets cookies + returns tokens)
       await refresh();
       navigate('/', { replace: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Setup failed');
+      setError(err instanceof Error ? err.message : 'Registration failed');
     } finally {
       setLoading(false);
     }
@@ -76,18 +88,18 @@ export default function SetupRoute() {
       <Card className="w-full max-w-md">
         <CardContent className="pt-6">
           <div className="text-center mb-6">
-            <h1 className="text-2xl font-bold">Welcome to Skyjo</h1>
+            <h1 className="text-2xl font-bold">Create Account</h1>
             <p className="text-sm text-muted-foreground mt-2">
-              Create the administrator account to get started.
+              Sign up to track your games on the leaderboard.
             </p>
           </div>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="text-sm font-medium" htmlFor="setup-username">
+              <label className="text-sm font-medium" htmlFor="reg-username">
                 Username
               </label>
               <Input
-                id="setup-username"
+                id="reg-username"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 autoComplete="username"
@@ -96,22 +108,22 @@ export default function SetupRoute() {
               />
             </div>
             <div>
-              <label className="text-sm font-medium" htmlFor="setup-display">
+              <label className="text-sm font-medium" htmlFor="reg-display">
                 Display Name <span className="text-muted-foreground font-normal">(optional)</span>
               </label>
               <Input
-                id="setup-display"
+                id="reg-display"
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
                 placeholder={username || 'Same as username'}
               />
             </div>
             <div>
-              <label className="text-sm font-medium" htmlFor="setup-password">
+              <label className="text-sm font-medium" htmlFor="reg-password">
                 Password
               </label>
               <Input
-                id="setup-password"
+                id="reg-password"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -121,11 +133,11 @@ export default function SetupRoute() {
               />
             </div>
             <div>
-              <label className="text-sm font-medium" htmlFor="setup-confirm">
+              <label className="text-sm font-medium" htmlFor="reg-confirm">
                 Confirm Password
               </label>
               <Input
-                id="setup-confirm"
+                id="reg-confirm"
                 type="password"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
@@ -133,16 +145,22 @@ export default function SetupRoute() {
                 required
                 minLength={8}
               />
-              {confirmPassword && password !== confirmPassword && (
+              {!passwordsMatch && (
                 <p className="text-sm text-destructive mt-1">Passwords do not match</p>
               )}
             </div>
             {error && (
               <p className="text-sm text-destructive">{error}</p>
             )}
-            <Button type="submit" className="w-full" disabled={loading || (!!confirmPassword && password !== confirmPassword)}>
-              {loading ? 'Creating account...' : 'Create Admin Account'}
+            <Button type="submit" className="w-full" disabled={loading || !passwordsMatch}>
+              {loading ? 'Creating account...' : 'Create Account'}
             </Button>
+            <p className="text-sm text-center text-muted-foreground">
+              Already have an account?{' '}
+              <Link to="/login" className="text-primary underline">
+                Sign in
+              </Link>
+            </p>
           </form>
         </CardContent>
       </Card>

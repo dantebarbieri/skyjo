@@ -24,6 +24,7 @@ interface AuthState {
   isAuthenticated: boolean;
   isLoading: boolean;
   needsSetup: boolean;
+  registrationEnabled: boolean;
   /** Whether the backend server is reachable. Starts `true` (optimistic); set `false` on network error. */
   backendAvailable: boolean;
   login: (username: string, password: string) => Promise<void>;
@@ -41,6 +42,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [needsSetup, setNeedsSetup] = useState(false);
+  const [registrationEnabled, setRegistrationEnabled] = useState(false);
   const [backendAvailable, setBackendAvailable] = useState(true);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -136,8 +138,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const setupRes = await fetch('/api/auth/setup-status');
         setBackendAvailable(true);
         if (setupRes.ok) {
-          const { needs_setup } = await setupRes.json();
+          const { needs_setup, registration_enabled } = await setupRes.json();
           setNeedsSetup(needs_setup);
+          setRegistrationEnabled(registration_enabled ?? false);
           if (needs_setup) {
             setIsLoading(false);
             return;
@@ -168,6 +171,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isAuthenticated: user !== null,
         isLoading,
         needsSetup,
+        registrationEnabled,
         backendAvailable,
         login,
         logout,

@@ -264,6 +264,7 @@ async fn main() {
         .route("/auth/logout", post(auth_logout))
         .route("/auth/setup-status", get(auth_setup_status))
         .route("/auth/setup", post(auth_setup))
+        .route("/auth/register", post(auth_register))
         .route(
             "/auth/me",
             get(auth_me).layer(axum::middleware::from_fn_with_state(
@@ -904,14 +905,19 @@ async fn auth_me(Extension(user): Extension<AuthUser>) -> Json<UserInfo> {
 #[derive(Serialize)]
 struct SetupStatus {
     needs_setup: bool,
+    registration_enabled: bool,
 }
 
 async fn auth_setup_status(
     State(state): State<AppState>,
 ) -> Result<Json<SetupStatus>, ServerError> {
     let count = auth::user_count(state.persistence.pool()).await?;
+    let reg = auth::get_app_setting(state.persistence.pool(), "registration_enabled")
+        .await?
+        .unwrap_or_else(|| "false".to_string());
     Ok(Json(SetupStatus {
         needs_setup: count == 0,
+        registration_enabled: reg == "true",
     }))
 }
 
@@ -971,6 +977,80 @@ async fn auth_setup(
     tracing::info!("Setup complete: created admin account '{}'", user.username);
 
     // Auto-login the new admin
+    let access_token = auth::create_access_token(&user, &state.jwt_secret)?;
+    let refresh_token = auth::generate_refresh_token();
+    let token_hash = auth::hash_refresh_token(&refresh_token);
+    let expires_at = auth::refresh_token_expiry();
+    auth::store_refresh_token(state.persistence.pool(), user.id, &token_hash, expires_at).await?;
+
+    let body = LoginResponse {
+        access_token,
+        user: UserInfo::from(&user),
+    };
+
+    let secure = is_secure_request(&req_headers);
+    let mut response = Json(body).into_response();
+    let cookie = refresh_cookie(&refresh_token, 7 * 24 * 60 * 60, secure);
+    response
+        .headers_mut()
+        .insert(header::SET_COOKIE, HeaderValue::from_str(&cookie).unwrap());
+    Ok(response)
+}
+
+#[derive(Deserialize)]
+struct RegisterRequest {
+    username: String,
+    password: String,
+    confirm_password: String,
+    display_name: Option<String>,
+}
+
+async fn auth_register(
+    State(state): State<AppState>,
+    req_headers: axum::http::HeaderMap,
+    Json(req): Json<RegisterRequest>,
+) -> Result<Response, ServerError> {
+    // Check if registration is enabled
+    let reg = auth::get_app_setting(state.persistence.pool(), "registration_enabled")
+        .await?
+        .unwrap_or_else(|| "false".to_string());
+    if reg != "true" {
+        return Err(ServerError::InvalidAction(
+            "Public registration is not enabled".to_string(),
+        ));
+    }
+
+    let username = req.username.trim().to_string();
+    if username.is_empty() {
+        return Err(ServerError::InvalidAction(
+            "Username cannot be empty".to_string(),
+        ));
+    }
+    if req.password.len() < 8 {
+        return Err(ServerError::InvalidAction(
+            "Password must be at least 8 characters".to_string(),
+        ));
+    }
+    if req.password != req.confirm_password {
+        return Err(ServerError::InvalidAction(
+            "Passwords do not match".to_string(),
+        ));
+    }
+
+    let display_name = req.display_name.unwrap_or_else(|| username.clone());
+
+    let user = auth::create_user(
+        state.persistence.pool(),
+        &username,
+        &req.password,
+        &display_name,
+        PermissionLevel::User,
+    )
+    .await?;
+
+    tracing::info!("New user registered: '{}'", user.username);
+
+    // Auto-login the new user
     let access_token = auth::create_access_token(&user, &state.jwt_secret)?;
     let refresh_token = auth::generate_refresh_token();
     let token_hash = auth::hash_refresh_token(&refresh_token);
