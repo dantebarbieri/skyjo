@@ -51,6 +51,7 @@ export default function SetupRoute() {
         body: JSON.stringify({
           username,
           password,
+          confirm_password: confirmPassword,
           display_name: displayName || undefined,
         }),
       });
@@ -130,6 +131,7 @@ export default function SetupRoute() {
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 autoComplete="new-password"
                 required
+                minLength={8}
               />
             </div>
             {error && (

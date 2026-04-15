@@ -880,6 +880,7 @@ async fn auth_setup_status(
 struct SetupRequest {
     username: String,
     password: String,
+    confirm_password: String,
     display_name: Option<String>,
 }
 
@@ -905,6 +906,11 @@ async fn auth_setup(
     if req.password.len() < 8 {
         return Err(ServerError::InvalidAction(
             "Password must be at least 8 characters".to_string(),
+        ));
+    }
+    if req.password != req.confirm_password {
+        return Err(ServerError::InvalidAction(
+            "Passwords do not match".to_string(),
         ));
     }
 
@@ -1122,6 +1128,7 @@ async fn admin_update_settings(
 struct UpdatePasswordRequest {
     current_password: String,
     new_password: String,
+    confirm_password: String,
 }
 
 async fn update_my_password(
@@ -1142,6 +1149,11 @@ async fn update_my_password(
     if req.new_password.len() < 8 {
         return Err(ServerError::InvalidAction(
             "New password must be at least 8 characters".to_string(),
+        ));
+    }
+    if req.new_password != req.confirm_password {
+        return Err(ServerError::InvalidAction(
+            "Passwords do not match".to_string(),
         ));
     }
 
