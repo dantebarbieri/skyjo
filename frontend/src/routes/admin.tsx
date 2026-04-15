@@ -21,7 +21,7 @@ interface AppSettings {
 }
 
 export default function AdminRoute() {
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, backendAvailable } = useAuth();
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [newUsername, setNewUsername] = useState('');
@@ -30,6 +30,15 @@ export default function AdminRoute() {
   const [createdPassword, setCreatedPassword] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  if (!backendAvailable) {
+    return (
+      <div className="text-center py-12 text-muted-foreground">
+        <p className="text-lg font-medium mb-2">Server unavailable</p>
+        <p>The admin panel requires a connection to the game server.</p>
+      </div>
+    );
+  }
 
   if (!isAuthenticated || user?.permission !== 'admin') {
     return <Navigate to="/" replace />;

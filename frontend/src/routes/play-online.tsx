@@ -54,6 +54,7 @@ async function joinRoom(code: string, playerName: string) {
 export default function PlayOnlineRoute() {
   const { roomCode: urlRoomCode } = useParams<{ roomCode?: string }>();
   const navigate = useNavigate();
+  const { backendAvailable } = useAuth();
 
   const [sessionToken, setSessionToken] = useState<string | null>(() =>
     sessionStorage.getItem('skyjo-online-token')
@@ -152,6 +153,21 @@ export default function PlayOnlineRoute() {
   }
 
   // Not connected to a room yet — show create/join
+  if (!backendAvailable) {
+    return (
+      <div className="max-w-md mx-auto space-y-6">
+        <h1 className="text-2xl font-bold text-center">Online Play</h1>
+        <div className="text-center py-8 text-muted-foreground">
+          <p className="text-lg font-medium mb-2">Server unavailable</p>
+          <p>Online play requires a connection to the game server.</p>
+          <p className="mt-3">
+            <a href="/play" className="underline">Play locally</a> for offline mode.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   if (!roomCode || !sessionToken) {
     return (
       <JoinOrCreate

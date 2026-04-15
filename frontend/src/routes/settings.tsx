@@ -6,7 +6,16 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
 
 export default function SettingsRoute() {
-  const { user, isAuthenticated, logout } = useAuth();
+  const { user, isAuthenticated, logout, backendAvailable } = useAuth();
+
+  if (!backendAvailable) {
+    return (
+      <div className="text-center py-12 text-muted-foreground">
+        <p className="text-lg font-medium mb-2">Server unavailable</p>
+        <p>Account settings require a connection to the game server.</p>
+      </div>
+    );
+  }
 
   if (!isAuthenticated || !user) {
     return (

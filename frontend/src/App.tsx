@@ -22,12 +22,12 @@ export default function App() {
     );
   }, [auth.accessToken, auth.refresh]);
 
-  // Redirect to setup when needed
+  // Redirect to setup when needed (only if backend is reachable)
   useEffect(() => {
-    if (!auth.isLoading && auth.needsSetup && location.pathname !== '/setup') {
+    if (!auth.isLoading && auth.backendAvailable && auth.needsSetup && location.pathname !== '/setup') {
       navigate('/setup', { replace: true });
     }
-  }, [auth.isLoading, auth.needsSetup, location.pathname, navigate]);
+  }, [auth.isLoading, auth.backendAvailable, auth.needsSetup, location.pathname, navigate]);
 
   return (
     <TooltipProvider>
