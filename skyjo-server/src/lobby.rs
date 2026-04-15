@@ -237,7 +237,7 @@ pub struct RoomInfoResponse {
 /// Query parameters for the session validation endpoint.
 #[derive(Debug, Deserialize)]
 pub struct ValidateSessionQuery {
-    pub token: String,
+    pub token: Option<String>,
 }
 
 #[cfg(test)]

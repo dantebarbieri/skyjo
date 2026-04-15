@@ -206,9 +206,11 @@ pub async fn validate_session(
     Path(code): Path<String>,
     axum::extract::Query(query): axum::extract::Query<lobby::ValidateSessionQuery>,
 ) -> Result<Json<serde_json::Value>, ServerError> {
+    let token = query.token.as_deref().ok_or(ServerError::Unauthorized)?;
+
     let (room_code, _player_index) = state
         .lobby
-        .get_session(&query.token)
+        .get_session(token)
         .ok_or(ServerError::Unauthorized)?;
 
     if room_code != code {

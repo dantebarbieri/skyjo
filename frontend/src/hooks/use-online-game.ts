@@ -7,7 +7,13 @@ import type { z } from 'zod';
 
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected';
 
-/** Custom WebSocket close code indicating the session token is no longer valid. */
+/**
+ * Custom WebSocket close code (RFC 6455 §7.4.2 application range 4000–4999).
+ * The server does not currently send this code, but the client handles it
+ * defensively in case future server logic actively closes sockets on session
+ * invalidation. The primary detection mechanism is the HTTP session validation
+ * fetch before each reconnect attempt.
+ */
 const WS_CLOSE_SESSION_EXPIRED = 4001;
 
 const COLUMN_CLEAR_DELAY_MS = 2500;
@@ -106,7 +112,7 @@ export function useOnlineGame(
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const reconnectAttemptRef = useRef(0);
-  const pendingClearTimeoutRef= useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingClearTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const connectAbortRef = useRef<AbortController | null>(null);
   const { accessToken } = useAuth();
 
