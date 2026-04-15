@@ -801,19 +801,14 @@ fn schedule_turn_timeout_with_persistence(room: SharedRoom, persistence: Option<
                 }
 
                 // Persist game completion if it ended
-                if let Some((game_id, history, players)) = game_over_data {
-                    if let Some(persistence) = &persistence {
-                        let persistence = persistence.clone();
-                        tokio::spawn(async move {
-                            persist_game_completion(
-                                &persistence,
-                                game_id,
-                                history.as_ref(),
-                                &players,
-                            )
+                if let Some((game_id, history, players)) = game_over_data
+                    && let Some(persistence) = &persistence
+                {
+                    let persistence = persistence.clone();
+                    tokio::spawn(async move {
+                        persist_game_completion(&persistence, game_id, history.as_ref(), &players)
                             .await;
-                        });
-                    }
+                    });
                 }
             }
             Ok(None) => {
@@ -922,13 +917,12 @@ async fn persist_game_completion(
     _players: &[(usize, String, Option<uuid::Uuid>, Option<String>)],
 ) {
     // Save the full game history if available
-    if let Some(history) = history {
-        if let Err(e) = persistence
+    if let Some(history) = history
+        && let Err(e) = persistence
             .save_game_history(game_id, &history.rules_name, history)
             .await
-        {
-            tracing::error!(game_id = %game_id, "Failed to persist game history: {e}");
-        }
+    {
+        tracing::error!(game_id = %game_id, "Failed to persist game history: {e}");
     }
 
     // Mark as completed
