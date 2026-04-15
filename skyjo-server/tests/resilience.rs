@@ -31,9 +31,6 @@ fn ingame_room() -> Room {
 // Room snapshot round-trip through persistence
 // ========================================================================
 
-// TODO: Update this test when room snapshot normalization is completed.
-// Currently save/load are stubbed (save is no-op, load returns None) after
-// migration 003 replaced the BYTEA snapshot column with relational columns.
 #[tokio::test]
 async fn snapshot_round_trip_through_persistence() {
     let database_url = match std::env::var("DATABASE_URL") {
@@ -45,34 +42,40 @@ async fn snapshot_round_trip_through_persistence() {
     };
     let db = Persistence::connect(&database_url).await.unwrap();
 
-    let room = test_room();
+    let mut room = test_room();
+    room.banned_ips.push("10.0.0.99".to_string());
+    room.last_winners = vec![0];
     let snapshot = room.to_snapshot();
-    let json = serde_json::to_string(&snapshot).unwrap();
 
-    // save_room_snapshot is currently a no-op stub — should not error
-    db.save_room_snapshot("RESIL1", &json).await.unwrap();
+    db.save_room_snapshot(&snapshot).await.unwrap();
 
-    // load_room_snapshot is currently stubbed to return None
+    // load_room_snapshot should return the saved snapshot
     let loaded = db.load_room_snapshot("RESIL1").await.unwrap();
-    assert!(
-        loaded.is_none(),
-        "load_room_snapshot should return None while stubbed"
-    );
+    assert!(loaded.is_some(), "load_room_snapshot should return Some");
+    let loaded = loaded.unwrap();
+    assert_eq!(loaded.code, "RESIL1");
+    assert_eq!(loaded.phase, RoomPhase::Lobby);
+    assert_eq!(loaded.num_players, 2);
+    assert_eq!(loaded.players.len(), 2);
+    assert_eq!(loaded.players[0].name, "Alice");
+    assert_eq!(loaded.banned_ips, vec!["10.0.0.99"]);
+    assert_eq!(loaded.last_winners, vec![0]);
 
-    // load_all_room_snapshots is currently stubbed to return empty vec
+    // load_all_room_snapshots should include this snapshot
     let all = db.load_all_room_snapshots().await.unwrap();
     assert!(
-        all.is_empty(),
-        "load_all_room_snapshots should return empty while stubbed"
+        all.iter().any(|s| s.code == "RESIL1"),
+        "load_all_room_snapshots should include RESIL1"
     );
+
+    // Cleanup
+    db.delete_room_snapshot("RESIL1").await.unwrap();
 }
 
 // ========================================================================
 // Persistence connects and creates tables
 // ========================================================================
 
-// TODO: Update this test when room snapshot normalization is completed.
-// Currently save/load are stubbed after migration 003 replaced the BYTEA column.
 #[tokio::test]
 async fn persistence_creates_tables_on_connect() {
     let database_url = match std::env::var("DATABASE_URL") {
@@ -84,17 +87,18 @@ async fn persistence_creates_tables_on_connect() {
     };
     let db = Persistence::connect(&database_url).await.unwrap();
 
-    // save_room_snapshot is currently a no-op stub — should not error
-    db.save_room_snapshot("TEST01", r#"{"test":true}"#)
-        .await
-        .unwrap();
+    let room = test_room();
+    let snapshot = room.to_snapshot();
 
-    // load_room_snapshot is currently stubbed to return None
-    let loaded = db.load_room_snapshot("TEST01").await.unwrap();
-    assert!(
-        loaded.is_none(),
-        "load_room_snapshot should return None while stubbed"
-    );
+    // save_room_snapshot should succeed after migration
+    db.save_room_snapshot(&snapshot).await.unwrap();
+
+    // load_room_snapshot should return the saved data
+    let loaded = db.load_room_snapshot("RESIL1").await.unwrap();
+    assert!(loaded.is_some(), "should load saved snapshot");
+
+    // Cleanup
+    db.delete_room_snapshot("RESIL1").await.unwrap();
 }
 
 // ========================================================================
