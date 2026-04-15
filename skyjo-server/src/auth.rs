@@ -442,3 +442,36 @@ pub fn generate_random_password() -> String {
         .collect();
     chars.into_iter().collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn permission_level_from_id_maps_correctly() {
+        assert_eq!(PermissionLevel::from_id(1), PermissionLevel::User);
+        assert_eq!(PermissionLevel::from_id(2), PermissionLevel::Moderator);
+        assert_eq!(PermissionLevel::from_id(3), PermissionLevel::Admin);
+        assert_eq!(PermissionLevel::from_id(999), PermissionLevel::User);
+        assert_eq!(PermissionLevel::from_id(0), PermissionLevel::User);
+        assert_eq!(PermissionLevel::from_id(-1), PermissionLevel::User);
+    }
+
+    #[test]
+    fn permission_level_to_id_round_trips() {
+        for level in [
+            PermissionLevel::User,
+            PermissionLevel::Moderator,
+            PermissionLevel::Admin,
+        ] {
+            assert_eq!(PermissionLevel::from_id(level.to_id()), level);
+        }
+    }
+
+    #[test]
+    fn permission_level_display() {
+        assert_eq!(PermissionLevel::Admin.to_string(), "admin");
+        assert_eq!(PermissionLevel::Moderator.to_string(), "moderator");
+        assert_eq!(PermissionLevel::User.to_string(), "user");
+    }
+}
