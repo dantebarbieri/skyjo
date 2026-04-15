@@ -1,8 +1,31 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { InteractiveGameState, PlayerAction } from '@/types';
 import { ServerMessageSchema } from '@/schemas';
+import type { PendingColumnClear } from './use-interactive-game';
 
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected';
+
+const COLUMN_CLEAR_DELAY_MS = 2500;
+
+/**
+ * Build an intermediate "pre-clear" state from a post-clear state.
+ * Replaces Cleared slots in the clearing columns with Revealed(card_value).
+ */
+function buildPreClearState(state: InteractiveGameState): InteractiveGameState {
+  const { last_column_clears, num_rows } = state;
+  if (last_column_clears.length === 0) return state;
+
+  const boards = state.boards.map(b => [...b]);
+  for (const clear of last_column_clears) {
+    for (let r = 0; r < num_rows; r++) {
+      const idx = clear.column * num_rows + r;
+      if (boards[clear.player_index][idx] === 'Cleared') {
+        boards[clear.player_index][idx] = { Revealed: clear.card_value };
+      }
+    }
+  }
+  return { ...state, boards, last_column_clears: [] };
+}
 
 export interface RoomLobbyState {
   room_code: string;
@@ -55,6 +78,7 @@ interface UseOnlineGameReturn {
   playerIndex: number | null;
   lastError: string | null;
   kicked: boolean;
+  pendingClearColumns: PendingColumnClear[] | null;
   applyAction: (action: PlayerAction) => void;
   configureSlot: (slot: number, playerType: string) => void;
   setNumPlayers: (numPlayers: number) => void;
@@ -82,9 +106,11 @@ export function useOnlineGame(
   const [wasTimeout, setWasTimeout] = useState(false);
   const [lastError, setLastError] = useState<string | null>(null);
   const [kicked, setKicked] = useState(false);
+  const [pendingClearColumns, setPendingClearColumns] = useState<PendingColumnClear[] | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const reconnectAttemptRef = useRef(0);
+  const pendingClearTimeoutRef= useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const send = useCallback((msg: object) => {
     const ws = wsRef.current;
@@ -133,21 +159,66 @@ export function useOnlineGame(
           setGameState(null);
           break;
         case 'GameState':
+          if (pendingClearTimeoutRef.current) {
+            clearTimeout(pendingClearTimeoutRef.current);
+            pendingClearTimeoutRef.current = null;
+          }
+          setPendingClearColumns(null);
           setGameState(msg.state);
           setTurnDeadlineSecs(msg.turn_deadline_secs ?? null);
           setWasTimeout(false);
           break;
         case 'ActionApplied':
-        case 'BotAction':
-          setGameState(msg.state);
-          setTurnDeadlineSecs(msg.turn_deadline_secs ?? null);
-          setWasTimeout(false);
+        case 'BotAction': {
+          const isFlipClear = msg.action.type === 'DiscardAndFlip' && msg.state.last_column_clears.length > 0;
+          if (isFlipClear) {
+            const preClearState = buildPreClearState(msg.state);
+            const clearCols = msg.state.last_column_clears.map(c => ({
+              playerIndex: c.player_index,
+              column: c.column,
+            }));
+            setPendingClearColumns(clearCols);
+            setGameState(preClearState);
+            setTurnDeadlineSecs(msg.turn_deadline_secs ?? null);
+            setWasTimeout(false);
+            if (pendingClearTimeoutRef.current) clearTimeout(pendingClearTimeoutRef.current);
+            pendingClearTimeoutRef.current = setTimeout(() => {
+              setPendingClearColumns(null);
+              setGameState(msg.state);
+              pendingClearTimeoutRef.current = null;
+            }, COLUMN_CLEAR_DELAY_MS);
+          } else {
+            setGameState(msg.state);
+            setTurnDeadlineSecs(msg.turn_deadline_secs ?? null);
+            setWasTimeout(false);
+          }
           break;
-        case 'TimeoutAction':
-          setGameState(msg.state);
-          setTurnDeadlineSecs(null);
-          setWasTimeout(true);
+        }
+        case 'TimeoutAction': {
+          const isFlipClearTimeout = msg.action.type === 'DiscardAndFlip' && msg.state.last_column_clears.length > 0;
+          if (isFlipClearTimeout) {
+            const preClearState = buildPreClearState(msg.state);
+            const clearCols = msg.state.last_column_clears.map(c => ({
+              playerIndex: c.player_index,
+              column: c.column,
+            }));
+            setPendingClearColumns(clearCols);
+            setGameState(preClearState);
+            setTurnDeadlineSecs(null);
+            setWasTimeout(true);
+            if (pendingClearTimeoutRef.current) clearTimeout(pendingClearTimeoutRef.current);
+            pendingClearTimeoutRef.current = setTimeout(() => {
+              setPendingClearColumns(null);
+              setGameState(msg.state);
+              pendingClearTimeoutRef.current = null;
+            }, COLUMN_CLEAR_DELAY_MS);
+          } else {
+            setGameState(msg.state);
+            setTurnDeadlineSecs(null);
+            setWasTimeout(true);
+          }
           break;
+        }
         case 'PlayerJoined':
           setRoomState(prev => {
             if (!prev) return prev;
@@ -228,6 +299,10 @@ export function useOnlineGame(
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
       }
+      if (pendingClearTimeoutRef.current) {
+        clearTimeout(pendingClearTimeoutRef.current);
+        pendingClearTimeoutRef.current = null;
+      }
       if (wsRef.current) {
         wsRef.current.close();
         wsRef.current = null;
@@ -297,6 +372,10 @@ export function useOnlineGame(
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
     }
+    if (pendingClearTimeoutRef.current) {
+      clearTimeout(pendingClearTimeoutRef.current);
+      pendingClearTimeoutRef.current = null;
+    }
     if (wsRef.current) {
       wsRef.current.close();
       wsRef.current = null;
@@ -306,6 +385,7 @@ export function useOnlineGame(
     setGameState(null);
     setLastError(null);
     setKicked(false);
+    setPendingClearColumns(null);
   }, []);
 
   return {
@@ -317,6 +397,7 @@ export function useOnlineGame(
     playerIndex,
     lastError,
     kicked,
+    pendingClearColumns,
     applyAction,
     configureSlot,
     setNumPlayers,

@@ -40,6 +40,7 @@ interface UseBotTurnsOptions {
   applyBotTurn: (strategyName: string) => void;
   continueToNextRound: () => void;
   showStartingPlayer: boolean;
+  pendingColumnClear: boolean;
 }
 
 /**
@@ -54,6 +55,7 @@ export function useBotTurns({
   applyBotTurn,
   continueToNextRound,
   showStartingPlayer,
+  pendingColumnClear,
 }: UseBotTurnsOptions) {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -75,6 +77,9 @@ export function useBotTurns({
 
     // Don't act while the starting player dialog is shown
     if (showStartingPlayer) return;
+
+    // Don't act while a column clear animation is pending
+    if (pendingColumnClear) return;
 
     // Handle round_over: auto-continue if all players are bots
     if (phase === 'round_over') {
@@ -114,6 +119,7 @@ export function useBotTurns({
     hasBots,
     hasHumans,
     showStartingPlayer,
+    pendingColumnClear,
     applyBotTurn,
     continueToNextRound,
     clearTimer,

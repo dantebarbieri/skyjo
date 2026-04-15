@@ -26,6 +26,15 @@ export const CARD_COLORS: Record<CardColorGroup, { bg: string; text: string; bor
   high: { bg: 'bg-red-500', text: 'text-white', border: 'border-red-600' },
 };
 
+/** CSS color values for column-clear border animation (keyed by color group) */
+export const COLUMN_CLEAR_COLORS: Record<CardColorGroup, { base: string; bright: string; glow: string }> = {
+  negative: { base: '#9333ea', bright: '#a855f7', glow: 'rgba(147,51,234,0.5)' },  // purple
+  zero:     { base: '#38bdf8', bright: '#7dd3fc', glow: 'rgba(56,189,248,0.5)' },   // sky
+  low:      { base: '#22c55e', bright: '#4ade80', glow: 'rgba(34,197,94,0.5)' },    // green
+  mid:      { base: '#eab308', bright: '#facc15', glow: 'rgba(234,179,8,0.5)' },    // yellow
+  high:     { base: '#ef4444', bright: '#f87171', glow: 'rgba(239,68,68,0.5)' },    // red
+};
+
 export function getCardClasses(value: CardValue): string {
   const group = getCardColorGroup(value);
   const colors = CARD_COLORS[group];

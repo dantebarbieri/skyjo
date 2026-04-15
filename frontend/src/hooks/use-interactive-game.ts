@@ -33,6 +33,34 @@ export interface RoundRecord {
   goingOutPlayer: number | null;
 }
 
+export interface PendingColumnClear {
+  playerIndex: number;
+  column: number;
+}
+
+const COLUMN_CLEAR_DELAY_MS = 2500;
+
+/**
+ * Build an intermediate "pre-clear" state from a post-clear state.
+ * Replaces Cleared slots in the clearing columns with Revealed(card_value)
+ * so the UI can show the matching column before it disappears.
+ */
+function buildPreClearState(state: InteractiveGameState): InteractiveGameState {
+  const { last_column_clears, num_rows } = state;
+  if (last_column_clears.length === 0) return state;
+
+  const boards = state.boards.map(b => [...b]);
+  for (const clear of last_column_clears) {
+    for (let r = 0; r < num_rows; r++) {
+      const idx = clear.column * num_rows + r;
+      if (boards[clear.player_index][idx] === 'Cleared') {
+        boards[clear.player_index][idx] = { Revealed: clear.card_value };
+      }
+    }
+  }
+  return { ...state, boards, last_column_clears: [] };
+}
+
 /** Serializable save data for localStorage and export/import */
 export interface GameSaveData {
   config: PlayConfig;
@@ -53,6 +81,7 @@ interface UseInteractiveGame {
   playerTypes: PlayerType[];
   gameId: number | null;
   lastConfig: PlayConfig | null;
+  pendingClearColumns: PendingColumnClear[] | null;
 
   createGame: (config: PlayConfig) => void;
   applyAction: (action: PlayerAction) => void;
@@ -188,9 +217,12 @@ export function useInteractiveGame(): UseInteractiveGame {
   const [hasSavedGame, setHasSavedGame] = useState(() => loadSavedGame() !== null);
   const [playerTypes, setPlayerTypes] = useState<PlayerType[]>([]);
   const [lastConfig, setLastConfig] = useState<PlayConfig | null>(null);
+  const [pendingClearColumns, setPendingClearColumns] = useState<PendingColumnClear[] | null>(null);
   const gameIdRef = useRef<number | null>(null);
   const configRef = useRef<PlayConfig | null>(null);
   const actionsRef = useRef<PlayerAction[]>([]);
+  const pendingClearRef = useRef(false);
+  const pendingClearTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -198,6 +230,10 @@ export function useInteractiveGame(): UseInteractiveGame {
       if (gameIdRef.current !== null && wasmMod) {
         wasmMod.destroy_interactive_game(gameIdRef.current);
         gameIdRef.current = null;
+      }
+      if (pendingClearTimeoutRef.current !== null) {
+        clearTimeout(pendingClearTimeoutRef.current);
+        pendingClearTimeoutRef.current = null;
       }
     };
   }, []);
@@ -283,6 +319,7 @@ export function useInteractiveGame(): UseInteractiveGame {
 
   const applyAction = useCallback((action: PlayerAction) => {
     if (gameIdRef.current === null || !wasmMod) return;
+    if (pendingClearRef.current) return; // Block actions during column clear delay
 
     try {
       setError(null);
@@ -338,8 +375,32 @@ export function useInteractiveGame(): UseInteractiveGame {
         }]);
       }
 
-      setGameState(newState);
-      setPhase(newPhase);
+      // Flip-triggered column clear: show pre-clear state with highlight, then apply real state after delay
+      const isFlipClear = action.type === 'DiscardAndFlip' && newState.last_column_clears.length > 0;
+      if (isFlipClear) {
+        const preClearState = buildPreClearState(newState);
+        const clearCols = newState.last_column_clears.map(c => ({
+          playerIndex: c.player_index,
+          column: c.column,
+        }));
+
+        setPendingClearColumns(clearCols);
+        pendingClearRef.current = true;
+        setGameState(preClearState);
+        setPhase(derivePhase(preClearState));
+
+        if (pendingClearTimeoutRef.current) clearTimeout(pendingClearTimeoutRef.current);
+        pendingClearTimeoutRef.current = setTimeout(() => {
+          setPendingClearColumns(null);
+          pendingClearRef.current = false;
+          setGameState(newState);
+          setPhase(derivePhase(newState));
+          pendingClearTimeoutRef.current = null;
+        }, COLUMN_CLEAR_DELAY_MS);
+      } else {
+        setGameState(newState);
+        setPhase(newPhase);
+      }
 
       // Auto-save after every action
       autoSave();
@@ -350,6 +411,7 @@ export function useInteractiveGame(): UseInteractiveGame {
 
   const applyBotTurn = useCallback((strategyName: string) => {
     if (gameIdRef.current === null || !wasmMod) return;
+    if (pendingClearRef.current) return; // Block bot turns during column clear delay
 
     try {
       setError(null);
@@ -403,8 +465,33 @@ export function useInteractiveGame(): UseInteractiveGame {
         }]);
       }
 
-      setGameState(newState);
-      setPhase(newPhase);
+      // Flip-triggered column clear: show pre-clear state with highlight, then apply real state after delay
+      const isFlipClear = botAction.type === 'DiscardAndFlip' && newState.last_column_clears.length > 0;
+      if (isFlipClear) {
+        const preClearState = buildPreClearState(newState);
+        const clearCols = newState.last_column_clears.map(c => ({
+          playerIndex: c.player_index,
+          column: c.column,
+        }));
+
+        setPendingClearColumns(clearCols);
+        pendingClearRef.current = true;
+        setGameState(preClearState);
+        setPhase(derivePhase(preClearState));
+
+        if (pendingClearTimeoutRef.current) clearTimeout(pendingClearTimeoutRef.current);
+        pendingClearTimeoutRef.current = setTimeout(() => {
+          setPendingClearColumns(null);
+          pendingClearRef.current = false;
+          setGameState(newState);
+          setPhase(derivePhase(newState));
+          pendingClearTimeoutRef.current = null;
+        }, COLUMN_CLEAR_DELAY_MS);
+      } else {
+        setGameState(newState);
+        setPhase(newPhase);
+      }
+
       autoSave();
     } catch (e) {
       setError(String(e));
@@ -413,6 +500,13 @@ export function useInteractiveGame(): UseInteractiveGame {
 
   const continueToNextRound = useCallback(() => {
     if (gameIdRef.current === null || !wasmMod) return;
+
+    if (pendingClearTimeoutRef.current !== null) {
+      clearTimeout(pendingClearTimeoutRef.current);
+      pendingClearTimeoutRef.current = null;
+    }
+    pendingClearRef.current = false;
+    setPendingClearColumns(null);
 
     try {
       setError(null);
@@ -521,6 +615,11 @@ export function useInteractiveGame(): UseInteractiveGame {
       wasmMod.destroy_interactive_game(gameIdRef.current);
       gameIdRef.current = null;
     }
+    if (pendingClearTimeoutRef.current !== null) {
+      clearTimeout(pendingClearTimeoutRef.current);
+      pendingClearTimeoutRef.current = null;
+    }
+    pendingClearRef.current = false;
     // Preserve config for "play again" pre-fill
     setLastConfig(configRef.current);
     configRef.current = null;
@@ -531,6 +630,7 @@ export function useInteractiveGame(): UseInteractiveGame {
     setError(null);
     setRoundHistory([]);
     setShowStartingPlayer(false);
+    setPendingClearColumns(null);
     clearStorage();
     setHasSavedGame(false);
   }, []);
@@ -547,6 +647,7 @@ export function useInteractiveGame(): UseInteractiveGame {
     playerTypes,
     gameId: gameIdRef.current,
     lastConfig,
+    pendingClearColumns,
     createGame,
     applyAction,
     applyBotTurn,

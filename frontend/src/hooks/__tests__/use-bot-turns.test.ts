@@ -67,6 +67,7 @@ interface HookOptions {
   applyBotTurn?: ReturnType<typeof vi.fn<(strategyName: string) => void>>;
   continueToNextRound?: ReturnType<typeof vi.fn<() => void>>;
   showStartingPlayer?: boolean;
+  pendingColumnClear?: boolean;
 }
 
 function makeOptions(overrides: HookOptions = {}) {
@@ -78,6 +79,7 @@ function makeOptions(overrides: HookOptions = {}) {
     applyBotTurn: overrides.applyBotTurn ?? vi.fn<(strategyName: string) => void>(),
     continueToNextRound: overrides.continueToNextRound ?? vi.fn<() => void>(),
     showStartingPlayer: overrides.showStartingPlayer ?? false,
+    pendingColumnClear: overrides.pendingColumnClear ?? false,
   };
 }
 
@@ -204,6 +206,28 @@ describe('useBotTurns', () => {
     expect(opts.applyBotTurn).not.toHaveBeenCalled();
 
     vi.advanceTimersByTime(100);
+    expect(opts.applyBotTurn).toHaveBeenCalledWith('Random');
+  });
+
+  it('does not trigger bot turn when pendingColumnClear is true', () => {
+    const opts = makeOptions({
+      gameState: makeGameState('ChooseDraw', 1),
+      phase: 'playing',
+      pendingColumnClear: true,
+    });
+    renderHook(() => useBotTurns(opts));
+    vi.advanceTimersByTime(1000);
+    expect(opts.applyBotTurn).not.toHaveBeenCalled();
+  });
+
+  it('triggers bot turn when pendingColumnClear is false', () => {
+    const opts = makeOptions({
+      gameState: makeGameState('ChooseDraw', 1),
+      phase: 'playing',
+      pendingColumnClear: false,
+    });
+    renderHook(() => useBotTurns(opts));
+    vi.advanceTimersByTime(0);
     expect(opts.applyBotTurn).toHaveBeenCalledWith('Random');
   });
 

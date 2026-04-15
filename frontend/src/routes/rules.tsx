@@ -3,8 +3,10 @@ import { Link } from 'react-router-dom';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import SkyjoCard from '@/components/skyjo-card';
+import { ActionButtons } from '@/components/action-buttons';
 import ScoringSheet from '@/components/scoring-sheet';
 import { cn } from '@/lib/utils';
+import { getCardColorGroup, COLUMN_CLEAR_COLORS } from '@/lib/card-styles';
 import { useDocumentTitle } from '@/hooks/use-document-title';
 import type { Slot, GameHistory } from '@/types';
 
@@ -268,6 +270,7 @@ function TurnFlowSection() {
   const [phase, setPhase] = useState<TurnDemoPhase>('choose_draw');
   const [drawnCard, setDrawnCard] = useState<number | null>(null);
   const [discardTop, setDiscardTop] = useState(6);
+  const discardUnder = 10; // card revealed when the 6 is drawn
   const [message, setMessage] = useState('Choose: draw from the deck or the discard pile');
   const [highlightPositions, setHighlightPositions] = useState<Set<number>>(new Set());
   const [flipMode, setFlipMode] = useState(false);
@@ -308,19 +311,28 @@ function TurnFlowSection() {
   const handleDrawDiscard = useCallback(() => {
     if (phase !== 'choose_draw') return;
     setDrawnCard(discardTop);
+    setDiscardTop(discardUnder); // reveal the card underneath
     setPhase('drew_from_discard');
-    setMessage(`You drew a ${discardTop} from the discard pile. You must place it on your board.`);
+    setMessage(`You drew a ${discardTop} from the discard pile. You must place it on your board. Changed your mind? Hit undo (↩) to put it back.`);
     setHighlightPositions(new Set(board.map((_, i) => i).filter(i => board[i] !== 'Cleared')));
   }, [phase, discardTop, board]);
 
-  const handleDiscardAndFlip = useCallback(() => {
+  const handleToggleFlipMode = useCallback(() => {
     if (phase !== 'drew_from_deck') return;
-    setFlipMode(true);
-    setMessage('Click a hidden card to flip it face-up.');
-    const hiddenPositions = new Set(
-      board.map((s, i) => i).filter(i => typeof board[i] === 'object' && 'Hidden' in (board[i] as object))
-    );
-    setHighlightPositions(hiddenPositions);
+    setFlipMode(prev => {
+      const next = !prev;
+      if (next) {
+        setMessage('Click a hidden card to flip it face-up. Hit the discard button again to go back to place mode.');
+        const hiddenPositions = new Set(
+          board.map((_, i) => i).filter(i => typeof board[i] === 'object' && 'Hidden' in (board[i] as object))
+        );
+        setHighlightPositions(hiddenPositions);
+      } else {
+        setMessage('You drew a 4. Place it on your board, or discard it and flip a hidden card.');
+        setHighlightPositions(new Set(board.map((_, i) => i).filter(i => board[i] !== 'Cleared')));
+      }
+      return next;
+    });
   }, [phase, board]);
 
   const handleBoardClick = useCallback((idx: number) => {
@@ -400,7 +412,9 @@ function TurnFlowSection() {
               </li>
               <li>
                 <strong>Draw from the discard pile</strong> — you must place it on your board
-                (replace any card)
+                (replace any card). Since the discard is public knowledge, you can undo this draw
+                with the <strong>↩ undo button</strong>. Deck draws cannot be undone — that would
+                let you peek for free!
               </li>
             </ol>
           </div>
@@ -408,74 +422,65 @@ function TurnFlowSection() {
           <div className="border rounded-lg p-4 bg-muted/30 space-y-4">
             <div className="text-sm font-medium text-center">{message}</div>
 
-            <div className="flex items-center justify-center gap-6">
-              {/* Deck */}
-              <button
-                onClick={handleDrawDeck}
-                disabled={phase !== 'choose_draw'}
-                className={cn(
-                  'flex flex-col items-center gap-1 transition-transform',
-                  phase === 'choose_draw' && 'hover:scale-105 cursor-pointer',
-                )}
-              >
-                <span className="text-xs text-muted-foreground">Deck</span>
-                <div className={cn(phase === 'choose_draw' && 'ring-2 ring-blue-400 rounded-lg')}>
-                  <SkyjoCard slot={{ Hidden: 0 }} size="md" />
-                </div>
-              </button>
+            {/* Draw area — horizontal row matching real gameplay layout */}
+            <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-4 md:gap-6">
+              {/* Deck + Discard piles group */}
+              <div className="flex items-center gap-2 sm:gap-4">
+                {/* Deck */}
+                <button
+                  onClick={handleDrawDeck}
+                  disabled={phase !== 'choose_draw'}
+                  className={cn(
+                    'flex flex-col items-center gap-1 transition-transform',
+                    phase === 'choose_draw' && 'hover:scale-105 cursor-pointer',
+                  )}
+                >
+                  <span className="text-xs text-muted-foreground">Deck</span>
+                  <div className={cn('rounded-lg', phase === 'choose_draw' && 'ring-2 ring-blue-400')}>
+                    <SkyjoCard slot={{ Hidden: 0 }} size="md" />
+                  </div>
+                </button>
 
-              {/* Discard */}
-              <button
-                onClick={handleDrawDiscard}
-                disabled={phase !== 'choose_draw'}
-                className={cn(
-                  'flex flex-col items-center gap-1 transition-transform',
-                  phase === 'choose_draw' && 'hover:scale-105 cursor-pointer',
-                )}
-              >
-                <span className="text-xs text-muted-foreground">Discard</span>
-                <div className={cn(phase === 'choose_draw' && 'ring-2 ring-blue-400 rounded-lg')}>
-                  <SkyjoCard slot={{ Revealed: discardTop }} size="md" />
-                </div>
-              </button>
+                {/* Discard */}
+                <button
+                  onClick={handleDrawDiscard}
+                  disabled={phase !== 'choose_draw'}
+                  className={cn(
+                    'flex flex-col items-center gap-1 transition-transform',
+                    phase === 'choose_draw' && 'hover:scale-105 cursor-pointer',
+                  )}
+                >
+                  <span className="text-xs text-muted-foreground">Discard</span>
+                  <div className={cn('rounded-lg', phase === 'choose_draw' && 'ring-2 ring-blue-400')}>
+                    <SkyjoCard slot={{ Revealed: discardTop }} size="md" />
+                  </div>
+                </button>
+              </div>
 
-              {/* Drawn card */}
-              {drawnCard !== null && (
+              {/* Drawn card + Action buttons — stable slot, always present */}
+              <div className="flex items-center gap-2 sm:gap-4">
+                {/* Drawn card / placeholder */}
                 <div className="flex flex-col items-center gap-1">
                   <span className="text-xs text-muted-foreground">Drawn</span>
-                  <div className="ring-2 ring-green-400 rounded-lg">
-                    <SkyjoCard slot={{ Revealed: drawnCard }} size="md" />
-                  </div>
+                  {drawnCard !== null ? (
+                    <div className="ring-2 ring-green-400 rounded-lg">
+                      <SkyjoCard slot={{ Revealed: drawnCard }} size="md" />
+                    </div>
+                  ) : (
+                    <SkyjoCard slot="Cleared" size="md" />
+                  )}
                 </div>
-              )}
+
+                {/* Action icon buttons — always present, enabled/disabled contextually */}
+                <ActionButtons
+                  wantsFlip={flipMode}
+                  onToggleFlip={handleToggleFlipMode}
+                  onUndo={undoDraw}
+                  trashEnabled={phase === 'drew_from_deck'}
+                  undoEnabled={phase === 'drew_from_discard'}
+                />
+              </div>
             </div>
-
-            {phase === 'drew_from_deck' && !flipMode && (
-              <div className="flex flex-col sm:flex-row justify-center items-center gap-2">
-                <Button variant="outline" size="sm" onClick={handleDiscardAndFlip}>
-                  Discard & Flip Instead
-                </Button>
-                <Button variant="outline" size="sm" onClick={undoDraw}>
-                  Undo — Draw From Discard Instead
-                </Button>
-              </div>
-            )}
-
-            {phase === 'drew_from_deck' && flipMode && (
-              <div className="flex justify-center">
-                <Button variant="outline" size="sm" onClick={undoDraw}>
-                  Undo — Choose Again
-                </Button>
-              </div>
-            )}
-
-            {phase === 'drew_from_discard' && (
-              <div className="flex justify-center">
-                <Button variant="outline" size="sm" onClick={undoDraw}>
-                  Undo — Put Back & Choose Again
-                </Button>
-              </div>
-            )}
 
             {/* Board */}
             <div className="flex flex-col items-center gap-2">
@@ -532,18 +537,25 @@ function TurnFlowSection() {
 function ColumnClearSection() {
   const numRows = 3;
   const numCols = 4;
-  const [phase, setPhase] = useState<'before' | 'matched' | 'cleared'>('before');
-  // Board where column 1 (indices 3,4,5) has two 5s revealed and one hidden 5
+  const HIGHLIGHT_DURATION_MS = 5000;
+  const [phase, setPhase] = useState<'ready' | 'revealing' | 'cleared'>('ready');
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Column-major board (index = col * numRows + row)
+  // Col 0: [3, 7, -1]  Col 1: [5, 5, 5]  Col 2: [8, 2, 12]  Col 3: [-2, 4, 9]
+  // Col 1 (indices 3,4,5) has two 5s revealed and one hidden 5 at index 5
   const boardValues = [3, 7, -1, 5, 5, 5, 8, 2, 12, -2, 4, 9];
-  const initialRevealed = new Set([0, 3, 4, 6, 9, 10]); // col 1 has idx 3,4 revealed, 5 hidden
+  const initialRevealed = new Set([0, 3, 4, 6, 9, 10]);
+  const targetIdx = 5; // the hidden card that completes the column match
+  const columnIndices = new Set([3, 4, 5]); // col 1
 
   const getBoard = useCallback((): Slot[] => {
     return boardValues.map((v, i) => {
-      if (phase === 'cleared' && (i === 3 || i === 4 || i === 5)) {
+      if (phase === 'cleared' && columnIndices.has(i)) {
         return 'Cleared';
       }
-      if (phase === 'matched' && i === 5) {
-        return { Revealed: v }; // flipped to show match
+      if (phase === 'revealing' && i === targetIdx) {
+        return { Revealed: v };
       }
       return initialRevealed.has(i) ? { Revealed: v } : { Hidden: v };
     });
@@ -551,18 +563,28 @@ function ColumnClearSection() {
 
   const board = getBoard();
 
-  const handleStep = useCallback(() => {
-    if (phase === 'before') setPhase('matched');
-    else if (phase === 'matched') setPhase('cleared');
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  const handleFlipTarget = useCallback(() => {
+    if (phase !== 'ready') return;
+    setPhase('revealing');
+    timerRef.current = setTimeout(() => {
+      setPhase('cleared');
+      timerRef.current = null;
+    }, HIGHLIGHT_DURATION_MS);
   }, [phase]);
 
-  const handleReset = useCallback(() => setPhase('before'), []);
-
-  const stepLabel = phase === 'before'
-    ? 'Flip Hidden Card'
-    : phase === 'matched'
-      ? 'Clear Column'
-      : null;
+  const handleReset = useCallback(() => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    setPhase('ready');
+  }, []);
 
   return (
     <section id="columns" className="scroll-mt-12 lg:scroll-mt-20">
@@ -580,46 +602,103 @@ function ColumnClearSection() {
 
           <div className="border rounded-lg p-4 bg-muted/30 space-y-4">
             <div className="text-sm font-medium text-center">
-              {phase === 'before' && 'Column 2 has two 5s revealed and one hidden. What if the hidden card is also a 5?'}
-              {phase === 'matched' && 'All three cards match! The column will be cleared.'}
-              {phase === 'cleared' && 'Column cleared! Those cards no longer count toward your score.'}
+              {phase === 'ready' && (
+                <>You drew from the deck and discarded. Now flip a hidden card — tap the <strong>pulsing card</strong> in column 2.</>
+              )}
+              {phase === 'revealing' && (
+                <>All three cards in the column are 5s — they match! The column is being cleared…</>
+              )}
+              {phase === 'cleared' && (
+                <>Column cleared! Those 15 points no longer count toward your score.</>
+              )}
             </div>
 
-            <div className="flex flex-col items-center gap-3">
-              <div
-                className="grid gap-1.5"
-                style={{ gridTemplateColumns: `repeat(${numCols}, 1fr)` }}
-              >
-                {Array.from({ length: numRows }, (_, r) =>
-                  Array.from({ length: numCols }, (_, c) => {
-                    const idx = c * numRows + r;
-                    const slot = board[idx];
-                    const isHighlighted = phase === 'matched' && (idx === 3 || idx === 4 || idx === 5);
-                    return (
-                      <SkyjoCard
-                        key={idx}
-                        slot={slot}
-                        size="md"
-                        highlight={isHighlighted}
-                      />
-                    );
-                  })
-                ).flat()}
+            {/* Draw area — horizontal row matching real gameplay layout */}
+            <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-4 md:gap-6">
+              {/* Deck + Discard piles group */}
+              <div className="flex items-center gap-2 sm:gap-4">
+                {/* Deck */}
+                <div className="flex flex-col items-center gap-1">
+                  <span className="text-xs text-muted-foreground">Deck (87)</span>
+                  <SkyjoCard slot={{ Hidden: 0 }} size="md" />
+                </div>
+
+                {/* Discard — shows the 12 that was "just discarded" */}
+                <div className="flex flex-col items-center gap-1">
+                  <span className="text-xs text-muted-foreground">Discard</span>
+                  <SkyjoCard slot={{ Revealed: 12 }} size="md" />
+                </div>
               </div>
 
-              <div className="flex gap-2">
-                {stepLabel && (
-                  <Button variant="outline" size="sm" onClick={handleStep}>
-                    {stepLabel}
-                  </Button>
-                )}
-                {phase === 'cleared' && (
-                  <Button variant="outline" size="sm" onClick={handleReset}>
-                    Reset Demo
-                  </Button>
-                )}
+              {/* Drawn card placeholder (empty — already discarded) + Action buttons */}
+              <div className="flex items-center gap-2 sm:gap-4">
+                <div className="flex flex-col items-center gap-1">
+                  <span className="text-xs text-muted-foreground">Drawn</span>
+                  <SkyjoCard slot="Cleared" size="md" />
+                </div>
+
+                {/* Action buttons — trash active & disabled, undo disabled */}
+                <ActionButtons
+                  wantsFlip={true}
+                  onToggleFlip={() => {}}
+                  onUndo={() => {}}
+                  trashEnabled={false}
+                  undoEnabled={false}
+                />
               </div>
             </div>
+
+            {/* Board grid — rendered column-by-column for column-level highlighting */}
+            <div className="flex justify-center">
+              <div className="flex gap-1.5">
+                {Array.from({ length: numCols }, (_, c) => {
+                  const isColHighlighted = phase === 'revealing' && c === 1;
+                  // Column 1 has 5s (mid-range = yellow)
+                  const clearColors = COLUMN_CLEAR_COLORS[getCardColorGroup(5)];
+                  const clearStyle = isColHighlighted ? {
+                    '--clear-color-base': clearColors.base,
+                    '--clear-color-bright': clearColors.bright,
+                    '--clear-color-glow': clearColors.glow,
+                  } as React.CSSProperties : undefined;
+
+                  return (
+                    <div
+                      key={c}
+                      className={cn(
+                        'flex flex-col gap-1.5 rounded-lg transition-all duration-300',
+                        isColHighlighted && 'outline-4 outline outline-offset-2 animate-[border-pulse_1.5s_ease-in-out_infinite]',
+                      )}
+                      style={clearStyle}
+                    >
+                      {Array.from({ length: numRows }, (_, r) => {
+                        const idx = c * numRows + r;
+                        const slot = board[idx];
+                        const isTarget = idx === targetIdx && phase === 'ready';
+                        return (
+                          <SkyjoCard
+                            key={idx}
+                            slot={slot}
+                            size="md"
+                            className={cn(
+                              isTarget && 'ring-2 ring-primary animate-pulse cursor-pointer',
+                            )}
+                            onClick={isTarget ? handleFlipTarget : undefined}
+                          />
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {phase === 'cleared' && (
+              <div className="flex justify-center">
+                <Button variant="outline" size="sm" onClick={handleReset}>
+                  Reset Demo
+                </Button>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>

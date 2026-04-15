@@ -6,25 +6,20 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
-import { Undo2, Trash2 } from 'lucide-react';
+import { ActionButtons } from '@/components/action-buttons';
 import SkyjoCard from '@/components/skyjo-card';
 import { RoundScorecard } from '@/components/round-scorecard';
 import { useResponsiveCardSize } from '@/hooks/use-responsive-card-size';
 import { cn } from '@/lib/utils';
 import { toSlot, getPlayerName, computeVisibleScore } from '@/lib/game-helpers';
+import { getCardColorGroup, COLUMN_CLEAR_COLORS } from '@/lib/card-styles';
 import { useAuth } from '@/contexts/auth-context';
 import {
   useOnlineGame,
   type RoomLobbyState,
   type ConnectionStatus,
 } from '@/hooks/use-online-game';
-import type { RoundRecord } from '@/hooks/use-interactive-game';
+import type { RoundRecord, PendingColumnClear } from '@/hooks/use-interactive-game';
 import type { InteractiveGameState, PlayerAction, ActionNeeded } from '@/types';
 
 // --- API helpers ---
@@ -216,6 +211,7 @@ export default function PlayOnlineRoute() {
           onPlayAgain={game.playAgain}
           onReturnToLobby={game.returnToLobby}
           onLeave={handleLeave}
+          pendingClearColumns={game.pendingClearColumns}
         />
       )}
     </div>
@@ -843,6 +839,7 @@ function OnlinePlayBoard({
   onPlayAgain,
   onReturnToLobby,
   onLeave,
+  pendingClearColumns,
 }: {
   state: InteractiveGameState;
   playerIndex: number;
@@ -853,6 +850,7 @@ function OnlinePlayBoard({
   onPlayAgain: () => void;
   onReturnToLobby: () => void;
   onLeave: () => void;
+  pendingClearColumns: PendingColumnClear[] | null;
 }) {
   const { action_needed, boards, num_rows, num_cols, current_player } = state;
   const [wantsFlip, setWantsFlip] = useState(false);
@@ -942,6 +940,7 @@ function OnlinePlayBoard({
 
   // Card interactivity
   const getCardInteractive = (boardPlayerIdx: number, pos: number): boolean => {
+    if (pendingClearColumns) return false;
     if (!isMyTurn) return false;
     if (isInitialFlips) {
       if (boardPlayerIdx !== playerIndex) return false;
@@ -1149,42 +1148,13 @@ function OnlinePlayBoard({
             </div>
 
             {/* Action icon buttons */}
-            <TooltipProvider>
-              <div className="flex flex-col items-center gap-2">
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant={wantsFlip ? 'default' : 'outline'}
-                      size="icon"
-                      disabled={!isMyTurn || !isDeckDrawAction}
-                      onClick={() => setWantsFlip(!wantsFlip)}
-                      className="h-9 w-9"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="right">
-                    {wantsFlip ? 'Back to Place Mode' : 'Discard & Flip'}
-                  </TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      disabled={!isMyTurn || !isDiscardPlacement}
-                      onClick={() => onAction({ type: 'UndoDrawFromDiscard' })}
-                      className="h-9 w-9"
-                    >
-                      <Undo2 className="h-4 w-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="right">
-                    Undo
-                  </TooltipContent>
-                </Tooltip>
-              </div>
-            </TooltipProvider>
+            <ActionButtons
+              wantsFlip={wantsFlip}
+              onToggleFlip={() => setWantsFlip(!wantsFlip)}
+              onUndo={() => onAction({ type: 'UndoDrawFromDiscard' })}
+              trashEnabled={isMyTurn && isDeckDrawAction}
+              undoEnabled={isMyTurn && isDiscardPlacement}
+            />
           </div>
         </div>
       )}
@@ -1227,34 +1197,60 @@ function OnlinePlayBoard({
                   <span className="text-xs font-semibold text-orange-500 ml-1">went out</span>
                 )}
               </h4>
-              <div
-                className="grid gap-0.5 sm:gap-1"
-                style={{ gridTemplateColumns: `repeat(${num_cols}, 1fr)` }}
-              >
-                {Array.from({ length: num_rows }, (_, r) =>
-                  Array.from({ length: num_cols }, (_, c) => {
-                    const idx = c * num_rows + r;
-                    const interactive = getCardInteractive(boardPlayerIdx, idx);
+              <div className="flex gap-0.5 sm:gap-1">
+                {Array.from({ length: num_cols }, (_, c) => {
+                  const clearInfo = pendingClearColumns?.find(
+                    pc => pc.playerIndex === boardPlayerIdx && pc.column === c
+                  );
+                  const isColumnClearing = !!clearInfo;
 
-                    return (
-                      <button
-                        key={idx}
-                        onClick={() => interactive && handleCardClick(boardPlayerIdx, idx)}
-                        disabled={!interactive}
-                        className={cn(
-                          'transition-transform',
-                          interactive && 'hover:scale-110 cursor-pointer'
-                        )}
-                      >
-                        <SkyjoCard
-                          slot={toSlot(board[idx])}
-                          size={cardSize}
-                          highlight={interactive}
-                        />
-                      </button>
-                    );
-                  })
-                ).flat()}
+                  let clearStyle: React.CSSProperties | undefined;
+                  if (isColumnClearing) {
+                    const firstIdx = c * num_rows;
+                    const slot = board[firstIdx];
+                    const val = typeof slot === 'object' && 'Revealed' in slot ? slot.Revealed : 0;
+                    const colors = COLUMN_CLEAR_COLORS[getCardColorGroup(val as Parameters<typeof getCardColorGroup>[0])];
+                    clearStyle = {
+                      '--clear-color-base': colors.base,
+                      '--clear-color-bright': colors.bright,
+                      '--clear-color-glow': colors.glow,
+                    } as React.CSSProperties;
+                  }
+
+                  return (
+                    <div
+                      key={c}
+                      className={cn(
+                        'flex flex-col gap-0.5 sm:gap-1 rounded-lg transition-all duration-300',
+                        isColumnClearing && 'outline-4 outline outline-offset-2 animate-[border-pulse_1.5s_ease-in-out_infinite]',
+                      )}
+                      style={clearStyle}
+                    >
+                      {Array.from({ length: num_rows }, (_, r) => {
+                        const idx = c * num_rows + r;
+                        const interactive = getCardInteractive(boardPlayerIdx, idx);
+
+                        return (
+                          <button
+                            key={idx}
+                            onClick={() => interactive && handleCardClick(boardPlayerIdx, idx)}
+                            disabled={!interactive}
+                            className={cn(
+                              'transition-transform',
+                              interactive && 'hover:scale-110 cursor-pointer'
+                            )}
+                          >
+                            <SkyjoCard
+                              slot={toSlot(board[idx])}
+                              size={cardSize}
+                              highlight={interactive}
+                            />
+                          </button>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
               </div>
               <div className="text-xs mt-1 space-y-0.5">
                 <div className="text-muted-foreground">
