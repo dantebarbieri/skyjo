@@ -1,4 +1,5 @@
-import { getCardColorGroup, getCardClasses, CARD_COLORS } from '@/lib/card-styles';
+import { getCardColorGroup, getCardClasses, CARD_COLORS, COLUMN_CLEAR_COLORS } from '@/lib/card-styles';
+import type { CardColorGroup } from '@/lib/card-styles';
 
 describe('getCardColorGroup', () => {
   it('returns "negative" for negative values', () => {
@@ -41,5 +42,34 @@ describe('getCardClasses', () => {
       const colors = CARD_COLORS[group];
       expect(getCardClasses(val)).toBe(`${colors.bg} ${colors.text} ${colors.border}`);
     });
+  });
+});
+
+describe('COLUMN_CLEAR_COLORS', () => {
+  const allGroups: CardColorGroup[] = ['negative', 'zero', 'low', 'mid', 'high'];
+
+  it('has entries for all card color groups', () => {
+    for (const group of allGroups) {
+      expect(COLUMN_CLEAR_COLORS).toHaveProperty(group);
+    }
+  });
+
+  it('each entry has base, bright, and glow properties', () => {
+    for (const group of allGroups) {
+      const entry = COLUMN_CLEAR_COLORS[group];
+      expect(entry).toHaveProperty('base');
+      expect(entry).toHaveProperty('bright');
+      expect(entry).toHaveProperty('glow');
+    }
+  });
+
+  it('colors are valid CSS color strings (# or rgba)', () => {
+    const cssColorPattern = /^(#[0-9a-fA-F]{3,8}|rgba?\(.+\))$/;
+    for (const group of allGroups) {
+      const { base, bright, glow } = COLUMN_CLEAR_COLORS[group];
+      expect(base).toMatch(cssColorPattern);
+      expect(bright).toMatch(cssColorPattern);
+      expect(glow).toMatch(cssColorPattern);
+    }
   });
 });
