@@ -32,6 +32,7 @@ pub enum ServerError {
     GameNotStarted,
     GameAlreadyStarted,
     NotAllSlotsFilled,
+    NotAllReady,
 
     // Action errors
     InvalidAction(String),
@@ -93,6 +94,7 @@ impl ServerError {
             Self::GameNotStarted => "Game has not started".into(),
             Self::GameAlreadyStarted => "Game has already started".into(),
             Self::NotAllSlotsFilled => "Not all player slots are filled".into(),
+            Self::NotAllReady => "All players must be ready to start".into(),
             Self::InvalidAction(msg) => format!("Invalid action: {msg}"),
             Self::InvalidPosition(p) => format!("Invalid position: {p}"),
             Self::NotHost => "Only the host can perform this action".into(),

@@ -299,6 +299,7 @@ export const LobbyPlayerSchema = z.object({
   name: z.string(),
   player_type: PlayerSlotTypeSchema,
   connected: z.boolean(),
+  ready: z.boolean(),
   shares_ip_with_host: z.boolean().optional(),
   disconnect_secs: z.number().optional(),
 });
@@ -338,10 +339,10 @@ export const StateDeltaSchema = z.object({
 
 export const ServerMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('RoomState'), state: RoomLobbyStateSchema }),
-  z.object({ type: z.literal('GameState'), state: InteractiveGameStateSchema, turn_deadline_secs: z.number().nullable().optional() }),
-  z.object({ type: z.literal('ActionApplied'), player: z.number(), action: PlayerActionSchema, state: InteractiveGameStateSchema, turn_deadline_secs: z.number().nullable().optional() }),
+  z.object({ type: z.literal('GameState'), state: InteractiveGameStateSchema, turn_deadline_secs: z.number().nullable().optional(), round_ready: z.array(z.boolean()).optional() }),
+  z.object({ type: z.literal('ActionApplied'), player: z.number(), action: PlayerActionSchema, state: InteractiveGameStateSchema, turn_deadline_secs: z.number().nullable().optional(), round_ready: z.array(z.boolean()).optional() }),
   z.object({ type: z.literal('ActionAppliedDelta'), player: z.number(), action: PlayerActionSchema, delta: StateDeltaSchema }),
-  z.object({ type: z.literal('BotAction'), player: z.number(), action: PlayerActionSchema, state: InteractiveGameStateSchema, turn_deadline_secs: z.number().nullable().optional() }),
+  z.object({ type: z.literal('BotAction'), player: z.number(), action: PlayerActionSchema, state: InteractiveGameStateSchema, turn_deadline_secs: z.number().nullable().optional(), round_ready: z.array(z.boolean()).optional() }),
   z.object({ type: z.literal('TimeoutAction'), player: z.number(), action: PlayerActionSchema, state: InteractiveGameStateSchema, turn_deadline_secs: z.number().nullable().optional() }),
   z.object({ type: z.literal('PlayerJoined'), player_index: z.number(), name: z.string() }),
   z.object({ type: z.literal('PlayerLeft'), player_index: z.number() }),

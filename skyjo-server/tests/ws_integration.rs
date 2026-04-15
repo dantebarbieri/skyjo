@@ -16,6 +16,9 @@ fn all_client_messages_json_round_trip() {
         ClientMessage::ReturnToLobby,
         ClientMessage::PlayAgain,
         ClientMessage::ContinueRound,
+        ClientMessage::ReadyForNextRound,
+        ClientMessage::SetReady { ready: true },
+        ClientMessage::SetReady { ready: false },
         ClientMessage::RequestFullState,
         ClientMessage::SetNumPlayers { num_players: 4 },
         ClientMessage::SetRules {
@@ -78,6 +81,9 @@ fn all_client_messages_msgpack_round_trip() {
         ClientMessage::ReturnToLobby,
         ClientMessage::PlayAgain,
         ClientMessage::ContinueRound,
+        ClientMessage::ReadyForNextRound,
+        ClientMessage::SetReady { ready: true },
+        ClientMessage::SetReady { ready: false },
         ClientMessage::RequestFullState,
         ClientMessage::SetNumPlayers { num_players: 4 },
         ClientMessage::SetRules {

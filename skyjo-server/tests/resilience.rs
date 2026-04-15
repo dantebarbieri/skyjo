@@ -112,6 +112,9 @@ fn convert_disconnected_to_bot_preserves_integrity() {
     room.players[1].connected = false;
     room.players[1].disconnected_at = Some(Instant::now() - Duration::from_secs(120));
 
+    // Ready up players before starting
+    room.players[1].ready = true;
+
     // Start game (need all slots filled as human or bot)
     room.start_game().unwrap();
     assert_eq!(room.phase, RoomPhase::InGame);
@@ -145,6 +148,9 @@ fn reconnect_bot_to_human_restores_player() {
     room.players[1].session_token = Some(SessionToken::new());
     room.players[1].connected = false;
     room.players[1].disconnected_at = Some(Instant::now() - Duration::from_secs(120));
+
+    // Ready up players before starting
+    room.players[1].ready = true;
 
     // Start game
     room.start_game().unwrap();

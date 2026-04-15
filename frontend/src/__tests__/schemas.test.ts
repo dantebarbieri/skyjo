@@ -349,7 +349,7 @@ describe('Discriminated unions', () => {
     it('parses RoomState variant', () => {
       const roomState = {
         room_code: 'ABCD',
-        players: [{ slot: 0, name: 'Alice', player_type: { kind: 'Human' }, connected: true }],
+        players: [{ slot: 0, name: 'Alice', player_type: { kind: 'Human' }, connected: true, ready: true }],
         num_players: 2,
         rules: 'Standard',
         creator: 0,
