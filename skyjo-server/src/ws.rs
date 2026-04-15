@@ -743,12 +743,6 @@ async fn handle_parsed_message(
     }
 }
 
-/// Schedule a turn timeout check if the turn timer is active.
-/// Spawns a task that sleeps for the timer duration, then checks and applies timeout.
-fn schedule_turn_timeout(room: SharedRoom) {
-    schedule_turn_timeout_with_persistence(room, None);
-}
-
 /// Schedule a turn timeout check, with optional persistence for game-over handling.
 fn schedule_turn_timeout_with_persistence(room: SharedRoom, persistence: Option<Persistence>) {
     tokio::spawn(async move {
@@ -808,11 +802,6 @@ fn schedule_turn_timeout_with_persistence(room: SharedRoom, persistence: Option<
             }
         }
     });
-}
-
-/// Run consecutive bot turns with delays until a human player's turn or game end.
-async fn run_bot_turns(room: SharedRoom) {
-    run_bot_turns_with_persistence(room, None).await;
 }
 
 /// Run consecutive bot turns, optionally persisting game-over.
