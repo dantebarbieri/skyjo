@@ -64,8 +64,8 @@ html {
 
 /* Column-clear border pulse animation — uses CSS custom properties for color matching */
 @keyframes border-pulse {
-  0%, 100% { outline-color: var(--clear-color-base); box-shadow: 0 0 4px var(--clear-color-glow); }
-  50% { outline-color: var(--clear-color-bright); box-shadow: 0 0 12px var(--clear-color-glow); }
+  0%, 100% { outline-color: var(--clear-color-base); box-shadow: 0 0 6px 1px var(--clear-color-glow); }
+  50% { outline-color: var(--clear-color-bright); box-shadow: 0 0 16px 3px var(--clear-color-glow); }
 }
 
 /* Skyjo stained-glass / Voronoi mosaic pattern for cards */

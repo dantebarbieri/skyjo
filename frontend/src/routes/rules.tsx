@@ -666,7 +666,7 @@ function ColumnClearSection() {
                       key={c}
                       className={cn(
                         'flex flex-col gap-1.5 rounded-lg transition-all duration-300',
-                        isColHighlighted && 'outline-3 outline animate-[border-pulse_1.5s_ease-in-out_infinite]',
+                        isColHighlighted && 'outline-4 outline outline-offset-2 animate-[border-pulse_1.5s_ease-in-out_infinite]',
                       )}
                       style={clearStyle}
                     >
