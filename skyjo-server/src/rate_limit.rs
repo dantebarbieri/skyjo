@@ -66,8 +66,8 @@ pub mod limits {
     /// WebSocket messages: 30 per second (burst 30)
     pub const WS_MESSAGE: RateLimitConfig = RateLimitConfig::new(30.0, 30.0);
 
-    /// Genetic API: 1 per 10 seconds
-    pub const GENETIC_API: RateLimitConfig = RateLimitConfig::new(1.0, 0.1);
+    /// Genetic API: burst of 10, refill 10 per minute
+    pub const GENETIC_API: RateLimitConfig = RateLimitConfig::new(10.0, 10.0 / 60.0);
 }
 
 /// Per-IP rate limiter using token buckets.

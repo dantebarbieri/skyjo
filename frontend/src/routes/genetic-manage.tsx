@@ -25,7 +25,20 @@ export default function GeneticManageRoute() {
   const { user, isAuthenticated, isLoading } = useAuth();
   const navigate = useNavigate();
 
-  // Auth gate: require moderator or admin
+  const [model, setModel] = useState<GeneticModelData | null>(null);
+  const [saved, setSaved] = useState<SavedGenerationInfo[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!isLoading && isAuthenticated) {
+      fetchAll();
+    }
+  }, [isLoading, isAuthenticated]);
+
+  // Auth gate: require moderator or admin (after all hooks)
   if (!isLoading && (!isAuthenticated || !user || (user.permission !== 'admin' && user.permission !== 'moderator'))) {
     if (!isAuthenticated) {
       navigate('/login', { state: { from: '/rules/strategies/Genetic/manage' }, replace: true });
@@ -40,17 +53,6 @@ export default function GeneticManageRoute() {
   if (isLoading) {
     return <div className="text-center py-12 text-muted-foreground animate-pulse">Loading...</div>;
   }
-
-  const [model, setModel] = useState<GeneticModelData | null>(null);
-  const [saved, setSaved] = useState<SavedGenerationInfo[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    fetchAll();
-  }, []);
 
   async function fetchAll() {
     try {
