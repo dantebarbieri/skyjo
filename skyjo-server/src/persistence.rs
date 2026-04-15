@@ -81,6 +81,10 @@ impl Persistence {
                 "002_users_auth",
                 include_str!("../../migrations/002_users_auth.sql"),
             ),
+            (
+                "003_leaderboard",
+                include_str!("../../migrations/003_leaderboard.sql"),
+            ),
         ];
 
         for (name, sql) in migrations {
