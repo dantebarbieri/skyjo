@@ -2771,7 +2771,7 @@ mod tests {
     }
 
     #[test]
-    fn ready_state_not_preserved_across_game_restart() {
+    fn ready_state_preserved_across_game_restart() {
         let mut room = Room::new("R".to_string(), "A".to_string(), 2, None, 0, 0);
         room.players[1] = PlayerSlot {
             name: "Bob".to_string(),
