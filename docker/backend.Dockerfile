@@ -5,6 +5,7 @@ WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 COPY skyjo-core/ skyjo-core/
 COPY skyjo-server/ skyjo-server/
+COPY migrations/ migrations/
 # Stub skyjo-wasm to satisfy workspace
 COPY skyjo-wasm/Cargo.toml skyjo-wasm/Cargo.toml
 RUN mkdir -p skyjo-wasm/src && echo "" > skyjo-wasm/src/lib.rs
