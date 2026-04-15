@@ -244,6 +244,7 @@ async fn main() {
 
     // API routes
     let api_routes = Router::new()
+        .route("/health", get(health))
         .route("/rooms", post(skyjo_server::create_room))
         .route("/rooms/{code}", get(skyjo_server::room_info))
         .route("/rooms/{code}/join", post(skyjo_server::join_room))
@@ -384,6 +385,10 @@ struct WsQuery {
     /// Wire format preference: "json" (default) or "msgpack"
     #[serde(default)]
     format: Option<String>,
+}
+
+async fn health() -> Json<serde_json::Value> {
+    Json(serde_json::json!({ "status": "ok" }))
 }
 
 async fn ws_upgrade(
