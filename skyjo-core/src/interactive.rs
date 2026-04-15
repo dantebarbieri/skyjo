@@ -1547,15 +1547,8 @@ mod tests {
                 .unwrap();
         }
 
-        // Verify recorded turns match the actions played
-        let history = game.build_history();
-        // Turns are in current_round_turns (not yet in completed_rounds since round isn't over).
-        // build_history only includes completed_rounds, so we check directly.
-        // Instead, let's check the internal state via playing a full game:
-        // We know at least 3 turns were recorded. Since the round isn't complete,
-        // completed_rounds is empty. Let's verify that by playing to completion.
-
-        // For a completed game, verify turn action types:
+        // Current round turns aren't in completed_rounds yet (round not over).
+        // Verify via a completed game instead:
         let game = play_to_completion(42, 2);
         let history = game.build_history();
         let round = &history.rounds[0];
@@ -1607,11 +1600,7 @@ mod tests {
                 );
                 // All flip positions must be valid board indices (< 12 for 3x4)
                 for &pos in player_flips {
-                    assert!(
-                        pos < 12,
-                        "Flip position {} out of bounds for 3x4 grid",
-                        pos
-                    );
+                    assert!(pos < 12, "Flip position {} out of bounds for 3x4 grid", pos);
                 }
             }
         }
