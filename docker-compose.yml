@@ -6,7 +6,14 @@ services:
     ports:
       - "${PORT:-8080}:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://localhost/"]
+      interval: 30s
+      timeout: 3s
+      start_period: 5s
+      retries: 3
     restart: unless-stopped
 
   backend:
@@ -24,6 +31,12 @@ services:
       - SKYJO_DATA_DIR=/var/lib/skyjo
     volumes:
       - skyjo-data:/var/lib/skyjo
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "--max-time", "2", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 3s
+      start_period: 5s
+      retries: 3
     restart: unless-stopped
 
   db:

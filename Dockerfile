@@ -45,7 +45,7 @@ RUN cargo build --release --package skyjo-server
 # Stage 4: Final image — Rust server serves static files + WebSocket
 FROM debian:bookworm-slim
 
-RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y ca-certificates curl && rm -rf /var/lib/apt/lists/*
 
 COPY --from=server-build /app/target/release/skyjo-server /usr/local/bin/
 COPY --from=frontend-build /app/dist/ /var/www/static/
@@ -56,6 +56,6 @@ VOLUME ["/var/lib/skyjo"]
 ENV SKYJO_DATA_DIR=/var/lib/skyjo
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD timeout 3 bash -c 'cat < /dev/null > /dev/tcp/localhost/8080' || exit 1
+    CMD curl --fail --silent --show-error --max-time 2 http://localhost:8080/api/health || exit 1
 
 CMD ["skyjo-server", "--static-dir", "/var/www/static", "--port", "8080", "--data-dir", "/var/lib/skyjo"]
