@@ -246,7 +246,7 @@ impl Persistence {
     }
 
     /// Load all room snapshots (for crash recovery on startup).
-    /// Tolerant of per-room errors: logs and skips invalid snapshots.
+    /// Validates each snapshot and skips invalid ones with a warning log.
     pub async fn load_all_room_snapshots(&self) -> Result<Vec<RoomSnapshot>, PersistenceError> {
         let rows: Vec<SnapshotRow> = sqlx::query_as(
             "SELECT room_code, phase_id, num_players, rules_name, creator,
@@ -313,17 +313,50 @@ impl Persistence {
             winners_by_room.entry(code).or_default().push(idx as usize);
         }
 
-        // Assemble snapshots
+        // Assemble and validate snapshots
         let mut snapshots = Vec::with_capacity(rows.len());
         for row in rows {
             let code = row.room_code.clone();
+            let num_players = row.num_players.unwrap_or(0) as usize;
+            let creator = row.creator as usize;
+            let rules_name = row.rules_name.clone().unwrap_or_default();
+            let players = players_by_room.remove(&code).unwrap_or_default();
+
+            // Validate: skip corrupted/incomplete snapshots
+            if num_players == 0 {
+                tracing::warn!(room = %code, "Skipping snapshot: num_players is 0");
+                continue;
+            }
+            if rules_name.is_empty() {
+                tracing::warn!(room = %code, "Skipping snapshot: rules_name is empty");
+                continue;
+            }
+            if players.len() != num_players {
+                tracing::warn!(
+                    room = %code,
+                    expected = num_players,
+                    actual = players.len(),
+                    "Skipping snapshot: player count mismatch"
+                );
+                continue;
+            }
+            if creator >= num_players {
+                tracing::warn!(
+                    room = %code,
+                    creator,
+                    num_players,
+                    "Skipping snapshot: creator index out of bounds"
+                );
+                continue;
+            }
+
             snapshots.push(RoomSnapshot {
                 code: row.room_code,
                 phase: id_to_room_phase(row.phase_id),
-                num_players: row.num_players.unwrap_or(0) as usize,
-                creator: row.creator as usize,
-                players: players_by_room.remove(&code).unwrap_or_default(),
-                rules_name: row.rules_name.unwrap_or_default(),
+                num_players,
+                creator,
+                players,
+                rules_name,
                 turn_timer_secs: row.turn_timer_secs.map(|v| v as u64),
                 disconnect_bot_timeout_secs: row.disconnect_bot_timeout_secs.map(|v| v as u32),
                 game_state_json: row.game_state_json,
