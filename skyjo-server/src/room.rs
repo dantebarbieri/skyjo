@@ -2698,6 +2698,236 @@ mod tests {
         assert!(room.round_ready.is_empty());
     }
 
+    #[test]
+    fn promote_host_makes_new_host_auto_ready() {
+        let mut room = Room::new("R".to_string(), "A".to_string(), 3, None, 0, 0);
+        room.players[1] = PlayerSlot {
+            name: "Bob".to_string(),
+            slot_type: PlayerSlotType::Human,
+            session_token: None,
+            connected: true,
+            ip: None,
+            disconnected_at: None,
+            was_human: false,
+            latency_ms: None,
+            broadcast_lag_count: 0,
+            user_id: None,
+            ready: false,
+        };
+        room.configure_slot(2, "Bot:Random").unwrap();
+
+        // Bob is not ready, but after promotion he's the host = auto-ready
+        assert!(!room.players[1].ready);
+        room.promote_host(1).unwrap();
+        assert_eq!(room.creator, 1);
+
+        // all_players_ready: new host (1) auto-ready, old host (0) not ready
+        assert!(!room.all_players_ready());
+        // Old host needs to ready up
+        room.set_ready(0, true).unwrap();
+        assert!(room.all_players_ready());
+    }
+
+    #[test]
+    fn all_players_ready_with_multiple_humans() {
+        let mut room = Room::new("R".to_string(), "A".to_string(), 4, None, 0, 0);
+        for i in 1..4 {
+            room.players[i] = PlayerSlot {
+                name: format!("Player{i}"),
+                slot_type: PlayerSlotType::Human,
+                session_token: None,
+                connected: true,
+                ip: None,
+                disconnected_at: None,
+                was_human: false,
+                latency_ms: None,
+                broadcast_lag_count: 0,
+                user_id: None,
+                ready: false,
+            };
+        }
+        // Only host is auto-ready
+        assert!(!room.all_players_ready());
+
+        // Ready up one at a time
+        room.set_ready(1, true).unwrap();
+        assert!(!room.all_players_ready());
+        room.set_ready(2, true).unwrap();
+        assert!(!room.all_players_ready());
+        room.set_ready(3, true).unwrap();
+        assert!(room.all_players_ready());
+
+        // Un-ready one player
+        room.set_ready(2, false).unwrap();
+        assert!(!room.all_players_ready());
+    }
+
+    #[test]
+    fn set_ready_for_empty_slot_fails() {
+        let mut room = test_room();
+        let err = room.set_ready(1, true).unwrap_err();
+        // Slot 1 is Empty, not Human
+        assert!(matches!(err, ServerError::InvalidAction(_)));
+    }
+
+    #[test]
+    fn ready_state_not_preserved_across_game_restart() {
+        let mut room = Room::new("R".to_string(), "A".to_string(), 2, None, 0, 0);
+        room.players[1] = PlayerSlot {
+            name: "Bob".to_string(),
+            slot_type: PlayerSlotType::Human,
+            session_token: None,
+            connected: true,
+            ip: None,
+            disconnected_at: None,
+            was_human: false,
+            latency_ms: None,
+            broadcast_lag_count: 0,
+            user_id: None,
+            ready: true,
+        };
+        // Start and play through a game
+        room.start_game().unwrap();
+        play_until_game_over(&mut room);
+        room.play_again().unwrap();
+
+        // After returning to lobby, ready state should still be what it was
+        // (settings haven't changed, so ready doesn't reset)
+        assert!(room.players[1].ready);
+    }
+
+    #[test]
+    fn round_ready_with_multiple_humans() {
+        // Create a 3-player room: human host + 2 humans
+        let mut room = Room::new("R".to_string(), "A".to_string(), 3, None, 0, 0);
+        for i in 1..3 {
+            room.players[i] = PlayerSlot {
+                name: format!("P{i}"),
+                slot_type: PlayerSlotType::Human,
+                session_token: None,
+                connected: true,
+                ip: None,
+                disconnected_at: None,
+                was_human: false,
+                latency_ms: None,
+                broadcast_lag_count: 0,
+                user_id: None,
+                ready: true,
+            };
+        }
+        room.start_game().unwrap();
+        play_until_round_over(&mut room);
+        if room.phase == RoomPhase::GameOver {
+            return;
+        }
+
+        // All 3 humans should be not-ready
+        assert_eq!(room.round_ready.len(), 3);
+        assert!(room.round_ready.iter().all(|&r| !r));
+
+        // First player readies
+        let all = room.set_round_ready(0).unwrap();
+        assert!(!all);
+        assert!(room.round_ready[0]);
+
+        // Second readies
+        let all = room.set_round_ready(1).unwrap();
+        assert!(!all);
+
+        // Third readies — now all ready
+        let all = room.set_round_ready(2).unwrap();
+        assert!(all);
+    }
+
+    #[test]
+    fn round_ready_invalid_slot_rejected() {
+        let mut room = ingame_room();
+        play_until_round_over(&mut room);
+        if room.phase == RoomPhase::GameOver {
+            return;
+        }
+        let err = room.set_round_ready(99).unwrap_err();
+        assert_eq!(err, ServerError::InvalidSlot(99));
+    }
+
+    #[test]
+    fn round_ready_bot_conversion_auto_readies() {
+        let mut room = Room::new("R".to_string(), "A".to_string(), 3, None, 0, 0);
+        for i in 1..3 {
+            room.players[i] = PlayerSlot {
+                name: format!("P{i}"),
+                slot_type: PlayerSlotType::Human,
+                session_token: Some(SessionToken::new()),
+                connected: true,
+                ip: None,
+                disconnected_at: None,
+                was_human: false,
+                latency_ms: None,
+                broadcast_lag_count: 0,
+                user_id: None,
+                ready: true,
+            };
+        }
+        room.start_game().unwrap();
+
+        // Disconnect player 2 and convert to bot
+        room.players[2].connected = false;
+        room.players[2].disconnected_at = Some(Instant::now() - Duration::from_secs(300));
+        room.convert_disconnected_to_bots(Duration::from_secs(60));
+        assert!(matches!(
+            room.players[2].slot_type,
+            PlayerSlotType::Bot { .. }
+        ));
+
+        play_until_round_over(&mut room);
+        if room.phase == RoomPhase::GameOver {
+            return;
+        }
+
+        // Bot-converted player should be auto-ready
+        assert!(room.round_ready[2]);
+        // Humans should not be ready
+        assert!(!room.round_ready[0]);
+        assert!(!room.round_ready[1]);
+    }
+
+    #[test]
+    fn get_round_ready_returns_none_when_not_round_over() {
+        let room = ingame_room();
+        assert!(room.get_round_ready().is_none());
+    }
+
+    #[test]
+    fn get_round_ready_returns_none_in_lobby() {
+        let room = test_room();
+        assert!(room.get_round_ready().is_none());
+    }
+
+    #[test]
+    fn lobby_state_ready_after_set_ready() {
+        let mut room = Room::new("R".to_string(), "A".to_string(), 2, None, 0, 0);
+        room.players[1] = PlayerSlot {
+            name: "Bob".to_string(),
+            slot_type: PlayerSlotType::Human,
+            session_token: None,
+            connected: true,
+            ip: None,
+            disconnected_at: None,
+            was_human: false,
+            latency_ms: None,
+            broadcast_lag_count: 0,
+            user_id: None,
+            ready: false,
+        };
+
+        let state = room.lobby_state();
+        assert!(!state.players[1].ready);
+
+        room.set_ready(1, true).unwrap();
+        let state = room.lobby_state();
+        assert!(state.players[1].ready);
+    }
+
     // ========================================================================
     // Helpers
     // ========================================================================

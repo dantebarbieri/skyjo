@@ -196,7 +196,7 @@ pub struct LobbyPlayer {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub latency_ms: Option<u32>,
     /// Number of broadcast lag events (channel overflow).
-    #[serde(skip_serializing_if = "is_zero")]
+    #[serde(default, skip_serializing_if = "is_zero")]
     pub broadcast_lag_count: u32,
 }
 
