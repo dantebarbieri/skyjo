@@ -152,6 +152,26 @@ async fn main() {
         }
     }
 
+    // Mark any orphaned in-progress games as abandoned (from previous server crashes)
+    match persistence.find_orphaned_in_progress_games().await {
+        Ok(orphaned) => {
+            if !orphaned.is_empty() {
+                tracing::info!(
+                    "Found {} orphaned in-progress game(s), marking as abandoned",
+                    orphaned.len()
+                );
+                for game_id in orphaned {
+                    if let Err(e) = persistence.update_game_state(game_id, "abandoned").await {
+                        tracing::error!(game_id = %game_id, "Failed to mark orphaned game as abandoned: {e}");
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            tracing::warn!("Failed to find orphaned in-progress games: {e}");
+        }
+    }
+
     // Spawn room cleanup + periodic snapshot task
     let cleanup_state = app_state.clone();
     let cleanup_persistence = persistence.clone();
@@ -159,10 +179,20 @@ async fn main() {
         let mut interval = tokio::time::interval(Duration::from_secs(60));
         loop {
             interval.tick().await;
-            cleanup_state.lobby.cleanup_stale_rooms(
+            let abandoned_game_ids = cleanup_state.lobby.cleanup_stale_rooms(
                 Duration::from_secs(300), // 5 min after game over
                 Duration::from_secs(600), // 10 min after all disconnect
             );
+
+            // Mark abandoned in-progress games
+            for game_id in abandoned_game_ids {
+                if let Err(e) = cleanup_persistence
+                    .update_game_state(game_id, "abandoned")
+                    .await
+                {
+                    tracing::error!(game_id = %game_id, "Failed to mark abandoned game: {e}");
+                }
+            }
 
             // Clean up stale rate limiter entries
             cleanup_state.rate_limiter.cleanup(Duration::from_secs(300));
@@ -249,6 +279,15 @@ async fn main() {
         .route("/rooms/{code}", get(skyjo_server::room_info))
         .route("/rooms/{code}/join", post(skyjo_server::join_room))
         .route("/rooms/{code}/ws", get(ws_upgrade))
+        .route("/games", get(skyjo_server::leaderboard::list_games))
+        .route(
+            "/games/{id}",
+            get(skyjo_server::leaderboard::get_game_detail),
+        )
+        .route(
+            "/games/{id}/replay",
+            get(skyjo_server::leaderboard::get_game_replay),
+        )
         .route("/genetic/model", get(genetic_model))
         .route("/genetic/status", get(skyjo_server::genetic_status))
         .route("/genetic/saved", get(genetic_saved_list))

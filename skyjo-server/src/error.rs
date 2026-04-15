@@ -15,6 +15,9 @@ pub enum ServerError {
     // User errors
     UserNotFound,
 
+    // Game/leaderboard errors
+    GameNotFound,
+
     // Slot/player errors
     InvalidSlot(usize),
     SlotEmpty,
@@ -61,6 +64,7 @@ impl ServerError {
         match self {
             Self::RoomNotFound => StatusCode::NOT_FOUND,
             Self::UserNotFound => StatusCode::NOT_FOUND,
+            Self::GameNotFound => StatusCode::NOT_FOUND,
             Self::Unauthorized | Self::Banned => StatusCode::FORBIDDEN,
             Self::Forbidden => StatusCode::FORBIDDEN,
             Self::RateLimited => StatusCode::TOO_MANY_REQUESTS,
@@ -74,6 +78,7 @@ impl ServerError {
         match self {
             Self::RoomNotFound => "Room not found".into(),
             Self::UserNotFound => "User not found".into(),
+            Self::GameNotFound => "Game not found".into(),
             Self::RoomFull => "Room is full".into(),
             Self::RoomCodeInvalid => "Invalid room code format".into(),
             Self::MaxRoomsReached => "Maximum number of rooms reached".into(),
@@ -161,6 +166,10 @@ mod tests {
         assert_eq!(
             ServerError::NotYourTurn.status_code(),
             StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            ServerError::GameNotFound.status_code(),
+            StatusCode::NOT_FOUND
         );
     }
 

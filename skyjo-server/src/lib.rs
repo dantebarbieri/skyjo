@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod error;
 pub mod genetic;
+pub mod leaderboard;
 pub mod lobby;
 pub mod messages;
 pub mod persistence;

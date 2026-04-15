@@ -68,6 +68,8 @@ pub struct PlayerSlot {
     pub latency_ms: Option<u32>,
     /// Number of broadcast lag events (channel overflow).
     pub broadcast_lag_count: u32,
+    /// Authenticated user ID (set during WebSocket upgrade if JWT is valid).
+    pub user_id: Option<uuid::Uuid>,
 }
 
 /// A game room holding all state for one multiplayer session.
@@ -102,6 +104,10 @@ pub struct Room {
     /// Seconds before a disconnected player is converted to a bot during a game.
     /// None means use the default (60 seconds).
     pub disconnect_bot_timeout_secs: Option<u32>,
+    /// Unique ID for the current game (for persistence tracking).
+    pub game_id: Option<uuid::Uuid>,
+    /// Seed used for the current game's RNG.
+    pub game_seed: Option<u64>,
 }
 
 /// Validate and sanitize a player name.
@@ -152,6 +158,7 @@ impl Room {
             was_human: false,
             latency_ms: None,
             broadcast_lag_count: 0,
+            user_id: None,
         });
         // Remaining slots are empty
         for _ in 1..num_players {
@@ -165,6 +172,7 @@ impl Room {
                 was_human: false,
                 latency_ms: None,
                 broadcast_lag_count: 0,
+                user_id: None,
             });
         }
 
@@ -187,6 +195,8 @@ impl Room {
             genetic_games_trained,
             genetic_generation,
             disconnect_bot_timeout_secs: None,
+            game_id: None,
+            game_seed: None,
         }
     }
 
@@ -277,6 +287,7 @@ impl Room {
                     was_human: false,
                     latency_ms: None,
                     broadcast_lag_count: 0,
+                    user_id: None,
                 };
             }
             s if s.starts_with("Bot:") => {
@@ -298,6 +309,7 @@ impl Room {
                     was_human: false,
                     latency_ms: None,
                     broadcast_lag_count: 0,
+                    user_id: None,
                 };
             }
             _ => {
@@ -441,6 +453,7 @@ impl Room {
                     was_human: false,
                     latency_ms: None,
                     broadcast_lag_count: 0,
+                    user_id: None,
                 });
             }
         } else if num_players < self.num_players {
@@ -497,6 +510,7 @@ impl Room {
             was_human: false,
             latency_ms: None,
             broadcast_lag_count: 0,
+            user_id: None,
         };
 
         self.touch();
@@ -558,6 +572,8 @@ impl Room {
             .map_err(|e| ServerError::InvalidAction(e.to_string()))?;
 
         self.game = Some(game);
+        self.game_id = Some(uuid::Uuid::new_v4());
+        self.game_seed = Some(seed);
         self.transition(RoomPhase::InGame)?;
         self.reset_turn_start();
 
@@ -639,15 +655,17 @@ impl Room {
         Ok((current, action, delta))
     }
 
-    fn check_game_over(&mut self) {
+    fn check_game_over(&mut self) -> bool {
         if let Some(game) = &self.game {
             let action_needed = game.get_action_needed();
             if let skyjo_core::ActionNeeded::GameOver { ref winners, .. } = action_needed {
                 self.transition(RoomPhase::GameOver)
                     .expect("InGame → GameOver is a valid transition");
                 self.last_winners = winners.clone();
+                return true;
             }
         }
+        false
     }
 
     /// Continue to next round. Phase remains InGame (no transition needed).
@@ -739,6 +757,7 @@ impl Room {
                     was_human: false,
                     latency_ms: None,
                     broadcast_lag_count: 0,
+                    user_id: None,
                 };
                 kicked.push((i, token));
             }
@@ -954,6 +973,7 @@ impl Room {
                 was_human: ps.was_human,
                 latency_ms: None,
                 broadcast_lag_count: 0,
+                user_id: None,
             })
             .collect();
 
@@ -977,6 +997,8 @@ impl Room {
             genetic_generation: 0,
             disconnect_bot_timeout_secs: snapshot.disconnect_bot_timeout_secs,
             player_txs: vec![None; snapshot.num_players],
+            game_id: None,
+            game_seed: None,
         }
     }
 
@@ -1725,6 +1747,7 @@ mod tests {
             was_human: false,
             latency_ms: None,
             broadcast_lag_count: 0,
+            user_id: None,
         };
 
         let token = room.kick_player(1).unwrap();
@@ -1775,6 +1798,7 @@ mod tests {
             was_human: false,
             latency_ms: None,
             broadcast_lag_count: 0,
+            user_id: None,
         };
 
         room.ban_player(1).unwrap();
@@ -1796,6 +1820,7 @@ mod tests {
             was_human: false,
             latency_ms: None,
             broadcast_lag_count: 0,
+            user_id: None,
         };
 
         let err = room.ban_player(1).unwrap_err();
@@ -1822,6 +1847,7 @@ mod tests {
             was_human: false,
             latency_ms: None,
             broadcast_lag_count: 0,
+            user_id: None,
         };
         room.promote_host(1).unwrap();
         assert_eq!(room.creator, 1);
@@ -1856,6 +1882,7 @@ mod tests {
             was_human: false,
             latency_ms: None,
             broadcast_lag_count: 0,
+            user_id: None,
         };
         room.players[2] = PlayerSlot {
             name: "Charlie".to_string(),
@@ -1867,6 +1894,7 @@ mod tests {
             was_human: false,
             latency_ms: None,
             broadcast_lag_count: 0,
+            user_id: None,
         };
 
         let promoted = room.auto_promote_host();
@@ -1904,6 +1932,7 @@ mod tests {
             was_human: false,
             latency_ms: None,
             broadcast_lag_count: 0,
+            user_id: None,
         };
 
         let promoted = room.auto_promote_host();
@@ -1938,6 +1967,7 @@ mod tests {
             was_human: false,
             latency_ms: None,
             broadcast_lag_count: 0,
+            user_id: None,
         };
         assert_eq!(room.next_available_slot(), None);
     }
@@ -1968,6 +1998,7 @@ mod tests {
             was_human: false,
             latency_ms: None,
             broadcast_lag_count: 0,
+            user_id: None,
         };
 
         let kicked = room.auto_kick_disconnected(Duration::from_secs(60));
@@ -1989,6 +2020,7 @@ mod tests {
             was_human: false,
             latency_ms: None,
             broadcast_lag_count: 0,
+            user_id: None,
         };
 
         let kicked = room.auto_kick_disconnected(Duration::from_secs(60));
@@ -2245,6 +2277,7 @@ mod tests {
             was_human: false,
             latency_ms: None,
             broadcast_lag_count: 0,
+            user_id: None,
         };
         // In lobby phase, auto_kick_disconnected should kick, not convert to bot
         assert_eq!(room.phase, RoomPhase::Lobby);
