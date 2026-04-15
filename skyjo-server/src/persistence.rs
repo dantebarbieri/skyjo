@@ -246,6 +246,7 @@ impl Persistence {
     }
 
     /// Load all room snapshots (for crash recovery on startup).
+    /// Tolerant of per-room errors: logs and skips invalid snapshots.
     pub async fn load_all_room_snapshots(&self) -> Result<Vec<RoomSnapshot>, PersistenceError> {
         let rows: Vec<SnapshotRow> = sqlx::query_as(
             "SELECT room_code, phase_id, num_players, rules_name, creator,
@@ -255,9 +256,80 @@ impl Persistence {
         .fetch_all(&self.pool)
         .await?;
 
+        if rows.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let room_codes: Vec<String> = rows.iter().map(|r| r.room_code.clone()).collect();
+
+        // Batch-fetch all child rows
+        let all_players: Vec<BatchedSnapshotPlayerRow> = sqlx::query_as(
+            "SELECT room_code, slot_index, slot_type_id, player_name, strategy_name, was_human
+             FROM room_snapshot_players WHERE room_code = ANY($1) ORDER BY room_code, slot_index",
+        )
+        .bind(&room_codes)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let all_banned: Vec<(String, String)> = sqlx::query_as(
+            "SELECT room_code, ip_address FROM room_snapshot_banned_ips
+             WHERE room_code = ANY($1) ORDER BY room_code, ip_address",
+        )
+        .bind(&room_codes)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let all_winners: Vec<(String, i32)> = sqlx::query_as(
+            "SELECT room_code, player_index FROM room_snapshot_last_winners
+             WHERE room_code = ANY($1) ORDER BY room_code, player_index",
+        )
+        .bind(&room_codes)
+        .fetch_all(&self.pool)
+        .await?;
+
+        // Group child rows by room_code
+        let mut players_by_room: std::collections::HashMap<String, Vec<PlayerSlotSnapshot>> =
+            std::collections::HashMap::new();
+        for p in all_players {
+            players_by_room
+                .entry(p.room_code)
+                .or_default()
+                .push(PlayerSlotSnapshot {
+                    name: p.player_name.unwrap_or_default(),
+                    slot_type: row_to_player_slot_type(p.slot_type_id, p.strategy_name),
+                    was_human: p.was_human,
+                });
+        }
+
+        let mut banned_by_room: std::collections::HashMap<String, Vec<String>> =
+            std::collections::HashMap::new();
+        for (code, ip) in all_banned {
+            banned_by_room.entry(code).or_default().push(ip);
+        }
+
+        let mut winners_by_room: std::collections::HashMap<String, Vec<usize>> =
+            std::collections::HashMap::new();
+        for (code, idx) in all_winners {
+            winners_by_room.entry(code).or_default().push(idx as usize);
+        }
+
+        // Assemble snapshots
         let mut snapshots = Vec::with_capacity(rows.len());
         for row in rows {
-            snapshots.push(self.build_room_snapshot(row).await?);
+            let code = row.room_code.clone();
+            snapshots.push(RoomSnapshot {
+                code: row.room_code,
+                phase: id_to_room_phase(row.phase_id),
+                num_players: row.num_players.unwrap_or(0) as usize,
+                creator: row.creator as usize,
+                players: players_by_room.remove(&code).unwrap_or_default(),
+                rules_name: row.rules_name.unwrap_or_default(),
+                turn_timer_secs: row.turn_timer_secs.map(|v| v as u64),
+                disconnect_bot_timeout_secs: row.disconnect_bot_timeout_secs.map(|v| v as u32),
+                game_state_json: row.game_state_json,
+                banned_ips: banned_by_room.remove(&code).unwrap_or_default(),
+                last_winners: winners_by_room.remove(&code).unwrap_or_default(),
+            });
         }
         Ok(snapshots)
     }
@@ -276,7 +348,8 @@ impl Persistence {
         .await?;
 
         let banned_ips: Vec<String> = sqlx::query_scalar(
-            "SELECT ip_address FROM room_snapshot_banned_ips WHERE room_code = $1",
+            "SELECT ip_address FROM room_snapshot_banned_ips WHERE room_code = $1
+             ORDER BY ip_address",
         )
         .bind(&row.room_code)
         .fetch_all(&self.pool)
@@ -1599,6 +1672,17 @@ struct SnapshotRow {
 
 #[derive(Debug, sqlx::FromRow)]
 struct SnapshotPlayerRow {
+    #[allow(dead_code)]
+    slot_index: i32,
+    slot_type_id: i32,
+    player_name: Option<String>,
+    strategy_name: Option<String>,
+    was_human: bool,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct BatchedSnapshotPlayerRow {
+    room_code: String,
     #[allow(dead_code)]
     slot_index: i32,
     slot_type_id: i32,
