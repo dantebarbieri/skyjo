@@ -82,11 +82,23 @@ export default function SkyjoCard({ slot, size = 'md', className, highlight, onC
   const cardRef = useRef<HTMLDivElement>(null);
   useTiltEffect(cardRef);
 
+  const interactiveProps = onClick ? {
+    role: 'button' as const,
+    tabIndex: 0,
+    onKeyDown: (e: React.KeyboardEvent) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        onClick();
+      }
+    },
+  } : {};
+
   if (typeof slot === 'string') {
     // Cleared — no tilt effect
     return (
       <div
         onClick={onClick}
+        {...interactiveProps}
         className={cn(
           SIZES[size],
           'rounded-lg border-2 border-dashed border-muted-foreground/30 bg-muted/30 flex items-center justify-center select-none',
@@ -101,6 +113,7 @@ export default function SkyjoCard({ slot, size = 'md', className, highlight, onC
       <div
         ref={cardRef}
         onClick={onClick}
+        {...interactiveProps}
         className={cn(
           SIZES[size],
           'rounded-lg border-[3px] border-white bg-gradient-to-br from-teal-600 to-teal-800 flex items-center justify-center relative overflow-hidden will-change-transform select-none cursor-default',
@@ -129,6 +142,7 @@ export default function SkyjoCard({ slot, size = 'md', className, highlight, onC
     <div
       ref={cardRef}
       onClick={onClick}
+      {...interactiveProps}
       className={cn(
         SIZES[size],
         `rounded-lg border-[3px] border-white bg-gradient-to-br ${colors.bg} ${colors.text} flex items-center justify-center relative overflow-hidden will-change-transform select-none cursor-default`,

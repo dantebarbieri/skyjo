@@ -5,7 +5,6 @@ import type {
   PlayerAction,
   PlayConfig,
   PlayerType,
-  ColumnClearEvent,
 } from '@/types';
 import { z } from 'zod';
 import {

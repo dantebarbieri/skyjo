@@ -1,12 +1,4 @@
-// Polyfill ResizeObserver for Radix UI tooltip in jsdom
-class ResizeObserverMock {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-}
-globalThis.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
-
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { ActionButtons } from '../action-buttons';
 
@@ -24,6 +16,18 @@ function renderButtons(overrides: Partial<Parameters<typeof ActionButtons>[0]> =
 }
 
 describe('ActionButtons', () => {
+  beforeEach(() => {
+    vi.stubGlobal('ResizeObserver', class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it('renders Trash and Undo buttons', () => {
     renderButtons();
     const buttons = screen.getAllByRole('button');

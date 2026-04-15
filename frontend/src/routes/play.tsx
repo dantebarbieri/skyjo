@@ -469,6 +469,7 @@ function PlayBoard({
 
   // Which cards are clickable on a given player's board
   const getCardInteractive = (playerIdx: number, pos: number): boolean => {
+    if (pendingClearColumns) return false;
     if (isBotTurn) return false;
     if (isInitialFlips) {
       if (playerIdx !== action_needed.player) return false;

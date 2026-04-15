@@ -33,7 +33,7 @@ export function ActionButtons({
               disabled={!trashEnabled}
               onClick={onToggleFlip}
               className="h-9 w-9"
-              aria-label="Discard & Flip"
+              aria-label={wantsFlip ? 'Back to Place Mode' : 'Discard & Flip'}
               aria-pressed={wantsFlip}
             >
               <Trash2 className="h-4 w-4" />

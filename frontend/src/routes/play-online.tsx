@@ -940,6 +940,7 @@ function OnlinePlayBoard({
 
   // Card interactivity
   const getCardInteractive = (boardPlayerIdx: number, pos: number): boolean => {
+    if (pendingClearColumns) return false;
     if (!isMyTurn) return false;
     if (isInitialFlips) {
       if (boardPlayerIdx !== playerIndex) return false;
