@@ -904,6 +904,252 @@ mod tests {
         assert!(matches!(decoded, ServerMessage::ServerShutdown));
     }
 
+    // --- Round-end / Game-over serialization tests ---
+
+    /// Construct a realistic round-end ActionApplied message and verify JSON structure.
+    #[test]
+    fn round_end_action_applied_serializes_correctly() {
+        use skyjo_core::history::ColumnClearEvent;
+        use skyjo_core::interactive::ActionNeeded;
+
+        // State at round-end: all cards revealed, some cleared columns
+        let boards = vec![
+            vec![
+                VisibleSlot::Revealed(3),
+                VisibleSlot::Revealed(5),
+                VisibleSlot::Revealed(7),
+                VisibleSlot::Cleared,
+                VisibleSlot::Cleared,
+                VisibleSlot::Cleared,
+                VisibleSlot::Revealed(2),
+                VisibleSlot::Revealed(4),
+                VisibleSlot::Revealed(6),
+                VisibleSlot::Revealed(1),
+                VisibleSlot::Revealed(8),
+                VisibleSlot::Revealed(9),
+            ],
+            vec![
+                VisibleSlot::Revealed(10),
+                VisibleSlot::Revealed(11),
+                VisibleSlot::Revealed(12),
+                VisibleSlot::Revealed(-2),
+                VisibleSlot::Revealed(-1),
+                VisibleSlot::Revealed(0),
+                VisibleSlot::Revealed(3),
+                VisibleSlot::Revealed(4),
+                VisibleSlot::Revealed(5),
+                VisibleSlot::Revealed(6),
+                VisibleSlot::Revealed(7),
+                VisibleSlot::Revealed(8),
+            ],
+        ];
+
+        let state = InteractiveGameState {
+            num_players: 2,
+            player_names: vec!["Alice".to_string(), "Bob".to_string()],
+            num_rows: 3,
+            num_cols: 4,
+            round_number: 0,
+            current_player: 1,
+            action_needed: ActionNeeded::RoundOver {
+                round_number: 0,
+                round_scores: vec![45, 63],
+                raw_round_scores: vec![45, 63],
+                cumulative_scores: vec![45, 63],
+                going_out_player: Some(0),
+                end_of_round_clears: vec![ColumnClearEvent {
+                    player_index: 0,
+                    column: 1,
+                    card_value: 4,
+                    displaced_card: None,
+                }],
+            },
+            boards,
+            discard_tops: vec![Some(4)],
+            discard_sizes: vec![15],
+            deck_remaining: 95,
+            cumulative_scores: vec![45, 63],
+            going_out_player: Some(0),
+            is_final_turn: true,
+            last_column_clears: vec![],
+        };
+
+        let msg = ServerMessage::ActionApplied {
+            player: 1,
+            action: PlayerAction::KeepDeckDraw { position: 5 },
+            state,
+            turn_deadline_secs: None,
+        };
+
+        let json = serde_json::to_value(&msg).unwrap();
+
+        // Verify top-level structure
+        assert_eq!(json["type"], "ActionApplied");
+        assert_eq!(json["player"], 1);
+        assert!(json.get("turn_deadline_secs").is_none(), "None should be skipped");
+
+        // Verify action
+        assert_eq!(json["action"]["type"], "KeepDeckDraw");
+
+        // Verify state structure
+        let s = &json["state"];
+        assert_eq!(s["num_players"], 2);
+        assert_eq!(s["action_needed"]["type"], "RoundOver");
+        assert_eq!(s["action_needed"]["round_number"], 0);
+        assert_eq!(s["action_needed"]["round_scores"], serde_json::json!([45, 63]));
+        assert_eq!(s["action_needed"]["going_out_player"], 0);
+        assert_eq!(s["going_out_player"], 0);
+        assert_eq!(s["is_final_turn"], true);
+
+        // Verify end_of_round_clears
+        let clears = &s["action_needed"]["end_of_round_clears"];
+        assert_eq!(clears.as_array().unwrap().len(), 1);
+        assert_eq!(clears[0]["player_index"], 0);
+        assert_eq!(clears[0]["column"], 1);
+        assert_eq!(clears[0]["card_value"], 4);
+        assert!(clears[0]["displaced_card"].is_null());
+
+        // Verify boards contain correct slot serialization
+        let board0 = &s["boards"][0];
+        // First slot: Revealed(3)
+        assert_eq!(board0[0], serde_json::json!({"Revealed": 3}));
+        // Fourth slot: Cleared
+        assert_eq!(board0[3], "Cleared");
+
+        // Write fixture for frontend test
+        let json_str = serde_json::to_string_pretty(&json).unwrap();
+        let fixture_path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../frontend/src/__fixtures__");
+        std::fs::create_dir_all(&fixture_path).ok();
+        std::fs::write(
+            fixture_path.join("round-end-action-applied.json"),
+            &json_str,
+        )
+        .expect("Failed to write fixture file");
+    }
+
+    /// Construct a realistic game-over ActionApplied message and verify JSON structure.
+    #[test]
+    fn game_over_action_applied_serializes_correctly() {
+        use skyjo_core::interactive::ActionNeeded;
+
+        let boards = vec![
+            vec![VisibleSlot::Revealed(5); 12],
+            vec![VisibleSlot::Revealed(3); 12],
+        ];
+
+        let state = InteractiveGameState {
+            num_players: 2,
+            player_names: vec!["Alice".to_string(), "Bob".to_string()],
+            num_rows: 3,
+            num_cols: 4,
+            round_number: 2,
+            current_player: 0,
+            action_needed: ActionNeeded::GameOver {
+                final_scores: vec![105, 89],
+                winners: vec![1],
+                round_number: 2,
+                round_scores: vec![40, 30],
+                raw_round_scores: vec![40, 30],
+                going_out_player: Some(1),
+                end_of_round_clears: vec![],
+            },
+            boards,
+            discard_tops: vec![Some(7)],
+            discard_sizes: vec![20],
+            deck_remaining: 80,
+            cumulative_scores: vec![105, 89],
+            going_out_player: Some(1),
+            is_final_turn: true,
+            last_column_clears: vec![],
+        };
+
+        let msg = ServerMessage::ActionApplied {
+            player: 0,
+            action: PlayerAction::DiscardAndFlip { position: 3 },
+            state,
+            turn_deadline_secs: None,
+        };
+
+        let json = serde_json::to_value(&msg).unwrap();
+
+        assert_eq!(json["state"]["action_needed"]["type"], "GameOver");
+        assert_eq!(json["state"]["action_needed"]["final_scores"], serde_json::json!([105, 89]));
+        assert_eq!(json["state"]["action_needed"]["winners"], serde_json::json!([1]));
+
+        // Write fixture
+        let json_str = serde_json::to_string_pretty(&json).unwrap();
+        let fixture_path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../frontend/src/__fixtures__");
+        std::fs::create_dir_all(&fixture_path).ok();
+        std::fs::write(
+            fixture_path.join("game-over-action-applied.json"),
+            &json_str,
+        )
+        .expect("Failed to write fixture file");
+    }
+
+    /// Play an actual game to round-end via InteractiveGame and validate the serialized
+    /// ActionApplied message structure. This catches edge cases that hand-crafted states miss.
+    #[test]
+    fn actual_game_round_end_serialization() {
+        use skyjo_core::interactive::InteractiveGame;
+        use skyjo_core::rules::StandardRules;
+        use skyjo_core::strategies::RandomStrategy;
+
+        // Try multiple seeds to increase chance of hitting edge cases
+        for seed in 0..20 {
+            let rules = Box::new(StandardRules);
+            let names = vec!["Alice".to_string(), "Bob".to_string()];
+            let mut game = InteractiveGame::new(rules, 2, names, seed).unwrap();
+            let strategy = RandomStrategy;
+
+            // Play until round-over or game-over
+            for _ in 0..2000 {
+                let action_needed = game.get_action_needed();
+                match action_needed {
+                    skyjo_core::interactive::ActionNeeded::RoundOver { .. }
+                    | skyjo_core::interactive::ActionNeeded::GameOver { .. } => break,
+                    _ => {}
+                }
+                let action = game.get_bot_action(&strategy).unwrap();
+                game.apply_action(action).unwrap();
+            }
+
+            // Get the player state and construct the message
+            let state = game.get_player_state(0);
+            let msg = ServerMessage::ActionApplied {
+                player: 0,
+                action: PlayerAction::DiscardAndFlip { position: 0 },
+                state: state.clone(),
+                turn_deadline_secs: None,
+            };
+
+            // Serialize to JSON and verify it round-trips
+            let json_str = serde_json::to_string(&msg).unwrap();
+            let reparsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+            // Verify action_needed type
+            let an_type = reparsed["state"]["action_needed"]["type"].as_str().unwrap();
+            assert!(
+                an_type == "RoundOver" || an_type == "GameOver",
+                "seed {seed}: expected RoundOver or GameOver, got {an_type}"
+            );
+
+            // Write ONE fixture from an actual game for the frontend test
+            if seed == 0 {
+                let fixture_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../frontend/src/__fixtures__");
+                std::fs::create_dir_all(&fixture_path).ok();
+                std::fs::write(
+                    fixture_path.join("actual-game-round-end.json"),
+                    serde_json::to_string_pretty(&reparsed).unwrap(),
+                )
+                .expect("Failed to write actual game fixture");
+            }
+        }
+    }
+
     // --- TimeoutAction turn_deadline_secs tests ---
 
     #[test]

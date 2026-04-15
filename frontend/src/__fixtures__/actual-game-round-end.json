@@ -1,0 +1,129 @@
+{
+  "action": {
+    "position": 0,
+    "type": "DiscardAndFlip"
+  },
+  "player": 0,
+  "state": {
+    "action_needed": {
+      "cumulative_scores": [
+        63,
+        67
+      ],
+      "end_of_round_clears": [],
+      "going_out_player": 0,
+      "raw_round_scores": [
+        63,
+        67
+      ],
+      "round_number": 0,
+      "round_scores": [
+        63,
+        67
+      ],
+      "type": "RoundOver"
+    },
+    "boards": [
+      [
+        {
+          "Revealed": 10
+        },
+        {
+          "Revealed": -1
+        },
+        {
+          "Revealed": 10
+        },
+        {
+          "Revealed": 2
+        },
+        {
+          "Revealed": 5
+        },
+        {
+          "Revealed": 1
+        },
+        {
+          "Revealed": 1
+        },
+        {
+          "Revealed": 10
+        },
+        {
+          "Revealed": 2
+        },
+        {
+          "Revealed": 5
+        },
+        {
+          "Revealed": 8
+        },
+        {
+          "Revealed": 10
+        }
+      ],
+      [
+        {
+          "Revealed": 1
+        },
+        {
+          "Revealed": 3
+        },
+        {
+          "Revealed": 3
+        },
+        {
+          "Revealed": 11
+        },
+        {
+          "Revealed": -2
+        },
+        {
+          "Revealed": 6
+        },
+        {
+          "Revealed": 6
+        },
+        {
+          "Revealed": 5
+        },
+        {
+          "Revealed": 12
+        },
+        {
+          "Revealed": 4
+        },
+        {
+          "Revealed": 10
+        },
+        {
+          "Revealed": 8
+        }
+      ]
+    ],
+    "cumulative_scores": [
+      63,
+      67
+    ],
+    "current_player": 1,
+    "deck_remaining": 114,
+    "discard_sizes": [
+      12
+    ],
+    "discard_tops": [
+      1
+    ],
+    "going_out_player": 0,
+    "is_final_turn": true,
+    "last_column_clears": [],
+    "num_cols": 4,
+    "num_players": 2,
+    "num_rows": 3,
+    "player_names": [
+      "Alice",
+      "Bob"
+    ],
+    "round_number": 0
+  },
+  "type": "ActionApplied"
+}

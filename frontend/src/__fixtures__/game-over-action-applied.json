@@ -1,0 +1,132 @@
+{
+  "action": {
+    "position": 3,
+    "type": "DiscardAndFlip"
+  },
+  "player": 0,
+  "state": {
+    "action_needed": {
+      "end_of_round_clears": [],
+      "final_scores": [
+        105,
+        89
+      ],
+      "going_out_player": 1,
+      "raw_round_scores": [
+        40,
+        30
+      ],
+      "round_number": 2,
+      "round_scores": [
+        40,
+        30
+      ],
+      "type": "GameOver",
+      "winners": [
+        1
+      ]
+    },
+    "boards": [
+      [
+        {
+          "Revealed": 5
+        },
+        {
+          "Revealed": 5
+        },
+        {
+          "Revealed": 5
+        },
+        {
+          "Revealed": 5
+        },
+        {
+          "Revealed": 5
+        },
+        {
+          "Revealed": 5
+        },
+        {
+          "Revealed": 5
+        },
+        {
+          "Revealed": 5
+        },
+        {
+          "Revealed": 5
+        },
+        {
+          "Revealed": 5
+        },
+        {
+          "Revealed": 5
+        },
+        {
+          "Revealed": 5
+        }
+      ],
+      [
+        {
+          "Revealed": 3
+        },
+        {
+          "Revealed": 3
+        },
+        {
+          "Revealed": 3
+        },
+        {
+          "Revealed": 3
+        },
+        {
+          "Revealed": 3
+        },
+        {
+          "Revealed": 3
+        },
+        {
+          "Revealed": 3
+        },
+        {
+          "Revealed": 3
+        },
+        {
+          "Revealed": 3
+        },
+        {
+          "Revealed": 3
+        },
+        {
+          "Revealed": 3
+        },
+        {
+          "Revealed": 3
+        }
+      ]
+    ],
+    "cumulative_scores": [
+      105,
+      89
+    ],
+    "current_player": 0,
+    "deck_remaining": 80,
+    "discard_sizes": [
+      20
+    ],
+    "discard_tops": [
+      7
+    ],
+    "going_out_player": 1,
+    "is_final_turn": true,
+    "last_column_clears": [],
+    "num_cols": 4,
+    "num_players": 2,
+    "num_rows": 3,
+    "player_names": [
+      "Alice",
+      "Bob"
+    ],
+    "round_number": 2
+  },
+  "type": "ActionApplied"
+}

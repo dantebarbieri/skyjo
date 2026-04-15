@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { ActionButtons } from '@/components/action-buttons';
 import SkyjoCard from '@/components/skyjo-card';
 import { RoundScorecard } from '@/components/round-scorecard';
+import { GameErrorBoundary } from '@/components/game-error-boundary';
 import { useResponsiveCardSize } from '@/hooks/use-responsive-card-size';
 import { cn } from '@/lib/utils';
 import { toSlot, getPlayerName, computeVisibleScore } from '@/lib/game-helpers';
@@ -216,19 +217,23 @@ export default function PlayOnlineRoute() {
       )}
 
       {game.gameState && (
-        <OnlinePlayBoard
-          state={game.gameState}
-          playerIndex={playerIndex!}
-          turnDeadlineSecs={game.turnDeadlineSecs}
-          wasTimeout={game.wasTimeout}
-          onAction={game.applyAction}
-          onContinueRound={game.readyForNextRound}
-          onPlayAgain={game.playAgain}
-          onReturnToLobby={game.returnToLobby}
-          onLeave={handleLeave}
-          pendingClearColumns={game.pendingClearColumns}
-          roundReady={game.roundReady}
-        />
+        <GameErrorBoundary
+          fallbackMessage="An error occurred while rendering the game. Check the browser console for details."
+        >
+          <OnlinePlayBoard
+            state={game.gameState}
+            playerIndex={playerIndex!}
+            turnDeadlineSecs={game.turnDeadlineSecs}
+            wasTimeout={game.wasTimeout}
+            onAction={game.applyAction}
+            onContinueRound={game.readyForNextRound}
+            onPlayAgain={game.playAgain}
+            onReturnToLobby={game.returnToLobby}
+            onLeave={handleLeave}
+            pendingClearColumns={game.pendingClearColumns}
+            roundReady={game.roundReady}
+          />
+        </GameErrorBoundary>
       )}
     </div>
   );

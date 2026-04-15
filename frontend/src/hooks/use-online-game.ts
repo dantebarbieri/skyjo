@@ -177,13 +177,28 @@ export function useOnlineGame(
           const parsedMessage = ServerMessageSchema.safeParse(rawMessage);
           if (!parsedMessage.success) {
             if (import.meta.env.DEV) {
-              console.error('Invalid server message:', JSON.stringify(rawMessage).slice(0, 500), parsedMessage.error.issues);
+              console.error('[WS] Invalid server message:', JSON.stringify(rawMessage).slice(0, 1000), parsedMessage.error.issues);
             }
             setLastError('Received invalid server message.');
             return;
           }
 
           const msg: ServerMessage = parsedMessage.data;
+
+          // Log round-end transitions for debugging blank screen issue (#19)
+          if ('state' in msg && msg.state && 'action_needed' in msg.state) {
+            const an = msg.state.action_needed;
+            if (an.type === 'RoundOver' || an.type === 'GameOver') {
+              if (import.meta.env.DEV) {
+                console.debug(`[WS] ${msg.type} → ${an.type}`, {
+                  action_needed: an,
+                  boards_lengths: msg.state.boards.map(b => b.length),
+                  num_players: msg.state.num_players,
+                  current_player: msg.state.current_player,
+                });
+              }
+            }
+          }
 
           switch (msg.type) {
             case 'RoomState':
