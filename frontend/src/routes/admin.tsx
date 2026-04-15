@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, type FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Navigate } from 'react-router-dom';
 import { useAuth, type PermissionLevel } from '@/contexts/auth-context';
 import { apiFetch } from '@/lib/api';
 import { Button } from '@/components/ui/button';
@@ -22,7 +22,6 @@ interface AppSettings {
 
 export default function AdminRoute() {
   const { user, isAuthenticated } = useAuth();
-  const navigate = useNavigate();
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [newUsername, setNewUsername] = useState('');
@@ -33,8 +32,7 @@ export default function AdminRoute() {
   const [loading, setLoading] = useState(false);
 
   if (!isAuthenticated || user?.permission !== 'admin') {
-    navigate('/', { replace: true });
-    return null;
+    return <Navigate to="/" replace />;
   }
 
   const fetchUsers = useCallback(async () => {

@@ -80,14 +80,17 @@ async fn main() {
         .expect("Failed to connect to PostgreSQL database");
     tracing::info!("Connected to PostgreSQL database");
 
-    // JWT secret — generate one if not provided (warn about it)
-    let jwt_secret = args.jwt_secret.unwrap_or_else(|| {
-        let secret = uuid::Uuid::new_v4().to_string();
-        tracing::warn!(
-            "No SKYJO_JWT_SECRET set — generated ephemeral secret. Sessions will not survive restart."
-        );
-        secret
-    });
+    // JWT secret — generate one if not provided or empty (warn about it)
+    let jwt_secret = args
+        .jwt_secret
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| {
+            let secret = uuid::Uuid::new_v4().to_string();
+            tracing::warn!(
+                "No SKYJO_JWT_SECRET set — generated ephemeral secret. Sessions will not survive restart."
+            );
+            secret
+        });
 
     // Check setup status
     match auth::user_count(persistence.pool()).await {
@@ -687,8 +690,31 @@ impl From<&auth::User> for UserInfo {
     }
 }
 
+/// Build a Set-Cookie value for the refresh token.
+/// Omits `Secure` flag when not behind HTTPS to support plain HTTP dev/docker setups.
+fn refresh_cookie(token: &str, max_age_secs: i64, secure: bool) -> String {
+    let secure_flag = if secure { " Secure;" } else { "" };
+    format!(
+        "refresh_token={token}; HttpOnly;{secure_flag} SameSite=Strict; Path=/api/auth; Max-Age={max_age_secs}"
+    )
+}
+
+fn clear_refresh_cookie(secure: bool) -> String {
+    let secure_flag = if secure { " Secure;" } else { "" };
+    format!("refresh_token=; HttpOnly;{secure_flag} SameSite=Strict; Path=/api/auth; Max-Age=0")
+}
+
+/// Check if the request was forwarded over HTTPS.
+fn is_secure_request(headers: &axum::http::HeaderMap) -> bool {
+    headers
+        .get("x-forwarded-proto")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|proto| proto.eq_ignore_ascii_case("https"))
+}
+
 async fn auth_login(
     State(state): State<AppState>,
+    req_headers: axum::http::HeaderMap,
     Json(req): Json<LoginRequest>,
 ) -> Result<Response, ServerError> {
     let user = auth::find_user_by_username(state.persistence.pool(), &req.username)
@@ -712,12 +738,9 @@ async fn auth_login(
         user: UserInfo::from(&user),
     };
 
+    let secure = is_secure_request(&req_headers);
     let mut response = Json(body).into_response();
-    let cookie = format!(
-        "refresh_token={}; HttpOnly; Secure; SameSite=Strict; Path=/api/auth; Max-Age={}",
-        refresh_token,
-        7 * 24 * 60 * 60
-    );
+    let cookie = refresh_cookie(&refresh_token, 7 * 24 * 60 * 60, secure);
     response
         .headers_mut()
         .insert(header::SET_COOKIE, HeaderValue::from_str(&cookie).unwrap());
@@ -776,11 +799,8 @@ async fn auth_refresh(
     };
 
     let mut response = Json(body).into_response();
-    let cookie = format!(
-        "refresh_token={}; HttpOnly; Secure; SameSite=Strict; Path=/api/auth; Max-Age={}",
-        new_refresh_token,
-        7 * 24 * 60 * 60
-    );
+    let secure = is_secure_request(&headers);
+    let cookie = refresh_cookie(&new_refresh_token, 7 * 24 * 60 * 60, secure);
     response
         .headers_mut()
         .insert(header::SET_COOKIE, HeaderValue::from_str(&cookie).unwrap());
@@ -808,12 +828,11 @@ async fn auth_logout(
         auth::revoke_refresh_token(state.persistence.pool(), &token_hash).await?;
     }
 
+    let secure = is_secure_request(&headers);
     let mut response = Json(serde_json::json!({"ok": true})).into_response();
     response.headers_mut().insert(
         header::SET_COOKIE,
-        HeaderValue::from_static(
-            "refresh_token=; HttpOnly; Secure; SameSite=Strict; Path=/api/auth; Max-Age=0",
-        ),
+        HeaderValue::from_str(&clear_refresh_cookie(secure)).unwrap(),
     );
     Ok(response)
 }
@@ -852,6 +871,7 @@ struct SetupRequest {
 
 async fn auth_setup(
     State(state): State<AppState>,
+    req_headers: axum::http::HeaderMap,
     Json(req): Json<SetupRequest>,
 ) -> Result<Response, ServerError> {
     // Only allow setup when no users exist
@@ -903,12 +923,9 @@ async fn auth_setup(
         user: UserInfo::from(&user),
     };
 
+    let secure = is_secure_request(&req_headers);
     let mut response = Json(body).into_response();
-    let cookie = format!(
-        "refresh_token={}; HttpOnly; Secure; SameSite=Strict; Path=/api/auth; Max-Age={}",
-        refresh_token,
-        7 * 24 * 60 * 60
-    );
+    let cookie = refresh_cookie(&refresh_token, 7 * 24 * 60 * 60, secure);
     response
         .headers_mut()
         .insert(header::SET_COOKIE, HeaderValue::from_str(&cookie).unwrap());

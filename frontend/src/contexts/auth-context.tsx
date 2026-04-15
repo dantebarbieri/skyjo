@@ -44,7 +44,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const scheduleRefresh = useCallback((token: string) => {
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
     try {
-      const payload = JSON.parse(atob(token.split('.')[1]));
+      // JWT uses Base64URL encoding — convert to standard Base64 before decoding
+      let b64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+      while (b64.length % 4) b64 += '=';
+      const payload = JSON.parse(atob(b64));
       const expiresIn = payload.exp * 1000 - Date.now();
       // Refresh 60 seconds before expiry
       const refreshIn = Math.max(expiresIn - 60_000, 5_000);

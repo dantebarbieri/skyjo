@@ -300,7 +300,7 @@ pub async fn update_user_permission(
             .map_err(|e| ServerError::InternalError(format!("database error: {e}")))?;
 
     if result.rows_affected() == 0 {
-        return Err(ServerError::RoomNotFound); // reusing — user not found
+        return Err(ServerError::UserNotFound); // reusing — user not found
     }
     Ok(())
 }
@@ -313,7 +313,7 @@ pub async fn delete_user(pool: &PgPool, user_id: Uuid) -> Result<(), ServerError
         .map_err(|e| ServerError::InternalError(format!("database error: {e}")))?;
 
     if result.rows_affected() == 0 {
-        return Err(ServerError::RoomNotFound); // reusing — user not found
+        return Err(ServerError::UserNotFound); // reusing — user not found
     }
     Ok(())
 }

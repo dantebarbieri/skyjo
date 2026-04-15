@@ -12,6 +12,9 @@ pub enum ServerError {
     RoomCodeInvalid,
     MaxRoomsReached,
 
+    // User errors
+    UserNotFound,
+
     // Slot/player errors
     InvalidSlot(usize),
     SlotEmpty,
@@ -57,6 +60,7 @@ impl ServerError {
     pub fn status_code(&self) -> StatusCode {
         match self {
             Self::RoomNotFound => StatusCode::NOT_FOUND,
+            Self::UserNotFound => StatusCode::NOT_FOUND,
             Self::Unauthorized | Self::Banned => StatusCode::FORBIDDEN,
             Self::Forbidden => StatusCode::FORBIDDEN,
             Self::RateLimited => StatusCode::TOO_MANY_REQUESTS,
@@ -69,6 +73,7 @@ impl ServerError {
     pub fn message(&self) -> String {
         match self {
             Self::RoomNotFound => "Room not found".into(),
+            Self::UserNotFound => "User not found".into(),
             Self::RoomFull => "Room is full".into(),
             Self::RoomCodeInvalid => "Invalid room code format".into(),
             Self::MaxRoomsReached => "Maximum number of rooms reached".into(),

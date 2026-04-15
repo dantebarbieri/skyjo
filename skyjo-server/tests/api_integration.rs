@@ -20,7 +20,9 @@ async fn test_app() -> Option<Router> {
         }
     };
 
-    let persistence = Persistence::connect(&database_url).await.ok()?;
+    let persistence = Persistence::connect(&database_url)
+        .await
+        .expect("Failed to connect to test database");
 
     let model_path =
         std::env::temp_dir().join(format!("skyjo_test_model_{}.json", std::process::id()));
@@ -291,7 +293,9 @@ async fn test_app_with_auth() -> Option<Router> {
         }
     };
 
-    let persistence = Persistence::connect(&database_url).await.ok()?;
+    let persistence = Persistence::connect(&database_url)
+        .await
+        .expect("Failed to connect to test database");
 
     let model_path =
         std::env::temp_dir().join(format!("skyjo_test_model_auth_{}.json", std::process::id()));

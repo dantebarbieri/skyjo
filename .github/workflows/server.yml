@@ -6,6 +6,7 @@ on:
     paths:
       - "skyjo-server/**"
       - "skyjo-core/**"
+      - "migrations/**"
       - "Cargo.toml"
       - "Cargo.lock"
   pull_request:
@@ -13,6 +14,7 @@ on:
     paths:
       - "skyjo-server/**"
       - "skyjo-core/**"
+      - "migrations/**"
       - "Cargo.toml"
       - "Cargo.lock"
 
@@ -55,6 +57,22 @@ jobs:
   test:
     name: Tests
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: skyjo_test
+          POSTGRES_USER: skyjo
+          POSTGRES_PASSWORD: skyjo
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U skyjo"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgres://skyjo:skyjo@localhost:5432/skyjo_test
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable

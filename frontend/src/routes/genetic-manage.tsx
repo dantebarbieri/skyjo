@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 import { z } from 'zod';
 import { GeneticModelDataSchema } from '@/schemas';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -23,7 +23,6 @@ const API_BASE = '/api';
 export default function GeneticManageRoute() {
   useDocumentTitle('Manage Genetic Generations');
   const { user, isAuthenticated, isLoading } = useAuth();
-  const navigate = useNavigate();
 
   const [model, setModel] = useState<GeneticModelData | null>(null);
   const [saved, setSaved] = useState<SavedGenerationInfo[]>([]);
@@ -41,7 +40,7 @@ export default function GeneticManageRoute() {
   // Auth gate: require moderator or admin (after all hooks)
   if (!isLoading && (!isAuthenticated || !user || (user.permission !== 'admin' && user.permission !== 'moderator'))) {
     if (!isAuthenticated) {
-      navigate('/login', { state: { from: '/rules/strategies/Genetic/manage' }, replace: true });
+      return <Navigate to="/login" state={{ from: '/rules/strategies/Genetic/manage' }} replace />;
     }
     return (
       <div className="text-center py-12 text-muted-foreground">
