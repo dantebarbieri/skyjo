@@ -67,6 +67,7 @@ interface HookOptions {
   applyBotTurn?: ReturnType<typeof vi.fn<(strategyName: string) => void>>;
   continueToNextRound?: ReturnType<typeof vi.fn<() => void>>;
   showStartingPlayer?: boolean;
+  pendingColumnClear?: boolean;
 }
 
 function makeOptions(overrides: HookOptions = {}) {
@@ -78,6 +79,7 @@ function makeOptions(overrides: HookOptions = {}) {
     applyBotTurn: overrides.applyBotTurn ?? vi.fn<(strategyName: string) => void>(),
     continueToNextRound: overrides.continueToNextRound ?? vi.fn<() => void>(),
     showStartingPlayer: overrides.showStartingPlayer ?? false,
+    pendingColumnClear: overrides.pendingColumnClear ?? false,
   };
 }
 

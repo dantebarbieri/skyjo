@@ -18,7 +18,7 @@ import {
   type RoomLobbyState,
   type ConnectionStatus,
 } from '@/hooks/use-online-game';
-import type { RoundRecord } from '@/hooks/use-interactive-game';
+import type { RoundRecord, PendingColumnClear } from '@/hooks/use-interactive-game';
 import type { InteractiveGameState, PlayerAction, ActionNeeded } from '@/types';
 
 // --- API helpers ---
@@ -210,6 +210,7 @@ export default function PlayOnlineRoute() {
           onPlayAgain={game.playAgain}
           onReturnToLobby={game.returnToLobby}
           onLeave={handleLeave}
+          pendingClearColumns={game.pendingClearColumns}
         />
       )}
     </div>
@@ -837,6 +838,7 @@ function OnlinePlayBoard({
   onPlayAgain,
   onReturnToLobby,
   onLeave,
+  pendingClearColumns,
 }: {
   state: InteractiveGameState;
   playerIndex: number;
@@ -847,6 +849,7 @@ function OnlinePlayBoard({
   onPlayAgain: () => void;
   onReturnToLobby: () => void;
   onLeave: () => void;
+  pendingClearColumns: PendingColumnClear[] | null;
 }) {
   const { action_needed, boards, num_rows, num_cols, current_player } = state;
   const [wantsFlip, setWantsFlip] = useState(false);
@@ -1200,6 +1203,9 @@ function OnlinePlayBoard({
                   Array.from({ length: num_cols }, (_, c) => {
                     const idx = c * num_rows + r;
                     const interactive = getCardInteractive(boardPlayerIdx, idx);
+                    const isColumnClearing = pendingClearColumns?.some(
+                      pc => pc.playerIndex === boardPlayerIdx && pc.column === c
+                    ) ?? false;
 
                     return (
                       <button
@@ -1215,6 +1221,7 @@ function OnlinePlayBoard({
                           slot={toSlot(board[idx])}
                           size={cardSize}
                           highlight={interactive}
+                          className={isColumnClearing ? 'ring-2 ring-amber-400 ring-offset-1 animate-pulse' : undefined}
                         />
                       </button>
                     );

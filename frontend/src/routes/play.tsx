@@ -23,6 +23,7 @@ import SkyjoCard from '@/components/skyjo-card';
 import { RoundScorecard } from '@/components/round-scorecard';
 import { useWasmContext } from '@/contexts/wasm-context';
 import { useInteractiveGame } from '@/hooks/use-interactive-game';
+import type { PendingColumnClear } from '@/hooks/use-interactive-game';
 import { useBotTurns } from '@/hooks/use-bot-turns';
 import { cn } from '@/lib/utils';
 import { toSlot, getPlayerName, computeVisibleScore } from '@/lib/game-helpers';
@@ -341,10 +342,12 @@ function PlayBoard({
   state,
   onAction,
   playerTypes,
+  pendingClearColumns,
 }: {
   state: InteractiveGameState;
   onAction: (action: PlayerAction) => void;
   playerTypes: PlayerType[];
+  pendingClearColumns: PendingColumnClear[] | null;
 }) {
   const { action_needed, boards, num_rows, num_cols, current_player } = state;
   const [wantsFlip, setWantsFlip] = useState(false);
@@ -668,6 +671,9 @@ function PlayBoard({
                     const idx = c * num_rows + r;
                     const slot = board[idx];
                     const interactive = getCardInteractive(playerIdx, idx);
+                    const isColumnClearing = pendingClearColumns?.some(
+                      pc => pc.playerIndex === playerIdx && pc.column === c
+                    ) ?? false;
 
                     return (
                       <button
@@ -683,6 +689,7 @@ function PlayBoard({
                           slot={toSlot(slot)}
                           size={cardSize}
                           highlight={interactive}
+                          className={isColumnClearing ? 'ring-2 ring-amber-400 ring-offset-1 animate-pulse' : undefined}
                         />
                       </button>
                     );
@@ -924,6 +931,7 @@ export default function PlayRoute() {
     applyBotTurn: game.applyBotTurn,
     continueToNextRound: game.continueToNextRound,
     showStartingPlayer: game.showStartingPlayer,
+    pendingColumnClear: game.pendingClearColumns !== null,
   });
 
   return (
@@ -969,7 +977,7 @@ export default function PlayRoute() {
                   </Select>
                 </div>
               )}
-              <PlayBoard state={game.gameState} onAction={game.applyAction} playerTypes={game.playerTypes} />
+              <PlayBoard state={game.gameState} onAction={game.applyAction} playerTypes={game.playerTypes} pendingClearColumns={game.pendingClearColumns} />
             </CardContent>
           </Card>
         )}
