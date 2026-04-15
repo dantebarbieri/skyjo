@@ -665,91 +665,8 @@ async fn handle_parsed_message(
             }
         }
 
-        ClientMessage::ReadyForNextRound => {
-            let mut room_guard = room.lock().await;
-
-            match room_guard.set_round_ready(player_index) {
-                Ok(all_ready) => {
-                    if all_ready {
-                        // All players ready — continue to next round
-                        match room_guard.continue_round() {
-                            Ok(()) => {
-                                room_guard.broadcast_game_state();
-
-                                if room_guard.is_current_player_bot() {
-                                    drop(room_guard);
-                                    let room_clone = room.clone();
-                                    let persistence_clone = state.persistence.clone();
-                                    tokio::spawn(async move {
-                                        run_bot_turns_with_persistence(
-                                            room_clone,
-                                            Some(persistence_clone),
-                                        )
-                                        .await;
-                                    });
-                                } else {
-                                    drop(room_guard);
-                                    schedule_turn_timeout_with_persistence(
-                                        room.clone(),
-                                        Some(state.persistence.clone()),
-                                    );
-                                }
-
-                                None
-                            }
-                            Err(e) => Some(error_msg(e)),
-                        }
-                    } else {
-                        // Not all ready yet — broadcast updated round_ready state
-                        room_guard.broadcast_game_state();
-                        None
-                    }
-                }
-                Err(e) => Some(error_msg(e)),
-            }
-        }
-
-        ClientMessage::ContinueRound => {
-            // Backward compatibility: treat as ReadyForNextRound
-            let mut room_guard = room.lock().await;
-
-            match room_guard.set_round_ready(player_index) {
-                Ok(all_ready) => {
-                    if all_ready {
-                        match room_guard.continue_round() {
-                            Ok(()) => {
-                                room_guard.broadcast_game_state();
-
-                                if room_guard.is_current_player_bot() {
-                                    drop(room_guard);
-                                    let room_clone = room.clone();
-                                    let persistence_clone = state.persistence.clone();
-                                    tokio::spawn(async move {
-                                        run_bot_turns_with_persistence(
-                                            room_clone,
-                                            Some(persistence_clone),
-                                        )
-                                        .await;
-                                    });
-                                } else {
-                                    drop(room_guard);
-                                    schedule_turn_timeout_with_persistence(
-                                        room.clone(),
-                                        Some(state.persistence.clone()),
-                                    );
-                                }
-
-                                None
-                            }
-                            Err(e) => Some(error_msg(e)),
-                        }
-                    } else {
-                        room_guard.broadcast_game_state();
-                        None
-                    }
-                }
-                Err(e) => Some(error_msg(e)),
-            }
+        ClientMessage::ReadyForNextRound | ClientMessage::ContinueRound => {
+            handle_round_ready(player_index, state, room).await
         }
 
         ClientMessage::PlayAgain => {
@@ -827,6 +744,52 @@ async fn handle_parsed_message(
                 Err(e) => Some(error_msg(e)),
             }
         }
+    }
+}
+
+/// Handle a player signaling readiness for the next round.
+/// Shared by `ReadyForNextRound` and `ContinueRound` (backward compat).
+async fn handle_round_ready(
+    player_index: usize,
+    state: &Arc<AppStateInner>,
+    room: &SharedRoom,
+) -> Option<ServerMessage> {
+    let mut room_guard = room.lock().await;
+
+    match room_guard.set_round_ready(player_index) {
+        Ok(all_ready) => {
+            if all_ready {
+                match room_guard.continue_round() {
+                    Ok(()) => {
+                        room_guard.broadcast_game_state();
+
+                        if room_guard.is_current_player_bot() {
+                            drop(room_guard);
+                            let room_clone = room.clone();
+                            let persistence_clone = state.persistence.clone();
+                            tokio::spawn(async move {
+                                run_bot_turns_with_persistence(room_clone, Some(persistence_clone))
+                                    .await;
+                            });
+                        } else {
+                            drop(room_guard);
+                            schedule_turn_timeout_with_persistence(
+                                room.clone(),
+                                Some(state.persistence.clone()),
+                            );
+                        }
+
+                        None
+                    }
+                    Err(e) => Some(error_msg(e)),
+                }
+            } else {
+                // Not all ready yet — broadcast updated round_ready state
+                room_guard.broadcast_game_state();
+                None
+            }
+        }
+        Err(e) => Some(error_msg(e)),
     }
 }
 
