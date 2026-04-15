@@ -198,6 +198,35 @@ pub async fn join_room(
     }))
 }
 
+/// Lightweight session validation endpoint.
+/// Returns 200 if the session token is valid for the given room, 401 otherwise.
+/// Used by clients to check session validity before attempting WebSocket reconnection.
+pub async fn validate_session(
+    State(state): State<AppState>,
+    Path(code): Path<String>,
+    axum::extract::Query(query): axum::extract::Query<lobby::ValidateSessionQuery>,
+) -> Result<Json<serde_json::Value>, ServerError> {
+    let token = query.token.as_deref().ok_or(ServerError::Unauthorized)?;
+
+    let (room_code, _player_index) = state
+        .lobby
+        .get_session(token)
+        .ok_or(ServerError::Unauthorized)?;
+
+    if room_code != code {
+        return Err(ServerError::Unauthorized);
+    }
+
+    // Treat a missing room as an invalid session for this endpoint so the
+    // response matches the documented 401-only contract for failed validation.
+    state
+        .lobby
+        .get_room(&code)
+        .ok_or(ServerError::Unauthorized)?;
+
+    Ok(Json(serde_json::json!({ "valid": true })))
+}
+
 pub async fn genetic_status(State(state): State<AppState>) -> Json<genetic::TrainingStatus> {
     let s = state.genetic.lock().await;
     Json(s.status())

@@ -171,7 +171,7 @@ fn rate_limiter_different_ips_independent() {
 // ========================================================================
 
 #[tokio::test]
-async fn genetic_train_without_auth_header_returns_403() {
+async fn genetic_train_without_auth_header_returns_401() {
     let Some(app) = test_app_with_auth().await else {
         return;
     };
@@ -188,11 +188,11 @@ async fn genetic_train_without_auth_header_returns_403() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
-async fn genetic_train_with_wrong_bearer_token_returns_403() {
+async fn genetic_train_with_wrong_bearer_token_returns_401() {
     let Some(app) = test_app_with_auth().await else {
         return;
     };
@@ -210,11 +210,11 @@ async fn genetic_train_with_wrong_bearer_token_returns_403() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
-async fn genetic_train_with_invalid_jwt_returns_403() {
+async fn genetic_train_with_invalid_jwt_returns_401() {
     let Some(app) = test_app_with_auth().await else {
         return;
     };
@@ -232,7 +232,7 @@ async fn genetic_train_with_invalid_jwt_returns_403() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
 
 // ========================================================================

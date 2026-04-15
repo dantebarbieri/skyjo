@@ -147,6 +147,20 @@ export default function PlayOnlineRoute() {
     );
   }
 
+  // Session expired (e.g. after server restart)
+  if (game.sessionExpired) {
+    return (
+      <div className="max-w-md mx-auto space-y-4 text-center">
+        <h1 className="text-2xl font-bold">Session Expired</h1>
+        <p className="text-muted-foreground">
+          Your session is no longer valid. This can happen after a server restart.
+        </p>
+        <p className="text-muted-foreground text-sm">Please create or join a new room to continue playing.</p>
+        <Button onClick={handleLeave}>Back to Online Play</Button>
+      </div>
+    );
+  }
+
   // Not connected to a room yet — show create/join
   if (!backendAvailable) {
     return (

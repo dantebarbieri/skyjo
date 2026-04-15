@@ -234,6 +234,12 @@ pub struct RoomInfoResponse {
     pub phase: String,
 }
 
+/// Query parameters for the session validation endpoint.
+#[derive(Debug, Deserialize)]
+pub struct ValidateSessionQuery {
+    pub token: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

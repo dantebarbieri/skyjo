@@ -65,8 +65,8 @@ impl ServerError {
             Self::RoomNotFound => StatusCode::NOT_FOUND,
             Self::UserNotFound => StatusCode::NOT_FOUND,
             Self::GameNotFound => StatusCode::NOT_FOUND,
-            Self::Unauthorized | Self::Banned => StatusCode::FORBIDDEN,
-            Self::Forbidden => StatusCode::FORBIDDEN,
+            Self::Unauthorized => StatusCode::UNAUTHORIZED,
+            Self::Banned | Self::Forbidden => StatusCode::FORBIDDEN,
             Self::RateLimited => StatusCode::TOO_MANY_REQUESTS,
             Self::InternalError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Self::RoomFull | Self::MaxRoomsReached => StatusCode::CONFLICT,
@@ -147,7 +147,7 @@ mod tests {
         );
         assert_eq!(
             ServerError::Unauthorized.status_code(),
-            StatusCode::FORBIDDEN
+            StatusCode::UNAUTHORIZED
         );
         assert_eq!(ServerError::Banned.status_code(), StatusCode::FORBIDDEN);
         assert_eq!(

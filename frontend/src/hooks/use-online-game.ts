@@ -7,6 +7,15 @@ import type { z } from 'zod';
 
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected';
 
+/**
+ * Custom WebSocket close code (RFC 6455 §7.4.2 application range 4000–4999).
+ * The server does not currently send this code, but the client handles it
+ * defensively in case future server logic actively closes sockets on session
+ * invalidation. The primary detection mechanism is the HTTP session validation
+ * fetch before each reconnect attempt.
+ */
+const WS_CLOSE_SESSION_EXPIRED = 4001;
+
 const COLUMN_CLEAR_DELAY_MS = 2500;
 
 /**
@@ -69,6 +78,7 @@ interface UseOnlineGameReturn {
   playerIndex: number | null;
   lastError: string | null;
   kicked: boolean;
+  sessionExpired: boolean;
   pendingClearColumns: PendingColumnClear[] | null;
   applyAction: (action: PlayerAction) => void;
   configureSlot: (slot: number, playerType: string) => void;
@@ -97,11 +107,13 @@ export function useOnlineGame(
   const [wasTimeout, setWasTimeout] = useState(false);
   const [lastError, setLastError] = useState<string | null>(null);
   const [kicked, setKicked] = useState(false);
+  const [sessionExpired, setSessionExpired] = useState(false);
   const [pendingClearColumns, setPendingClearColumns] = useState<PendingColumnClear[] | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const reconnectAttemptRef = useRef(0);
-  const pendingClearTimeoutRef= useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingClearTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const connectAbortRef = useRef<AbortController | null>(null);
   const { accessToken } = useAuth();
 
   const send = useCallback((msg: object) => {
@@ -114,195 +126,256 @@ export function useOnlineGame(
   const connect = useCallback(() => {
     if (!roomCode || !sessionToken) return;
 
+    // Cancel any in-flight validation fetch from a previous connect attempt
+    connectAbortRef.current?.abort();
+    const abortController = new AbortController();
+    connectAbortRef.current = abortController;
+
     setConnectionStatus('connecting');
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    let wsUrl = `${protocol}//${window.location.host}/api/rooms/${roomCode}/ws?token=${sessionToken}`;
-    if (accessToken) {
-      wsUrl += `&access_token=${encodeURIComponent(accessToken)}`;
-    }
-    const ws = new WebSocket(wsUrl);
+    // Validate the session before attempting WebSocket connection.
+    // This detects stale tokens (e.g. after server restart) without relying on
+    // browser WebSocket error codes, which don't expose HTTP status.
+    const encodedToken = encodeURIComponent(sessionToken);
+    fetch(`/api/rooms/${roomCode}/validate-session?token=${encodedToken}`, {
+      signal: abortController.signal,
+    })
+      .then((res) => {
+        if (abortController.signal.aborted) return;
 
-    ws.onopen = () => {
-      setConnectionStatus('connected');
-      setLastError(null);
-      reconnectAttemptRef.current = 0;
-    };
-
-    ws.onmessage = (event) => {
-      let rawMessage: unknown;
-
-      try {
-        rawMessage = JSON.parse(event.data);
-      } catch {
-        setLastError('Received invalid JSON from server.');
-        return;
-      }
-
-      const parsedMessage = ServerMessageSchema.safeParse(rawMessage);
-      if (!parsedMessage.success) {
-        if (import.meta.env.DEV) {
-          console.error('Invalid server message:', JSON.stringify(rawMessage).slice(0, 500), parsedMessage.error.issues);
-        }
-        setLastError('Received invalid server message.');
-        return;
-      }
-
-      const msg: ServerMessage = parsedMessage.data;
-
-      switch (msg.type) {
-        case 'RoomState':
-          setRoomState(msg.state);
-          setGameState(null);
-          break;
-        case 'GameState':
-          if (pendingClearTimeoutRef.current) {
-            clearTimeout(pendingClearTimeoutRef.current);
-            pendingClearTimeoutRef.current = null;
-          }
-          setPendingClearColumns(null);
-          setGameState(msg.state);
-          setTurnDeadlineSecs(msg.turn_deadline_secs ?? null);
-          setWasTimeout(false);
-          break;
-        case 'ActionApplied':
-        case 'BotAction': {
-          const isFlipClear = msg.action.type === 'DiscardAndFlip' && msg.state.last_column_clears.length > 0;
-          if (isFlipClear) {
-            const preClearState = buildPreClearState(msg.state);
-            const clearCols = msg.state.last_column_clears.map(c => ({
-              playerIndex: c.player_index,
-              column: c.column,
-            }));
-            setPendingClearColumns(clearCols);
-            setGameState(preClearState);
-            setTurnDeadlineSecs(msg.turn_deadline_secs ?? null);
-            setWasTimeout(false);
-            if (pendingClearTimeoutRef.current) clearTimeout(pendingClearTimeoutRef.current);
-            pendingClearTimeoutRef.current = setTimeout(() => {
-              setPendingClearColumns(null);
-              setGameState(msg.state);
-              pendingClearTimeoutRef.current = null;
-            }, COLUMN_CLEAR_DELAY_MS);
-          } else {
-            setGameState(msg.state);
-            setTurnDeadlineSecs(msg.turn_deadline_secs ?? null);
-            setWasTimeout(false);
-          }
-          break;
-        }
-        case 'TimeoutAction': {
-          const isFlipClearTimeout = msg.action.type === 'DiscardAndFlip' && msg.state.last_column_clears.length > 0;
-          if (isFlipClearTimeout) {
-            const preClearState = buildPreClearState(msg.state);
-            const clearCols = msg.state.last_column_clears.map(c => ({
-              playerIndex: c.player_index,
-              column: c.column,
-            }));
-            setPendingClearColumns(clearCols);
-            setGameState(preClearState);
-            setTurnDeadlineSecs(msg.turn_deadline_secs ?? null);
-            setWasTimeout(true);
-            if (pendingClearTimeoutRef.current) clearTimeout(pendingClearTimeoutRef.current);
-            pendingClearTimeoutRef.current = setTimeout(() => {
-              setPendingClearColumns(null);
-              setGameState(msg.state);
-              pendingClearTimeoutRef.current = null;
-            }, COLUMN_CLEAR_DELAY_MS);
-          } else {
-            setGameState(msg.state);
-            setTurnDeadlineSecs(msg.turn_deadline_secs ?? null);
-            setWasTimeout(true);
-          }
-          break;
-        }
-        case 'PlayerJoined':
-          setRoomState(prev => {
-            if (!prev) return prev;
-            const players = [...prev.players];
-            players[msg.player_index] = {
-              ...players[msg.player_index],
-              name: msg.name,
-              player_type: { kind: 'Human' },
-              connected: true,
-            };
-            return { ...prev, players };
-          });
-          break;
-        case 'PlayerLeft':
-          setRoomState(prev => {
-            if (!prev) return prev;
-            const players = [...prev.players];
-            players[msg.player_index] = {
-              ...players[msg.player_index],
-              connected: false,
-            };
-            return { ...prev, players };
-          });
-          break;
-        case 'PlayerReconnected':
-          setRoomState(prev => {
-            if (!prev) return prev;
-            const players = [...prev.players];
-            players[msg.player_index] = {
-              ...players[msg.player_index],
-              connected: true,
-            };
-            return { ...prev, players };
-          });
-          break;
-        case 'Kicked':
-          setKicked(true);
-          setLastError(msg.reason);
-          // Stop reconnecting
+        if (res.status === 401) {
+          // Session is invalid — stop reconnecting
+          setSessionExpired(true);
+          setConnectionStatus('disconnected');
           reconnectAttemptRef.current = 999;
-          break;
-        case 'Error':
-          setLastError(msg.message);
-          break;
-        case 'Pong':
-        case 'ActionAppliedDelta':
-          // Delta messages are ignored — we use the full state from ActionApplied/BotAction
-          break;
-        case 'PlayerConvertedToBot':
-          setRoomState(prev => {
-            if (!prev) return prev;
-            const players = [...prev.players];
-            players[msg.slot] = {
-              ...players[msg.slot],
-              name: msg.name,
-              player_type: { kind: 'Bot', strategy: 'Random' },
-              connected: false,
-            };
-            return { ...prev, players };
-          });
-          break;
-        case 'ServerShutdown':
-          setLastError('Server is shutting down. Please reconnect shortly.');
-          break;
-      }
-    };
+          return;
+        }
 
-    ws.onclose = () => {
-      setConnectionStatus('disconnected');
-      wsRef.current = null;
+        if (!res.ok) {
+          // Non-auth error (404, 500, etc.) — treat as transient, retry with backoff
+          setConnectionStatus('disconnected');
+          const attempt = reconnectAttemptRef.current;
+          if (attempt < 10) {
+            const delay = Math.min(1000 * Math.pow(2, attempt), 30000);
+            reconnectTimeoutRef.current = setTimeout(() => {
+              reconnectAttemptRef.current++;
+              connect();
+            }, delay);
+          }
+          return;
+        }
 
-      // Exponential backoff reconnection
-      const attempt = reconnectAttemptRef.current;
-      if (attempt < 10) {
-        const delay = Math.min(1000 * Math.pow(2, attempt), 30000);
-        reconnectTimeoutRef.current = setTimeout(() => {
-          reconnectAttemptRef.current++;
-          connect();
-        }, delay);
-      }
-    };
+        if (abortController.signal.aborted) return;
 
-    ws.onerror = () => {
-      // onclose will fire after this
-    };
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        let wsUrl = `${protocol}//${window.location.host}/api/rooms/${roomCode}/ws?token=${encodedToken}`;
+        if (accessToken) {
+          wsUrl += `&access_token=${encodeURIComponent(accessToken)}`;
+        }
+        const ws = new WebSocket(wsUrl);
 
-    wsRef.current = ws;
+        ws.onopen = () => {
+          setConnectionStatus('connected');
+          setLastError(null);
+          reconnectAttemptRef.current = 0;
+        };
+
+        ws.onmessage = (event) => {
+          let rawMessage: unknown;
+
+          try {
+            rawMessage = JSON.parse(event.data);
+          } catch {
+            setLastError('Received invalid JSON from server.');
+            return;
+          }
+
+          const parsedMessage = ServerMessageSchema.safeParse(rawMessage);
+          if (!parsedMessage.success) {
+            if (import.meta.env.DEV) {
+              console.error('Invalid server message:', JSON.stringify(rawMessage).slice(0, 500), parsedMessage.error.issues);
+            }
+            setLastError('Received invalid server message.');
+            return;
+          }
+
+          const msg: ServerMessage = parsedMessage.data;
+
+          switch (msg.type) {
+            case 'RoomState':
+              setRoomState(msg.state);
+              setGameState(null);
+              break;
+            case 'GameState':
+              if (pendingClearTimeoutRef.current) {
+                clearTimeout(pendingClearTimeoutRef.current);
+                pendingClearTimeoutRef.current = null;
+              }
+              setPendingClearColumns(null);
+              setGameState(msg.state);
+              setTurnDeadlineSecs(msg.turn_deadline_secs ?? null);
+              setWasTimeout(false);
+              break;
+            case 'ActionApplied':
+            case 'BotAction': {
+              const isFlipClear = msg.action.type === 'DiscardAndFlip' && msg.state.last_column_clears.length > 0;
+              if (isFlipClear) {
+                const preClearState = buildPreClearState(msg.state);
+                const clearCols = msg.state.last_column_clears.map(c => ({
+                  playerIndex: c.player_index,
+                  column: c.column,
+                }));
+                setPendingClearColumns(clearCols);
+                setGameState(preClearState);
+                setTurnDeadlineSecs(msg.turn_deadline_secs ?? null);
+                setWasTimeout(false);
+                if (pendingClearTimeoutRef.current) clearTimeout(pendingClearTimeoutRef.current);
+                pendingClearTimeoutRef.current = setTimeout(() => {
+                  setPendingClearColumns(null);
+                  setGameState(msg.state);
+                  pendingClearTimeoutRef.current = null;
+                }, COLUMN_CLEAR_DELAY_MS);
+              } else {
+                setGameState(msg.state);
+                setTurnDeadlineSecs(msg.turn_deadline_secs ?? null);
+                setWasTimeout(false);
+              }
+              break;
+            }
+            case 'TimeoutAction': {
+              const isFlipClearTimeout = msg.action.type === 'DiscardAndFlip' && msg.state.last_column_clears.length > 0;
+              if (isFlipClearTimeout) {
+                const preClearState = buildPreClearState(msg.state);
+                const clearCols = msg.state.last_column_clears.map(c => ({
+                  playerIndex: c.player_index,
+                  column: c.column,
+                }));
+                setPendingClearColumns(clearCols);
+                setGameState(preClearState);
+                setTurnDeadlineSecs(msg.turn_deadline_secs ?? null);
+                setWasTimeout(true);
+                if (pendingClearTimeoutRef.current) clearTimeout(pendingClearTimeoutRef.current);
+                pendingClearTimeoutRef.current = setTimeout(() => {
+                  setPendingClearColumns(null);
+                  setGameState(msg.state);
+                  pendingClearTimeoutRef.current = null;
+                }, COLUMN_CLEAR_DELAY_MS);
+              } else {
+                setGameState(msg.state);
+                setTurnDeadlineSecs(msg.turn_deadline_secs ?? null);
+                setWasTimeout(true);
+              }
+              break;
+            }
+            case 'PlayerJoined':
+              setRoomState(prev => {
+                if (!prev) return prev;
+                const players = [...prev.players];
+                players[msg.player_index] = {
+                  ...players[msg.player_index],
+                  name: msg.name,
+                  player_type: { kind: 'Human' },
+                  connected: true,
+                };
+                return { ...prev, players };
+              });
+              break;
+            case 'PlayerLeft':
+              setRoomState(prev => {
+                if (!prev) return prev;
+                const players = [...prev.players];
+                players[msg.player_index] = {
+                  ...players[msg.player_index],
+                  connected: false,
+                };
+                return { ...prev, players };
+              });
+              break;
+            case 'PlayerReconnected':
+              setRoomState(prev => {
+                if (!prev) return prev;
+                const players = [...prev.players];
+                players[msg.player_index] = {
+                  ...players[msg.player_index],
+                  connected: true,
+                };
+                return { ...prev, players };
+              });
+              break;
+            case 'Kicked':
+              setKicked(true);
+              setLastError(msg.reason);
+              // Stop reconnecting
+              reconnectAttemptRef.current = 999;
+              break;
+            case 'Error':
+              setLastError(msg.message);
+              break;
+            case 'Pong':
+            case 'ActionAppliedDelta':
+              // Delta messages are ignored — we use the full state from ActionApplied/BotAction
+              break;
+            case 'PlayerConvertedToBot':
+              setRoomState(prev => {
+                if (!prev) return prev;
+                const players = [...prev.players];
+                players[msg.slot] = {
+                  ...players[msg.slot],
+                  name: msg.name,
+                  player_type: { kind: 'Bot', strategy: 'Random' },
+                  connected: false,
+                };
+                return { ...prev, players };
+              });
+              break;
+            case 'ServerShutdown':
+              setLastError('Server is shutting down. Please reconnect shortly.');
+              break;
+          }
+        };
+
+        ws.onclose = (event) => {
+          setConnectionStatus('disconnected');
+          wsRef.current = null;
+
+          // Session expired close code — stop reconnecting immediately
+          if (event.code === WS_CLOSE_SESSION_EXPIRED) {
+            setSessionExpired(true);
+            reconnectAttemptRef.current = 999;
+            return;
+          }
+
+          // Exponential backoff reconnection for network failures
+          const attempt = reconnectAttemptRef.current;
+          if (attempt < 10) {
+            const delay = Math.min(1000 * Math.pow(2, attempt), 30000);
+            reconnectTimeoutRef.current = setTimeout(() => {
+              reconnectAttemptRef.current++;
+              connect();
+            }, delay);
+          }
+        };
+
+        ws.onerror = () => {
+          // onclose will fire after this
+        };
+
+        wsRef.current = ws;
+      })
+      .catch((err) => {
+        // Ignore aborted requests (from cleanup/disconnect)
+        if (err instanceof DOMException && err.name === 'AbortError') return;
+        // Network error on validation fetch — treat as temporary, retry with backoff
+        setConnectionStatus('disconnected');
+        const attempt = reconnectAttemptRef.current;
+        if (attempt < 10) {
+          const delay = Math.min(1000 * Math.pow(2, attempt), 30000);
+          reconnectTimeoutRef.current = setTimeout(() => {
+            reconnectAttemptRef.current++;
+            connect();
+          }, delay);
+        }
+      });
   }, [roomCode, sessionToken, accessToken]);
 
   // Connect when we have room code and token
@@ -311,6 +384,7 @@ export function useOnlineGame(
       connect();
     }
     return () => {
+      connectAbortRef.current?.abort();
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
       }
@@ -384,6 +458,7 @@ export function useOnlineGame(
 
   const disconnect = useCallback(() => {
     reconnectAttemptRef.current = 999; // Prevent reconnect
+    connectAbortRef.current?.abort();
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
     }
@@ -400,6 +475,7 @@ export function useOnlineGame(
     setGameState(null);
     setLastError(null);
     setKicked(false);
+    setSessionExpired(false);
     setPendingClearColumns(null);
   }, []);
 
@@ -412,6 +488,7 @@ export function useOnlineGame(
     playerIndex,
     lastError,
     kicked,
+    sessionExpired,
     pendingClearColumns,
     applyAction,
     configureSlot,
