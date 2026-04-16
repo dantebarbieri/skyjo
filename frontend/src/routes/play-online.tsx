@@ -100,7 +100,7 @@ export default function PlayOnlineRoute() {
     }
   }, [urlRoomCode, sessionToken, navigate]);
 
-  const handleCreate= useCallback(async (playerName: string, numPlayers: number, rules: string) => {
+  const handleCreate = useCallback(async (playerName: string, numPlayers: number, rules: string) => {
     setFormError(null);
     try {
       const result = await createRoom(playerName, numPlayers, rules);

@@ -54,7 +54,7 @@ jobs:
       - name: Check for eslint-disable comments
         run: |
           if grep -rn 'eslint-disable' frontend/src/; then
-            echo "::error::Found eslint-disable comments. Remove them and fix the underlying issue. See CONTRIBUTING guidelines."
+            echo "::error::Found eslint-disable comments. Remove them and fix the underlying issue."
             exit 1
           fi
       - name: Type check
