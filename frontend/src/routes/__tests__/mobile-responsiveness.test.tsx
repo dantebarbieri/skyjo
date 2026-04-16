@@ -127,24 +127,15 @@ describe('Mobile responsiveness regression tests', () => {
   });
 
   describe('Admin page', () => {
-    it('wraps user table in overflow-x-auto container', async () => {
-      vi.stubGlobal(
-        'fetch',
-        vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([]) })),
-      );
+    it('table is rendered inside shadcn scroll container', async () => {
       const { container } = renderWithRouter(<AdminRoute />, ['/admin']);
-      // The table should be inside an overflow-x-auto wrapper
+      // shadcn <Table> wraps <table> in a div with overflow-x-auto
       const table = container.querySelector('table');
       expect(table).not.toBeNull();
-      const scrollWrapper = table!.closest('.overflow-x-auto');
-      expect(scrollWrapper).not.toBeNull();
+      expect(table!.parentElement?.className).toContain('overflow-x-auto');
     });
 
     it('permission select uses responsive width', () => {
-      vi.stubGlobal(
-        'fetch',
-        vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([]) })),
-      );
       const { container } = renderWithRouter(<AdminRoute />, ['/admin']);
       // Find the create-user form's select trigger — it should use w-full sm:w-[140px]
       const form = container.querySelector('form');

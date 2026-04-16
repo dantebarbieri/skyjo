@@ -190,7 +190,6 @@ export default function AdminRoute() {
       <Card>
         <CardContent className="pt-6">
           <h2 className="text-lg font-semibold mb-3">Users</h2>
-          <div className="overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
@@ -243,7 +242,6 @@ export default function AdminRoute() {
               ))}
             </TableBody>
           </Table>
-          </div>
         </CardContent>
       </Card>
     </div>
