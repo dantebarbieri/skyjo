@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { ActionButtons } from '@/components/action-buttons';
 import SkyjoCard from '@/components/skyjo-card';
 import { RoundScorecard } from '@/components/round-scorecard';
+import { GameErrorBoundary } from '@/components/game-error-boundary';
 import { useResponsiveCardSize } from '@/hooks/use-responsive-card-size';
 import { cn } from '@/lib/utils';
 import { toSlot, getPlayerName, computeVisibleScore } from '@/lib/game-helpers';
@@ -216,19 +217,23 @@ export default function PlayOnlineRoute() {
       )}
 
       {game.gameState && (
-        <OnlinePlayBoard
-          state={game.gameState}
-          playerIndex={playerIndex!}
-          turnDeadlineSecs={game.turnDeadlineSecs}
-          wasTimeout={game.wasTimeout}
-          onAction={game.applyAction}
-          onContinueRound={game.readyForNextRound}
-          onPlayAgain={game.playAgain}
-          onReturnToLobby={game.returnToLobby}
-          onLeave={handleLeave}
-          pendingClearColumns={game.pendingClearColumns}
-          roundReady={game.roundReady}
-        />
+        <GameErrorBoundary
+          fallbackMessage="An error occurred while rendering the game. Check the browser console for details."
+        >
+          <OnlinePlayBoard
+            state={game.gameState}
+            playerIndex={playerIndex!}
+            turnDeadlineSecs={game.turnDeadlineSecs}
+            wasTimeout={game.wasTimeout}
+            onAction={game.applyAction}
+            onContinueRound={game.readyForNextRound}
+            onPlayAgain={game.playAgain}
+            onReturnToLobby={game.returnToLobby}
+            onLeave={handleLeave}
+            pendingClearColumns={game.pendingClearColumns}
+            roundReady={game.roundReady}
+          />
+        </GameErrorBoundary>
       )}
     </div>
   );
@@ -919,7 +924,18 @@ function OnlinePlayBoard({
     }
   }, [action_needed]);
 
-  // Round / game over screens
+  const activePlayer = action_needed.type === 'ChooseInitialFlips'
+    ? action_needed.player
+    : current_player;
+
+  // Auto-scroll to active player's board on mobile
+  useEffect(() => {
+    if (window.innerWidth < 640 && activeBoardRef.current) {
+      activeBoardRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }, [activePlayer]);
+
+  // Round / game over screens (must be after all hooks)
   if (action_needed.type === 'RoundOver') {
     return (
       <OnlineRoundSummary
@@ -943,10 +959,6 @@ function OnlinePlayBoard({
       />
     );
   }
-
-  const activePlayer = action_needed.type === 'ChooseInitialFlips'
-    ? action_needed.player
-    : current_player;
 
   const isMyTurn = activePlayer === playerIndex;
   const isInitialFlips = action_needed.type === 'ChooseInitialFlips';
@@ -1038,14 +1050,6 @@ function OnlinePlayBoard({
   };
 
   const hasGoneOut = state.going_out_player !== null;
-
-  // Auto-scroll to active player's board on mobile
-  // eslint-disable-next-line react-hooks/rules-of-hooks
-  useEffect(() => {
-    if (window.innerWidth < 640 && activeBoardRef.current) {
-      activeBoardRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    }
-  }, [activePlayer]);
 
   return (
     <div className="space-y-4">

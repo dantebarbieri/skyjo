@@ -961,3 +961,67 @@ describe('New ServerMessage variants', () => {
     expect(ServerMessageSchema.parse(msg)).toEqual(msg);
   });
 });
+
+// ─── Round-end / Game-over Fixture Tests (Issue #19) ────────────────
+
+import roundEndFixture from '@/__fixtures__/round-end-action-applied.json';
+import gameOverFixture from '@/__fixtures__/game-over-action-applied.json';
+import actualGameFixture from '@/__fixtures__/actual-game-round-end.json';
+
+describe('Round-end server message validation (Issue #19)', () => {
+  it('parses round-end ActionApplied from server fixture', () => {
+    const result = ServerMessageSchema.safeParse(roundEndFixture);
+    if (!result.success) {
+      console.error('Round-end parse errors:', JSON.stringify(result.error.issues, null, 2));
+    }
+    expect(result.success).toBe(true);
+  });
+
+  it('parses game-over ActionApplied from server fixture', () => {
+    const result = ServerMessageSchema.safeParse(gameOverFixture);
+    if (!result.success) {
+      console.error('Game-over parse errors:', JSON.stringify(result.error.issues, null, 2));
+    }
+    expect(result.success).toBe(true);
+  });
+
+  it('parses actual game round-end from engine playthrough', () => {
+    const result = ServerMessageSchema.safeParse(actualGameFixture);
+    if (!result.success) {
+      console.error('Actual game parse errors:', JSON.stringify(result.error.issues, null, 2));
+    }
+    expect(result.success).toBe(true);
+  });
+
+  it('round-end state passes InteractiveGameStateSchema', () => {
+    const result = InteractiveGameStateSchema.safeParse(roundEndFixture.state);
+    if (!result.success) {
+      console.error('Round-end state parse errors:', JSON.stringify(result.error.issues, null, 2));
+    }
+    expect(result.success).toBe(true);
+  });
+
+  it('round-end action_needed passes ActionNeededSchema', () => {
+    const result = ActionNeededSchema.safeParse(roundEndFixture.state.action_needed);
+    if (!result.success) {
+      console.error('Round-end action_needed parse errors:', JSON.stringify(result.error.issues, null, 2));
+    }
+    expect(result.success).toBe(true);
+  });
+
+  it('game-over action_needed passes ActionNeededSchema', () => {
+    const result = ActionNeededSchema.safeParse(gameOverFixture.state.action_needed);
+    if (!result.success) {
+      console.error('Game-over action_needed parse errors:', JSON.stringify(result.error.issues, null, 2));
+    }
+    expect(result.success).toBe(true);
+  });
+
+  it('actual game state passes InteractiveGameStateSchema', () => {
+    const result = InteractiveGameStateSchema.safeParse(actualGameFixture.state);
+    if (!result.success) {
+      console.error('Actual game state parse errors:', JSON.stringify(result.error.issues, null, 2));
+    }
+    expect(result.success).toBe(true);
+  });
+});

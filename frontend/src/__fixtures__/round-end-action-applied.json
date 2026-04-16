@@ -1,0 +1,130 @@
+{
+  "action": {
+    "position": 5,
+    "type": "KeepDeckDraw"
+  },
+  "player": 1,
+  "state": {
+    "action_needed": {
+      "cumulative_scores": [
+        45,
+        63
+      ],
+      "end_of_round_clears": [
+        {
+          "card_value": 4,
+          "column": 1,
+          "displaced_card": null,
+          "player_index": 0
+        }
+      ],
+      "going_out_player": 0,
+      "raw_round_scores": [
+        45,
+        63
+      ],
+      "round_number": 0,
+      "round_scores": [
+        45,
+        63
+      ],
+      "type": "RoundOver"
+    },
+    "boards": [
+      [
+        {
+          "Revealed": 3
+        },
+        {
+          "Revealed": 5
+        },
+        {
+          "Revealed": 7
+        },
+        "Cleared",
+        "Cleared",
+        "Cleared",
+        {
+          "Revealed": 2
+        },
+        {
+          "Revealed": 4
+        },
+        {
+          "Revealed": 6
+        },
+        {
+          "Revealed": 1
+        },
+        {
+          "Revealed": 8
+        },
+        {
+          "Revealed": 9
+        }
+      ],
+      [
+        {
+          "Revealed": 10
+        },
+        {
+          "Revealed": 11
+        },
+        {
+          "Revealed": 12
+        },
+        {
+          "Revealed": -2
+        },
+        {
+          "Revealed": -1
+        },
+        {
+          "Revealed": 0
+        },
+        {
+          "Revealed": 3
+        },
+        {
+          "Revealed": 4
+        },
+        {
+          "Revealed": 5
+        },
+        {
+          "Revealed": 6
+        },
+        {
+          "Revealed": 7
+        },
+        {
+          "Revealed": 8
+        }
+      ]
+    ],
+    "cumulative_scores": [
+      45,
+      63
+    ],
+    "current_player": 1,
+    "deck_remaining": 95,
+    "discard_sizes": [
+      15
+    ],
+    "discard_tops": [
+      4
+    ],
+    "going_out_player": 0,
+    "is_final_turn": true,
+    "last_column_clears": [],
+    "num_cols": 4,
+    "num_players": 2,
+    "num_rows": 3,
+    "player_names": [
+      "Alice",
+      "Bob"
+    ],
+    "round_number": 0
+  },
+  "type": "ActionApplied"
+}
