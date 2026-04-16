@@ -425,10 +425,19 @@ struct WsQuery {
 #[derive(Serialize)]
 struct HealthResponse {
     status: &'static str,
+    database: &'static str,
 }
 
-async fn health() -> Json<HealthResponse> {
-    Json(HealthResponse { status: "ok" })
+async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
+    let db_ok = sqlx::query("SELECT 1")
+        .execute(state.persistence.pool())
+        .await
+        .is_ok();
+
+    Json(HealthResponse {
+        status: if db_ok { "ok" } else { "degraded" },
+        database: if db_ok { "ok" } else { "error" },
+    })
 }
 
 async fn ws_upgrade(

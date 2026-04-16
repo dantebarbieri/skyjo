@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react';
+import { toast } from 'sonner';
 import { useAuth } from '@/contexts/auth-context';
 import { apiFetch } from '@/lib/api';
 import { Button } from '@/components/ui/button';
@@ -77,6 +78,7 @@ function DisplayNameForm({ currentName }: { currentName: string }) {
       }
       await refresh();
       setMessage('Display name updated!');
+      toast.success('Display name updated!');
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Error');
     } finally {
@@ -145,6 +147,7 @@ function PasswordForm() {
         throw new Error(body?.error?.message || 'Failed');
       }
       setMessage('Password changed! You may need to sign in again.');
+      toast.success('Password changed!');
       setIsError(false);
       setCurrentPassword('');
       setNewPassword('');

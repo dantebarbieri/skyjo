@@ -37,6 +37,12 @@ describe('AuthProvider — backend availability', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn((url: string) => {
+        if (url.includes('/health')) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ status: 'ok', database: 'ok' }),
+          });
+        }
         if (url.includes('setup-status')) {
           return Promise.resolve({
             ok: true,
@@ -58,7 +64,7 @@ describe('AuthProvider — backend availability', () => {
     expect(screen.getByTestId('setup')).toHaveTextContent('false');
   });
 
-  it('sets backendAvailable=false when setup-status fetch throws (network error)', async () => {
+  it('sets backendAvailable=false when health fetch throws (network error)', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(() => Promise.reject(new TypeError('Failed to fetch'))),
@@ -78,6 +84,12 @@ describe('AuthProvider — backend availability', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn((url: string) => {
+        if (url.includes('/health')) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ status: 'ok', database: 'ok' }),
+          });
+        }
         if (url.includes('setup-status')) {
           return Promise.resolve({
             ok: true,
@@ -98,12 +110,15 @@ describe('AuthProvider — backend availability', () => {
     expect(screen.getByTestId('setup')).toHaveTextContent('true');
   });
 
-  it('sets backendAvailable=true even when setup-status returns non-ok (server reachable but error)', async () => {
+  it('sets backendAvailable=false when health returns database degraded', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn((url: string) => {
-        if (url.includes('setup-status')) {
-          return Promise.resolve({ ok: false, status: 500 });
+        if (url.includes('/health')) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ status: 'degraded', database: 'error' }),
+          });
         }
         return Promise.resolve({ ok: false });
       }),
@@ -115,8 +130,8 @@ describe('AuthProvider — backend availability', () => {
       expect(screen.getByTestId('loading')).toHaveTextContent('false');
     });
 
-    // Server responded (even with error) — it's reachable
-    expect(screen.getByTestId('backend')).toHaveTextContent('true');
+    // Database is degraded — backendAvailable should be false
+    expect(screen.getByTestId('backend')).toHaveTextContent('false');
     expect(screen.getByTestId('setup')).toHaveTextContent('false');
   });
 });

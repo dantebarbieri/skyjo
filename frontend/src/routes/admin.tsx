@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, type FormEvent } from 'react';
 import { Navigate } from 'react-router-dom';
+import { toast } from 'sonner';
 import { useAuth, type PermissionLevel } from '@/contexts/auth-context';
 import { apiFetch } from '@/lib/api';
 import { Button } from '@/components/ui/button';
@@ -92,28 +93,55 @@ export default function AdminRoute() {
   };
 
   const handlePermissionChange = async (userId: string, permission: PermissionLevel) => {
-    const res = await apiFetch(`/api/admin/users/${userId}/permission`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ permission }),
-    });
-    if (res.ok) fetchUsers();
+    try {
+      const res = await apiFetch(`/api/admin/users/${userId}/permission`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ permission }),
+      });
+      if (res.ok) {
+        fetchUsers();
+      } else {
+        const body = await res.json().catch(() => ({}));
+        toast.error(body?.error?.message || 'Failed to update permission');
+      }
+    } catch {
+      toast.error('Network error — could not update permission');
+    }
   };
 
   const handleDeleteUser = async (userId: string, username: string) => {
     if (!confirm(`Delete user "${username}"? This cannot be undone.`)) return;
-    const res = await apiFetch(`/api/admin/users/${userId}`, { method: 'DELETE' });
-    if (res.ok) fetchUsers();
+    try {
+      const res = await apiFetch(`/api/admin/users/${userId}`, { method: 'DELETE' });
+      if (res.ok) {
+        fetchUsers();
+      } else {
+        const body = await res.json().catch(() => ({}));
+        toast.error(body?.error?.message || 'Failed to delete user');
+      }
+    } catch {
+      toast.error('Network error — could not delete user');
+    }
   };
 
   const handleToggleRegistration = async () => {
     if (!settings) return;
-    const res = await apiFetch('/api/admin/settings', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ registration_enabled: !settings.registration_enabled }),
-    });
-    if (res.ok) setSettings(await res.json());
+    try {
+      const res = await apiFetch('/api/admin/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ registration_enabled: !settings.registration_enabled }),
+      });
+      if (res.ok) {
+        setSettings(await res.json());
+      } else {
+        const body = await res.json().catch(() => ({}));
+        toast.error(body?.error?.message || 'Failed to update registration setting');
+      }
+    } catch {
+      toast.error('Network error — could not update registration setting');
+    }
   };
 
   return (

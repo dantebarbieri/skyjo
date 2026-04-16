@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link, Navigate } from 'react-router-dom';
 import { z } from 'zod';
+import { toast } from 'sonner';
 import { GeneticModelDataSchema } from '@/schemas';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -103,17 +104,25 @@ export default function GeneticManageRoute() {
       const res = await apiFetch(`${API_BASE}/genetic/saved/${encodeURIComponent(deleteTarget)}`, {
         method: 'DELETE',
       });
-      if (res.ok) await fetchAll();
+      if (res.ok) {
+        await fetchAll();
+      } else {
+        const body = await res.json().catch(() => null);
+        toast.error(body?.message || 'Failed to delete generation');
+      }
     } catch {
-      // ignore
+      toast.error('Network error — could not delete generation');
     }
     setDeleteTarget(null);
   }
 
   async function exportGeneration(name: string) {
     try {
-      const res = await fetch(`${API_BASE}/genetic/saved/${encodeURIComponent(name)}/model`);
-      if (!res.ok) return;
+      const res = await apiFetch(`${API_BASE}/genetic/saved/${encodeURIComponent(name)}/model`);
+      if (!res.ok) {
+        toast.error('Failed to export generation');
+        return;
+      }
       const data = await res.json();
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
@@ -123,7 +132,7 @@ export default function GeneticManageRoute() {
       a.click();
       URL.revokeObjectURL(url);
     } catch {
-      // ignore
+      toast.error('Network error — could not export generation');
     }
   }
 

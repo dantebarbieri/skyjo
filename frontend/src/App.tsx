@@ -1,7 +1,9 @@
 import { useEffect } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { Toaster } from 'sonner';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import NavBar from '@/components/nav-bar';
+import ConnectionBanner from '@/components/connection-banner';
 import PwaUpdatePrompt from '@/components/pwa-update-prompt';
 import { useAuth } from '@/contexts/auth-context';
 import { initApiClient } from '@/lib/api';
@@ -33,10 +35,12 @@ export default function App() {
     <TooltipProvider>
       <div className="min-h-screen bg-background text-foreground">
         <NavBar />
+        <ConnectionBanner />
         <div className="mx-auto max-w-7xl px-3 py-4 sm:px-4 sm:py-6">
           <Outlet />
         </div>
         <PwaUpdatePrompt />
+        <Toaster position="bottom-right" richColors closeButton />
       </div>
     </TooltipProvider>
   );
