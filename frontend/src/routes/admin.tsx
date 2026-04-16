@@ -159,7 +159,7 @@ export default function AdminRoute() {
                 className="flex-1 min-w-[150px]"
               />
               <Select value={newPermission} onValueChange={(v) => setNewPermission(v as PermissionLevel)}>
-                <SelectTrigger className="w-[140px]">
+                <SelectTrigger className="w-full sm:w-[140px]">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -190,6 +190,7 @@ export default function AdminRoute() {
       <Card>
         <CardContent className="pt-6">
           <h2 className="text-lg font-semibold mb-3">Users</h2>
+          <div className="overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
@@ -242,6 +243,7 @@ export default function AdminRoute() {
               ))}
             </TableBody>
           </Table>
+          </div>
         </CardContent>
       </Card>
     </div>
