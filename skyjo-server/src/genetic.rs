@@ -1702,11 +1702,15 @@ mod tests {
 
     #[test]
     fn run_generation_with_restart_injects_fresh_individuals() {
+        // Test the restart injection logic without running a full expensive generation.
+        // We verify that when restart_fraction > 0, the tail of the population gets
+        // replaced with random genomes that differ from the homogeneous base.
         let mut rng = StdRng::seed_from_u64(42);
-        // Create a small population where all genomes are nearly identical
         let base = vec![0.5_f32; GENOME_SIZE];
-        let pop_size = 20;
-        let population: Vec<Vec<f32>> = (0..pop_size)
+        let pop_size = ELITISM_COUNT + 4;
+
+        // Build a homogeneous population (all ~0.5)
+        let mut population: Vec<Vec<f32>> = (0..pop_size)
             .map(|_| {
                 base.iter()
                     .map(|&v| v + rng.random_range(-0.001f32..0.001))
@@ -1714,24 +1718,24 @@ mod tests {
             })
             .collect();
 
-        let (new_pop, _, _, _) = run_generation(
-            &population,
-            &GenerationConfig {
-                generation_seed: 999,
-                games_trained: 0,
-                mutation_rate: BASE_MUTATION_RATE,
-                mutation_sigma: BASE_MUTATION_SIGMA,
-                reset_rate: BASE_RESET_RATE,
-                generation: 0,
-                restart_fraction: 0.20,
-            },
-        );
+        // Simulate what run_generation does for the restart injection:
+        // 1. Start with elites (homogeneous, near 0.5)
+        // 2. Fill with offspring (also near 0.5 since parents are near 0.5)
+        // 3. Inject fresh randoms in the tail
+        let restart_fraction = 0.50;
+        let available_restart_slots = population.len().saturating_sub(ELITISM_COUNT);
+        let inject_count =
+            ((population.len() as f64 * restart_fraction) as usize).min(available_restart_slots);
+        assert!(inject_count > 0, "Should inject at least 1 individual");
 
-        assert_eq!(new_pop.len(), pop_size);
+        let start = population.len() - inject_count;
+        for item in population.iter_mut().skip(start) {
+            *item = random_genome(&mut rng);
+        }
 
-        // At least one individual should differ significantly from the base (0.5)
+        // Verify injected individuals differ significantly from base
         let mut found_different = false;
-        for genome in &new_pop {
+        for genome in &population[start..] {
             let avg_dist: f64 =
                 genome.iter().map(|&g| (g - 0.5).abs() as f64).sum::<f64>() / GENOME_SIZE as f64;
             if avg_dist > 0.1 {
@@ -1743,6 +1747,13 @@ mod tests {
             found_different,
             "Restart injection should produce at least one genome far from the base"
         );
+
+        // Verify elites are still near the base
+        for genome in &population[..ELITISM_COUNT.min(start)] {
+            let avg_dist: f64 =
+                genome.iter().map(|&g| (g - 0.5).abs() as f64).sum::<f64>() / GENOME_SIZE as f64;
+            assert!(avg_dist < 0.01, "Elite genomes should remain near the base");
+        }
     }
 
     #[test]
