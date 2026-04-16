@@ -663,16 +663,17 @@ export function NeuralNetworkViz({ className }: NeuralNetworkVizProps) {
 
       {/* 5. Glossary */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-1 text-xs text-muted-foreground">
-        <p><strong className="text-foreground">Generation</strong> — one cycle of evolution. Each generation, 100 neural networks play games, and the best are selected, blended, and mutated to produce the next generation.</p>
-        <p><strong className="text-foreground">Fitness</strong> — how well the best network performs. Based on negative average score + win bonus + score differential. Since Skyjo scores are negative-is-good, fitness values are typically negative. <em>Less negative (closer to 0) = better performance.</em></p>
-        <p><strong className="text-foreground">Inputs ({model.input_size})</strong> — what the network sees: board state, discard pile, deck size, scores, column match potential, drawn card, opponent hidden counts, and opponent near-done signals.</p>
+        <p><strong className="text-foreground">Generation</strong> — one cycle of evolution. Each generation, 300 neural networks play games against varied opponents (2-6 players), and the best are selected, crossed over (SBX), and mutated to produce the next generation.</p>
+        <p><strong className="text-foreground">Fitness</strong> — how well the best network performs. Calculated as the negative average score across training games. Since lower Skyjo scores are better, fitness values are typically negative. <em>Less negative (closer to 0) = better performance.</em></p>
+        <p><strong className="text-foreground">Inputs ({model.input_size})</strong> — what the network sees: board state, discard pile, deck size, scores, column match potential, drawn card, opponent hidden counts, opponent near-done signals, card counting distribution (remaining copies of each value), and round progress.</p>
         <p><strong className="text-foreground">Hidden ({model.hidden1_size || model.hidden_size} + {model.hidden2_size || '?'})</strong> — two layers of internal neurons with ReLU activation that learn patterns from the inputs.</p>
         <p><strong className="text-foreground">Outputs ({model.output_size})</strong> — decisions the network makes: which cards to flip, whether to draw from deck or discard, whether to keep or swap, and where to place cards.</p>
         <p><strong className="text-foreground">Lineage</strong> — a unique identifier for each independent training run. When you reset the model, a new lineage begins. Saved generations retain their lineage so you can compare models from different training runs.</p>
         <p><strong className="text-foreground">ReLU</strong> — Rectified Linear Unit. An activation function: outputs the input if positive, 0 otherwise. Formula: max(0, x). Makes the network capable of learning non-linear patterns.</p>
         <p><strong className="text-foreground">Weight</strong> — a number that scales a connection between two neurons. Positive weights amplify signals; negative weights suppress them. Training evolves these values.</p>
         <p><strong className="text-foreground">Bias</strong> — an offset added to a neuron's output before activation. Allows the network to shift its decision boundary independently of inputs.</p>
-        <p><strong className="text-foreground">Mutation (μ / σ)</strong> — μ (mu) is the mutation rate — the probability a weight is changed each generation. σ (sigma) is the standard deviation of the Gaussian noise added to mutated weights. Adaptive: both increase when training stagnates.</p>
+        <p><strong className="text-foreground">Mutation (μ / σ)</strong> — μ (mu) is the mutation rate — the probability a weight is changed each generation. σ (sigma) is the standard deviation of the Gaussian noise added to mutated weights. Both adapt conservatively (σ ≤ 0.5, μ ≤ 10%). On prolonged stagnation, 20% of the population is replaced with fresh random individuals.</p>
+        <p><strong className="text-foreground">SBX (η)</strong> — Simulated Binary Crossover. Combines two parent genomes to produce offspring. η (eta) is the distribution index: higher values (η=20) keep offspring close to parents (exploitation), lower values allow more exploration. Unlike BLX-α, SBX preserves locality in high-dimensional weight spaces.</p>
         <p><strong className="text-foreground">Edge colors</strong> — connections between layers show average weights. <span className="text-blue-500 font-semibold">Blue = positive</span> (amplifying), <span className="text-red-500 font-semibold">Red = negative</span> (suppressing). Thicker = stronger. Each edge averages all weights between its source group and destination layer.</p>
       </div>
 
@@ -837,7 +838,7 @@ function NetworkDiagram({ model }: { model: GeneticModelData }) {
     <div className="w-full overflow-x-auto">
       <svg
         viewBox={`0 0 ${svgWidth} ${svgHeight}`}
-        className="w-full max-w-[900px] min-w-[600px] mx-auto"
+        className="w-full max-w-[900px] min-w-[400px] sm:min-w-[600px] mx-auto"
         style={{ minHeight: 200 }}
       >
         {/* Edges: input → hidden1 (distributed along hidden1 box height) */}

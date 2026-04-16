@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 
@@ -7,17 +9,17 @@ use crate::strategy::{
     PhaseDescription, Strategy, StrategyDescription, StrategyView,
 };
 
-use super::common::{average_unknown_value, column_analysis, expected_score};
+use super::common::{average_unknown_value, column_analysis, deck_distribution, expected_score};
 
 // --- Architecture constants ---
 
 /// Architecture version for model compatibility checking.
-/// v1 = original (48→32→39 tanh), v2 = improved (INPUT_SIZE→64→32→39 ReLU)
-pub const ARCHITECTURE_VERSION: u32 = 2;
+/// v1 = original (48→32→39 tanh), v2 = 62→64→32→39 ReLU, v3 = 78→48→24→39 (card counting)
+pub const ARCHITECTURE_VERSION: u32 = 3;
 
-pub const INPUT_SIZE: usize = 62; // expanded features
-pub const HIDDEN1_SIZE: usize = 64;
-pub const HIDDEN2_SIZE: usize = 32;
+pub const INPUT_SIZE: usize = 78; // card counting + round progress features
+pub const HIDDEN1_SIZE: usize = 48;
+pub const HIDDEN2_SIZE: usize = 24;
 pub const OUTPUT_SIZE: usize = 39;
 /// Total number of f32 weights in the genome.
 /// Layout: [W_ih1, b_h1, W_h1h2, b_h2, W_h2o, b_o]
@@ -104,6 +106,24 @@ pub const INPUT_LABELS: &[&str] = &[
     "Opp 2 Near Done",
     "Opp 3 Near Done",
     "Opp 4 Near Done",
+    // Card counting distribution
+    "Remaining -2",
+    "Remaining -1",
+    "Remaining 0",
+    "Remaining 1",
+    "Remaining 2",
+    "Remaining 3",
+    "Remaining 4",
+    "Remaining 5",
+    "Remaining 6",
+    "Remaining 7",
+    "Remaining 8",
+    "Remaining 9",
+    "Remaining 10",
+    "Remaining 11",
+    "Remaining 12",
+    // Round progress
+    "Round Progress",
 ];
 
 /// Labels for each output, used by the frontend NN visualization.
@@ -170,6 +190,8 @@ pub const INPUT_GROUPS: &[(&str, usize, usize)] = &[
     ("Discard Pile Depth", 55, 56),
     ("Score Rank", 56, 57),
     ("Opp Near Done (5)", 57, 62),
+    ("Card Counting (15)", 62, 77),
+    ("Round Progress", 77, 78),
 ];
 
 /// Grouped output labels for the frontend visualization (collapsed view).
@@ -451,6 +473,58 @@ pub fn extract_features(view: &StrategyView, drawn_card: Option<CardValue>) -> V
         features.push(opp_revealed_ratios.get(i).copied().unwrap_or(0.0));
     }
 
+    // Card counting distribution: fraction of each value remaining unseen
+    // Precompute all visible counts in a single pass to avoid repeated board scans
+    let dist = deck_distribution();
+    let mut visible_counts: HashMap<CardValue, usize> = HashMap::new();
+    for slot in &view.my_board {
+        if let VisibleSlot::Revealed(v) = slot {
+            *visible_counts.entry(*v).or_insert(0) += 1;
+        }
+    }
+    for board in &view.opponent_boards {
+        for slot in board {
+            if let VisibleSlot::Revealed(v) = slot {
+                *visible_counts.entry(*v).or_insert(0) += 1;
+            }
+        }
+    }
+    for pile in &view.discard_piles {
+        for &v in pile {
+            *visible_counts.entry(v).or_insert(0) += 1;
+        }
+    }
+    for value in -2i8..=12i8 {
+        let total = dist.get(&value).copied().unwrap_or(0);
+        let visible = visible_counts.get(&value).copied().unwrap_or(0);
+        let remaining = total.saturating_sub(visible);
+        features.push(if total > 0 {
+            remaining as f32 / total as f32
+        } else {
+            0.0
+        });
+    }
+
+    // Round progress: fraction of all cards revealed or cleared across all boards
+    let total_slots =
+        view.my_board.len() + view.opponent_boards.iter().map(|b| b.len()).sum::<usize>();
+    let revealed_or_cleared = view
+        .my_board
+        .iter()
+        .filter(|s| !matches!(s, VisibleSlot::Hidden))
+        .count()
+        + view
+            .opponent_boards
+            .iter()
+            .flat_map(|b| b.iter())
+            .filter(|s| !matches!(s, VisibleSlot::Hidden))
+            .count();
+    features.push(if total_slots > 0 {
+        revealed_or_cleared as f32 / total_slots as f32
+    } else {
+        0.0
+    });
+
     assert_eq!(features.len(), INPUT_SIZE);
     features
 }
@@ -582,6 +656,14 @@ impl Strategy for GeneticStrategy {
                     label: "Neural Network".into(),
                     used_for: "All decisions — the network transforms board state features \
                                into action scores via learned weights"
+                        .into(),
+                },
+                ConceptReference {
+                    id: "card_counting".into(),
+                    label: "Card Counting".into(),
+                    used_for: "Input feature — the network receives the fraction of each \
+                               card value (-2 through 12) remaining unseen, enabling \
+                               probability-aware decisions"
                         .into(),
                 },
                 ConceptReference {
@@ -842,5 +924,208 @@ mod tests {
         let _draw = strategy.choose_draw(&view, &mut rng);
         let _action = strategy.choose_deck_draw_action(&view, 3, &mut rng);
         let _pos = strategy.choose_discard_draw_placement(&view, 3, &mut rng);
+    }
+
+    #[test]
+    fn card_counting_features_all_hidden() {
+        let view = StrategyView {
+            my_index: 0,
+            my_board: vec![VisibleSlot::Hidden; 12],
+            num_rows: 3,
+            num_cols: 4,
+            opponent_boards: vec![vec![VisibleSlot::Hidden; 12]],
+            opponent_indices: vec![1],
+            discard_piles: vec![vec![]],
+            deck_remaining: 150,
+            cumulative_scores: vec![0, 0],
+            is_final_turn: false,
+        };
+        let features = extract_features(&view, None);
+        // Card counting features at indices 62..77 should all be 1.0 (all copies remaining)
+        for i in 62..77 {
+            assert!(
+                (features[i] - 1.0).abs() < 0.001,
+                "Card counting feature at index {} should be 1.0, got {}",
+                i,
+                features[i]
+            );
+        }
+    }
+
+    #[test]
+    fn card_counting_features_with_visible_cards() {
+        let view = make_test_view();
+        let features = extract_features(&view, None);
+
+        // Value 3 (index 62 + 5 = 67): one 3 revealed on board, 10 total → 9/10 = 0.9
+        assert!(
+            (features[67] - 0.9).abs() < 0.001,
+            "Feature for value 3 should be 0.9, got {}",
+            features[67]
+        );
+
+        // Value 4 (index 68): one 4 in discard pile, 10 total → 9/10 = 0.9
+        assert!(
+            (features[68] - 0.9).abs() < 0.001,
+            "Feature for value 4 should be 0.9, got {}",
+            features[68]
+        );
+
+        // Value -1 (index 63): one -1 revealed on board, 10 total → 9/10 = 0.9
+        assert!(
+            (features[63] - 0.9).abs() < 0.001,
+            "Feature for value -1 should be 0.9, got {}",
+            features[63]
+        );
+
+        // Value 0 (index 64): none visible → 1.0
+        assert!(
+            (features[64] - 1.0).abs() < 0.001,
+            "Feature for value 0 should be 1.0, got {}",
+            features[64]
+        );
+    }
+
+    #[test]
+    fn round_progress_feature_all_hidden() {
+        let view = StrategyView {
+            my_index: 0,
+            my_board: vec![VisibleSlot::Hidden; 12],
+            num_rows: 3,
+            num_cols: 4,
+            opponent_boards: vec![vec![VisibleSlot::Hidden; 12]],
+            opponent_indices: vec![1],
+            discard_piles: vec![vec![]],
+            deck_remaining: 150,
+            cumulative_scores: vec![0, 0],
+            is_final_turn: false,
+        };
+        let features = extract_features(&view, None);
+        assert!(
+            (features[77] - 0.0).abs() < 0.001,
+            "Round progress should be 0.0 when all hidden, got {}",
+            features[77]
+        );
+    }
+
+    #[test]
+    fn round_progress_feature_partially_revealed() {
+        let view = make_test_view();
+        let features = extract_features(&view, None);
+        // my board: 4 revealed out of 12, opponent: 0 out of 12 → 4/24 ≈ 0.1667
+        let expected = 4.0 / 24.0;
+        assert!(
+            (features[77] - expected).abs() < 0.001,
+            "Round progress should be ~{}, got {}",
+            expected,
+            features[77]
+        );
+    }
+
+    #[test]
+    fn round_progress_feature_fully_revealed() {
+        let view = StrategyView {
+            my_index: 0,
+            my_board: vec![VisibleSlot::Revealed(1); 12],
+            num_rows: 3,
+            num_cols: 4,
+            opponent_boards: vec![vec![VisibleSlot::Revealed(2); 12]],
+            opponent_indices: vec![1],
+            discard_piles: vec![vec![]],
+            deck_remaining: 100,
+            cumulative_scores: vec![0, 0],
+            is_final_turn: false,
+        };
+        let features = extract_features(&view, None);
+        assert!(
+            (features[77] - 1.0).abs() < 0.001,
+            "Round progress should be 1.0 when fully revealed, got {}",
+            features[77]
+        );
+    }
+
+    #[test]
+    fn extract_features_with_multiple_opponents() {
+        let view = StrategyView {
+            my_index: 0,
+            my_board: vec![VisibleSlot::Hidden; 12],
+            num_rows: 3,
+            num_cols: 4,
+            opponent_boards: vec![
+                vec![VisibleSlot::Hidden; 12],
+                vec![VisibleSlot::Hidden; 12],
+                vec![VisibleSlot::Hidden; 12],
+            ],
+            opponent_indices: vec![1, 2, 3],
+            discard_piles: vec![vec![5]],
+            deck_remaining: 100,
+            cumulative_scores: vec![0, 10, 20, 5],
+            is_final_turn: false,
+        };
+        let features = extract_features(&view, None);
+        assert_eq!(features.len(), INPUT_SIZE);
+    }
+
+    #[test]
+    fn extract_features_with_cleared_slots() {
+        let view = StrategyView {
+            my_index: 0,
+            my_board: vec![
+                VisibleSlot::Cleared,
+                VisibleSlot::Cleared,
+                VisibleSlot::Cleared,
+                VisibleSlot::Revealed(5),
+                VisibleSlot::Hidden,
+                VisibleSlot::Revealed(-1),
+                VisibleSlot::Hidden,
+                VisibleSlot::Hidden,
+                VisibleSlot::Hidden,
+                VisibleSlot::Revealed(8),
+                VisibleSlot::Hidden,
+                VisibleSlot::Hidden,
+            ],
+            num_rows: 3,
+            num_cols: 4,
+            opponent_boards: vec![vec![VisibleSlot::Hidden; 12]],
+            opponent_indices: vec![1],
+            discard_piles: vec![vec![4]],
+            deck_remaining: 120,
+            cumulative_scores: vec![0, 10],
+            is_final_turn: false,
+        };
+        let features = extract_features(&view, None);
+
+        // Cleared slots don't count as visible for card counting
+        // All 15 copies of value 0 are still "remaining" since cleared ≠ revealed
+        assert!(
+            (features[64] - 1.0).abs() < 0.001,
+            "Cleared slots should not reduce card count for value 0, got {}",
+            features[64]
+        );
+
+        // Round progress: cleared + revealed count as non-hidden
+        // my board: 3 cleared + 3 revealed + 6 hidden = 12, opponent: 0 non-hidden + 12 hidden
+        // (3+3)/24 = 6/24 = 0.25
+        let expected_progress = 6.0 / 24.0;
+        assert!(
+            (features[77] - expected_progress).abs() < 0.001,
+            "Round progress should be ~{}, got {}",
+            expected_progress,
+            features[77]
+        );
+    }
+
+    #[test]
+    fn card_counting_features_range() {
+        let view = make_test_view();
+        let features = extract_features(&view, None);
+        for i in 62..77 {
+            assert!(
+                features[i] >= 0.0 && features[i] <= 1.0,
+                "Card counting feature at index {} should be in [0.0, 1.0], got {}",
+                i,
+                features[i]
+            );
+        }
     }
 }
