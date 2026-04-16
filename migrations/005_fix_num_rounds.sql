@@ -10,7 +10,7 @@ SELECT
     g.created_at,
     gs.name AS game_state,
     COUNT(DISTINCT gp.id) AS num_players,
-    COUNT(DISTINCT gr.round_number) AS num_rounds
+    COUNT(DISTINCT gr.round_number)::INT AS num_rounds
 FROM games g
 JOIN game_states gs ON gs.id = g.game_state_id
 LEFT JOIN game_players gp ON gp.game_id = g.id

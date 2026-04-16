@@ -99,6 +99,10 @@ impl Persistence {
                 "004_snapshot_normalization",
                 include_str!("../../migrations/004_snapshot_normalization.sql"),
             ),
+            (
+                "005_fix_num_rounds",
+                include_str!("../../migrations/005_fix_num_rounds.sql"),
+            ),
         ];
 
         for (name, sql) in migrations {
