@@ -218,7 +218,7 @@ export default function GeneticManageRoute() {
             <CardTitle className="text-sm font-semibold">Latest Generation</CardTitle>
           </CardHeader>
           <CardContent className="px-4 pb-3">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="font-medium">Gen {model.generation}</span>
                 <Badge variant="outline" className="text-xs">
@@ -235,7 +235,7 @@ export default function GeneticManageRoute() {
                   </Badge>
                 )}
               </div>
-              <div className="flex gap-1">
+              <div className="flex gap-1 self-end sm:self-auto">
                 <Button
                   size="sm"
                   variant="outline"
@@ -280,7 +280,7 @@ export default function GeneticManageRoute() {
               {saved.map((sg) => (
                 <div
                   key={sg.name}
-                  className="flex items-center justify-between text-sm py-2 px-2 rounded hover:bg-muted"
+                  className="flex flex-col sm:flex-row sm:items-center justify-between text-sm py-2 px-2 rounded hover:bg-muted gap-1"
                 >
                   <div className="flex items-center gap-2 min-w-0 flex-wrap">
                     <span className="font-medium">{sg.name}</span>
@@ -300,7 +300,7 @@ export default function GeneticManageRoute() {
                       {formatTimestamp(sg.saved_at)}
                     </span>
                   </div>
-                  <div className="flex gap-1 shrink-0">
+                  <div className="flex gap-1 shrink-0 self-end sm:self-auto">
                     <Button
                       size="sm"
                       variant="ghost"
