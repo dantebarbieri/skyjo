@@ -185,7 +185,6 @@ export function useOnlineGame(
 
           const msg: ServerMessage = parsedMessage.data;
 
-          // Log round-end transitions for debugging blank screen issue (#19)
           if ('state' in msg && msg.state && 'action_needed' in msg.state) {
             const an = msg.state.action_needed;
             if (an.type === 'RoundOver' || an.type === 'GameOver') {

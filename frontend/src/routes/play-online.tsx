@@ -924,7 +924,18 @@ function OnlinePlayBoard({
     }
   }, [action_needed]);
 
-  // Round / game over screens
+  const activePlayer = action_needed.type === 'ChooseInitialFlips'
+    ? action_needed.player
+    : current_player;
+
+  // Auto-scroll to active player's board on mobile
+  useEffect(() => {
+    if (window.innerWidth < 640 && activeBoardRef.current) {
+      activeBoardRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }, [activePlayer]);
+
+  // Round / game over screens (must be after all hooks)
   if (action_needed.type === 'RoundOver') {
     return (
       <OnlineRoundSummary
@@ -948,10 +959,6 @@ function OnlinePlayBoard({
       />
     );
   }
-
-  const activePlayer = action_needed.type === 'ChooseInitialFlips'
-    ? action_needed.player
-    : current_player;
 
   const isMyTurn = activePlayer === playerIndex;
   const isInitialFlips = action_needed.type === 'ChooseInitialFlips';
@@ -1043,14 +1050,6 @@ function OnlinePlayBoard({
   };
 
   const hasGoneOut = state.going_out_player !== null;
-
-  // Auto-scroll to active player's board on mobile
-  // eslint-disable-next-line react-hooks/rules-of-hooks
-  useEffect(() => {
-    if (window.innerWidth < 640 && activeBoardRef.current) {
-      activeBoardRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    }
-  }, [activePlayer]);
 
   return (
     <div className="space-y-4">
