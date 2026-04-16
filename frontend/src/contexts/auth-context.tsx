@@ -247,9 +247,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             return;
           }
         }
-      } catch {
-        // Setup-status failed — database may have gone down between health and this call
-        setConnectivityStatus('database-degraded');
+      } catch (err) {
+        // Distinguish network errors from other failures
+        if (err instanceof TypeError) {
+          setConnectivityStatus(navigator.onLine ? 'server-unreachable' : 'client-offline');
+        } else {
+          // Non-network error (e.g. JSON parse) after healthy /api/health — likely DB issue
+          setConnectivityStatus('database-degraded');
+        }
         setIsLoading(false);
         return;
       }

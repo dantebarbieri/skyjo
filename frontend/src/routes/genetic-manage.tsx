@@ -118,7 +118,7 @@ export default function GeneticManageRoute() {
 
   async function exportGeneration(name: string) {
     try {
-      const res = await fetch(`${API_BASE}/genetic/saved/${encodeURIComponent(name)}/model`);
+      const res = await apiFetch(`${API_BASE}/genetic/saved/${encodeURIComponent(name)}/model`);
       if (!res.ok) {
         toast.error('Failed to export generation');
         return;

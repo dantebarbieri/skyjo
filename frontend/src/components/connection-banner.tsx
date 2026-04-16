@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useAuth, type ConnectivityStatus } from '@/contexts/auth-context';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -34,6 +34,15 @@ export default function ConnectionBanner() {
   const { connectivityStatus, retryConnection } = useAuth();
   const [dismissed, setDismissed] = useState(false);
   const [retrying, setRetrying] = useState(false);
+  const prevStatusRef = useRef(connectivityStatus);
+
+  // Reset dismissed state when connectivity status changes (so future outages surface)
+  if (connectivityStatus !== prevStatusRef.current) {
+    prevStatusRef.current = connectivityStatus;
+    if (connectivityStatus !== 'online') {
+      setDismissed(false);
+    }
+  }
 
   // Nothing to show when online or dismissed
   if (connectivityStatus === 'online' || dismissed) return null;

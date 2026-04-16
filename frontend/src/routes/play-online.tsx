@@ -509,8 +509,8 @@ function ConnectionIndicator({
   retryConnect: () => void;
   onLeave: () => void;
 }) {
-  const isReconnecting = (status === 'connecting' || status === 'disconnected') && reconnectAttempt > 0 && reconnectAttempt < maxReconnectAttempts;
-  const failedAllRetries = status === 'disconnected' && reconnectAttempt >= maxReconnectAttempts;
+  const isReconnecting = (status === 'connecting' || status === 'disconnected') && reconnectAttempt > 0 && reconnectAttempt <= maxReconnectAttempts;
+  const failedAllRetries = status === 'disconnected' && reconnectAttempt === maxReconnectAttempts;
 
   return (
     <div className="space-y-1">
