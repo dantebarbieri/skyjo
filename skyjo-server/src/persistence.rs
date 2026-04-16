@@ -1192,7 +1192,7 @@ impl Persistence {
         let rounds = rounds_map
             .into_iter()
             .map(|(round_number, scores)| RoundDetail {
-                round_number,
+                round_number: round_number + 1, // Convert 0-indexed DB value to 1-indexed for API
                 scores,
             })
             .collect();
