@@ -897,4 +897,207 @@ mod tests {
         let _action = strategy.choose_deck_draw_action(&view, 3, &mut rng);
         let _pos = strategy.choose_discard_draw_placement(&view, 3, &mut rng);
     }
+
+    #[test]
+    fn card_counting_features_all_hidden() {
+        let view = StrategyView {
+            my_index: 0,
+            my_board: vec![VisibleSlot::Hidden; 12],
+            num_rows: 3,
+            num_cols: 4,
+            opponent_boards: vec![vec![VisibleSlot::Hidden; 12]],
+            opponent_indices: vec![1],
+            discard_piles: vec![vec![]],
+            deck_remaining: 150,
+            cumulative_scores: vec![0, 0],
+            is_final_turn: false,
+        };
+        let features = extract_features(&view, None);
+        // Card counting features at indices 62..77 should all be 1.0 (all copies remaining)
+        for i in 62..77 {
+            assert!(
+                (features[i] - 1.0).abs() < 0.001,
+                "Card counting feature at index {} should be 1.0, got {}",
+                i,
+                features[i]
+            );
+        }
+    }
+
+    #[test]
+    fn card_counting_features_with_visible_cards() {
+        let view = make_test_view();
+        let features = extract_features(&view, None);
+
+        // Value 3 (index 62 + 5 = 67): one 3 revealed on board, 10 total → 9/10 = 0.9
+        assert!(
+            (features[67] - 0.9).abs() < 0.001,
+            "Feature for value 3 should be 0.9, got {}",
+            features[67]
+        );
+
+        // Value 4 (index 68): one 4 in discard pile, 10 total → 9/10 = 0.9
+        assert!(
+            (features[68] - 0.9).abs() < 0.001,
+            "Feature for value 4 should be 0.9, got {}",
+            features[68]
+        );
+
+        // Value -1 (index 63): one -1 revealed on board, 10 total → 9/10 = 0.9
+        assert!(
+            (features[63] - 0.9).abs() < 0.001,
+            "Feature for value -1 should be 0.9, got {}",
+            features[63]
+        );
+
+        // Value 0 (index 64): none visible → 1.0
+        assert!(
+            (features[64] - 1.0).abs() < 0.001,
+            "Feature for value 0 should be 1.0, got {}",
+            features[64]
+        );
+    }
+
+    #[test]
+    fn round_progress_feature_all_hidden() {
+        let view = StrategyView {
+            my_index: 0,
+            my_board: vec![VisibleSlot::Hidden; 12],
+            num_rows: 3,
+            num_cols: 4,
+            opponent_boards: vec![vec![VisibleSlot::Hidden; 12]],
+            opponent_indices: vec![1],
+            discard_piles: vec![vec![]],
+            deck_remaining: 150,
+            cumulative_scores: vec![0, 0],
+            is_final_turn: false,
+        };
+        let features = extract_features(&view, None);
+        assert!(
+            (features[77] - 0.0).abs() < 0.001,
+            "Round progress should be 0.0 when all hidden, got {}",
+            features[77]
+        );
+    }
+
+    #[test]
+    fn round_progress_feature_partially_revealed() {
+        let view = make_test_view();
+        let features = extract_features(&view, None);
+        // my board: 4 revealed out of 12, opponent: 0 out of 12 → 4/24 ≈ 0.1667
+        let expected = 4.0 / 24.0;
+        assert!(
+            (features[77] - expected).abs() < 0.001,
+            "Round progress should be ~{}, got {}",
+            expected,
+            features[77]
+        );
+    }
+
+    #[test]
+    fn round_progress_feature_fully_revealed() {
+        let view = StrategyView {
+            my_index: 0,
+            my_board: vec![VisibleSlot::Revealed(1); 12],
+            num_rows: 3,
+            num_cols: 4,
+            opponent_boards: vec![vec![VisibleSlot::Revealed(2); 12]],
+            opponent_indices: vec![1],
+            discard_piles: vec![vec![]],
+            deck_remaining: 100,
+            cumulative_scores: vec![0, 0],
+            is_final_turn: false,
+        };
+        let features = extract_features(&view, None);
+        assert!(
+            (features[77] - 1.0).abs() < 0.001,
+            "Round progress should be 1.0 when fully revealed, got {}",
+            features[77]
+        );
+    }
+
+    #[test]
+    fn extract_features_with_multiple_opponents() {
+        let view = StrategyView {
+            my_index: 0,
+            my_board: vec![VisibleSlot::Hidden; 12],
+            num_rows: 3,
+            num_cols: 4,
+            opponent_boards: vec![
+                vec![VisibleSlot::Hidden; 12],
+                vec![VisibleSlot::Hidden; 12],
+                vec![VisibleSlot::Hidden; 12],
+            ],
+            opponent_indices: vec![1, 2, 3],
+            discard_piles: vec![vec![5]],
+            deck_remaining: 100,
+            cumulative_scores: vec![0, 10, 20, 5],
+            is_final_turn: false,
+        };
+        let features = extract_features(&view, None);
+        assert_eq!(features.len(), INPUT_SIZE);
+    }
+
+    #[test]
+    fn extract_features_with_cleared_slots() {
+        let view = StrategyView {
+            my_index: 0,
+            my_board: vec![
+                VisibleSlot::Cleared,
+                VisibleSlot::Cleared,
+                VisibleSlot::Cleared,
+                VisibleSlot::Revealed(5),
+                VisibleSlot::Hidden,
+                VisibleSlot::Revealed(-1),
+                VisibleSlot::Hidden,
+                VisibleSlot::Hidden,
+                VisibleSlot::Hidden,
+                VisibleSlot::Revealed(8),
+                VisibleSlot::Hidden,
+                VisibleSlot::Hidden,
+            ],
+            num_rows: 3,
+            num_cols: 4,
+            opponent_boards: vec![vec![VisibleSlot::Hidden; 12]],
+            opponent_indices: vec![1],
+            discard_piles: vec![vec![4]],
+            deck_remaining: 120,
+            cumulative_scores: vec![0, 10],
+            is_final_turn: false,
+        };
+        let features = extract_features(&view, None);
+
+        // Cleared slots don't count as visible for card counting
+        // All 15 copies of value 0 are still "remaining" since cleared ≠ revealed
+        assert!(
+            (features[64] - 1.0).abs() < 0.001,
+            "Cleared slots should not reduce card count for value 0, got {}",
+            features[64]
+        );
+
+        // Round progress: cleared + revealed count as non-hidden
+        // my board: 3 cleared + 3 revealed + 6 hidden = 12, opponent: 0 non-hidden + 12 hidden
+        // (3+3)/24 = 6/24 = 0.25
+        let expected_progress = 6.0 / 24.0;
+        assert!(
+            (features[77] - expected_progress).abs() < 0.001,
+            "Round progress should be ~{}, got {}",
+            expected_progress,
+            features[77]
+        );
+    }
+
+    #[test]
+    fn card_counting_features_range() {
+        let view = make_test_view();
+        let features = extract_features(&view, None);
+        for i in 62..77 {
+            assert!(
+                features[i] >= 0.0 && features[i] <= 1.0,
+                "Card counting feature at index {} should be in [0.0, 1.0], got {}",
+                i,
+                features[i]
+            );
+        }
+    }
 }

@@ -1569,4 +1569,265 @@ mod tests {
         assert_eq!(info.name, "Gen 1");
         cleanup(&state);
     }
+
+    // ---- New GA Feature Tests ----
+
+    #[test]
+    fn select_player_count_returns_valid_range() {
+        let mut rng = StdRng::seed_from_u64(42);
+        for _ in 0..1000 {
+            let count = select_player_count(&mut rng);
+            assert!(
+                (2..=6).contains(&count),
+                "select_player_count returned {count}, expected 2..=6"
+            );
+        }
+    }
+
+    #[test]
+    fn select_player_count_distribution_roughly_correct() {
+        let mut rng = StdRng::seed_from_u64(123);
+        let n = 10_000;
+        let mut counts = [0usize; 7]; // index by player count
+        for _ in 0..n {
+            let c = select_player_count(&mut rng);
+            counts[c] += 1;
+        }
+        let pct = |c: usize| counts[c] as f64 / n as f64 * 100.0;
+
+        // 30% ± 5% for 2-player
+        assert!(
+            (25.0..=35.0).contains(&pct(2)),
+            "2-player: expected ~30%, got {:.1}%",
+            pct(2)
+        );
+        // 30% ± 5% for 3-player
+        assert!(
+            (25.0..=35.0).contains(&pct(3)),
+            "3-player: expected ~30%, got {:.1}%",
+            pct(3)
+        );
+        // 25% ± 5% for 4-player
+        assert!(
+            (20.0..=30.0).contains(&pct(4)),
+            "4-player: expected ~25%, got {:.1}%",
+            pct(4)
+        );
+        // 15% ± 5% for 5-6 player combined
+        let pct_56 = pct(5) + pct(6);
+        assert!(
+            (10.0..=20.0).contains(&pct_56),
+            "5-6 player: expected ~15%, got {:.1}%",
+            pct_56
+        );
+    }
+
+    #[test]
+    fn evaluate_individual_returns_negative_fitness() {
+        let mut rng = StdRng::seed_from_u64(77);
+        let population: Vec<Vec<f32>> = (0..2).map(|_| random_genome(&mut rng)).collect();
+        let fitness = evaluate_individual(&population[0], 0, &population, 42, 0, 3);
+        assert!(
+            fitness < 0.0,
+            "Fitness should be negative (= -avg_score), got {fitness}"
+        );
+    }
+
+    #[test]
+    fn evaluate_individual_is_deterministic() {
+        let mut rng = StdRng::seed_from_u64(99);
+        let population: Vec<Vec<f32>> = (0..2).map(|_| random_genome(&mut rng)).collect();
+        let seed = 12345u64;
+        let f1 = evaluate_individual(&population[0], 0, &population, seed, 0, 2);
+        let f2 = evaluate_individual(&population[0], 0, &population, seed, 0, 2);
+        assert_eq!(f1, f2, "evaluate_individual must be deterministic");
+    }
+
+    #[test]
+    fn sbx_crossover_locality_with_identical_parents() {
+        let mut rng = StdRng::seed_from_u64(55);
+        let parent = vec![5.0_f32; GENOME_SIZE];
+        let child = crossover(&parent, &parent, &mut rng);
+        for (i, &gene) in child.iter().enumerate() {
+            assert!(
+                (gene - 5.0).abs() < 1e-4,
+                "Gene {i} should be ~5.0 with identical parents, got {gene}"
+            );
+        }
+    }
+
+    #[test]
+    fn sbx_crossover_produces_reasonable_offspring() {
+        let mut rng = StdRng::seed_from_u64(200);
+        let parent_a: Vec<f32> = (0..GENOME_SIZE).map(|i| i as f32 * 0.01).collect();
+        let parent_b: Vec<f32> = (0..GENOME_SIZE).map(|i| -(i as f32) * 0.01).collect();
+
+        let child = crossover(&parent_a, &parent_b, &mut rng);
+
+        // Average distance of child genes from parent midpoints
+        let avg_dist_from_mid: f64 = child
+            .iter()
+            .enumerate()
+            .map(|(i, &c)| {
+                let mid = (parent_a[i] + parent_b[i]) / 2.0;
+                (c - mid).abs() as f64
+            })
+            .sum::<f64>()
+            / GENOME_SIZE as f64;
+
+        // Average distance between parents
+        let avg_parent_dist: f64 = parent_a
+            .iter()
+            .zip(parent_b.iter())
+            .map(|(&a, &b)| (a - b).abs() as f64)
+            .sum::<f64>()
+            / GENOME_SIZE as f64;
+
+        assert!(
+            avg_dist_from_mid < avg_parent_dist,
+            "SBX offspring should be closer to midpoint than parents are apart: \
+             avg_dist_from_mid={avg_dist_from_mid:.4}, avg_parent_dist={avg_parent_dist:.4}"
+        );
+    }
+
+    #[test]
+    fn run_generation_with_restart_injects_fresh_individuals() {
+        let mut rng = StdRng::seed_from_u64(42);
+        // Create a small population where all genomes are nearly identical
+        let base = vec![0.5_f32; GENOME_SIZE];
+        let pop_size = 20;
+        let population: Vec<Vec<f32>> = (0..pop_size)
+            .map(|_| {
+                base.iter()
+                    .map(|&v| v + rng.random_range(-0.001f32..0.001))
+                    .collect()
+            })
+            .collect();
+
+        let (new_pop, _, _, _) = run_generation(
+            &population,
+            999, // seed
+            0,   // games_trained
+            BASE_MUTATION_RATE,
+            BASE_MUTATION_SIGMA,
+            BASE_RESET_RATE,
+            0,    // generation
+            0.20, // restart_fraction: inject 20% fresh
+        );
+
+        assert_eq!(new_pop.len(), pop_size);
+
+        // At least one individual should differ significantly from the base (0.5)
+        let mut found_different = false;
+        for genome in &new_pop {
+            let avg_dist: f64 =
+                genome.iter().map(|&g| (g - 0.5).abs() as f64).sum::<f64>() / GENOME_SIZE as f64;
+            if avg_dist > 0.1 {
+                found_different = true;
+                break;
+            }
+        }
+        assert!(
+            found_different,
+            "Restart injection should produce at least one genome far from the base"
+        );
+    }
+
+    #[test]
+    fn games_per_individual_ramp_schedule() {
+        // Gen 0-50 → 30
+        for g in [0, 1, 25, 50] {
+            assert_eq!(games_per_individual(g), 30, "gen {g} should use 30 games");
+        }
+        // Gen 51-200 → 50
+        for g in [51, 100, 200] {
+            assert_eq!(games_per_individual(g), 50, "gen {g} should use 50 games");
+        }
+        // Gen 201+ → GAMES_PER_INDIVIDUAL (80)
+        for g in [201, 500, 10000] {
+            assert_eq!(
+                games_per_individual(g),
+                GAMES_PER_INDIVIDUAL,
+                "gen {g} should use {GAMES_PER_INDIVIDUAL} games"
+            );
+        }
+    }
+
+    #[test]
+    fn stagnation_counter_initializes_to_zero() {
+        let state = test_state("stag_init");
+        assert_eq!(state.stagnation_counter, 0);
+        cleanup(&state);
+    }
+
+    #[test]
+    fn update_adaptive_mutation_increases_on_stagnation() {
+        let mut state = test_state("stag_increase");
+        state.best_fitness = -50.0;
+        // Fill fitness_history with the same value (no improvement)
+        state.fitness_history = vec![-50.0; STAGNATION_WINDOW];
+
+        let rate_before = state.current_mutation_rate;
+        let sigma_before = state.current_mutation_sigma;
+        update_adaptive_mutation(&mut state);
+
+        assert!(
+            state.current_mutation_rate > rate_before,
+            "Mutation rate should increase on stagnation: {rate_before} -> {}",
+            state.current_mutation_rate
+        );
+        assert!(
+            state.current_mutation_sigma > sigma_before,
+            "Mutation sigma should increase on stagnation: {sigma_before} -> {}",
+            state.current_mutation_sigma
+        );
+        assert!(
+            state.stagnation_counter >= 1,
+            "Stagnation counter should increment"
+        );
+        cleanup(&state);
+    }
+
+    #[test]
+    fn update_adaptive_mutation_decreases_on_progress() {
+        let mut state = test_state("stag_decrease");
+        // Set elevated mutation rates (as if previously stagnated)
+        state.current_mutation_rate = 0.08;
+        state.current_mutation_sigma = 0.45;
+        state.best_fitness = -40.0;
+
+        // Fill fitness_history with an improving window (oldest=-50, newest=-40 → 20% improvement)
+        state.fitness_history = (0..STAGNATION_WINDOW)
+            .map(|i| -50.0 + (10.0 * i as f64 / (STAGNATION_WINDOW - 1) as f64))
+            .collect();
+
+        let rate_before = state.current_mutation_rate;
+        update_adaptive_mutation(&mut state);
+
+        assert!(
+            state.current_mutation_rate < rate_before,
+            "Mutation rate should decrease on progress: {rate_before} -> {}",
+            state.current_mutation_rate
+        );
+        assert_eq!(
+            state.stagnation_counter, 0,
+            "Stagnation counter should reset on progress"
+        );
+        cleanup(&state);
+    }
+
+    #[test]
+    fn select_opponent_returns_valid_strategy() {
+        let mut rng = StdRng::seed_from_u64(42);
+        let population: Vec<Vec<f32>> = (0..10).map(|_| random_genome(&mut rng)).collect();
+        // Exercise all branches (Statistician, self-play, Defensive/Clearer, Greedy/Rusher)
+        for _ in 0..200 {
+            let strategy = select_opponent(&mut rng, &population, 0, 1000);
+            // Just verify it doesn't panic and returns a valid strategy with a non-empty name
+            assert!(
+                !strategy.name().is_empty(),
+                "Strategy name should not be empty"
+            );
+        }
+    }
 }
