@@ -51,6 +51,12 @@ jobs:
           cache-dependency-path: frontend/pnpm-lock.yaml
       - name: Install dependencies
         run: cd frontend && pnpm install --frozen-lockfile
+      - name: Check for eslint-disable comments
+        run: |
+          if grep -rn 'eslint-disable' frontend/src/; then
+            echo "::error::Found eslint-disable comments. Remove them and fix the underlying issue."
+            exit 1
+          fi
       - name: Type check
         run: cd frontend && pnpm lint
       - name: Test

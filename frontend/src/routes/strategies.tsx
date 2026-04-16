@@ -387,7 +387,7 @@ function StrategyNav({
         </a>
       </nav>
       {/* Mobile: horizontal scrollable tabs */}
-      <nav className="lg:hidden sticky top-0 z-10 bg-background flex gap-2 overflow-x-auto py-2 -mx-4 px-4 border-b">
+      <nav className="lg:hidden sticky top-0 z-10 bg-background flex gap-2 overflow-x-auto py-2 -mx-3 px-3 sm:-mx-4 sm:px-4 border-b">
         {strategies.map((s) => (
           <button
             key={s.name}
@@ -460,7 +460,7 @@ export default function StrategiesRoute() {
         <span className="text-foreground">Strategy Guide</span>
       </div>
 
-      <div className="flex gap-8">
+      <div className="flex flex-col lg:flex-row gap-4 lg:gap-8">
         {/* Sidebar */}
         <StrategyNav
           strategies={data.strategies}
