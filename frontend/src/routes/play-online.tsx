@@ -224,6 +224,7 @@ export default function PlayOnlineRoute() {
             state={game.gameState}
             playerIndex={playerIndex!}
             turnDeadlineSecs={game.turnDeadlineSecs}
+            deadlineKey={game.deadlineKey}
             wasTimeout={game.wasTimeout}
             onAction={game.applyAction}
             onContinueRound={game.readyForNextRound}
@@ -882,6 +883,7 @@ function OnlinePlayBoard({
   state,
   playerIndex,
   turnDeadlineSecs,
+  deadlineKey,
   wasTimeout,
   onAction,
   onContinueRound,
@@ -894,6 +896,7 @@ function OnlinePlayBoard({
   state: InteractiveGameState;
   playerIndex: number;
   turnDeadlineSecs: number | null;
+  deadlineKey: number;
   wasTimeout: boolean;
   onAction: (action: PlayerAction) => void;
   onContinueRound: () => void;
@@ -1103,7 +1106,7 @@ function OnlinePlayBoard({
             {state.is_final_turn ? 'Final Turn!' : 'Turn'}
           </span>
           {turnDeadlineSecs != null && turnDeadlineSecs > 0 && (
-            <TurnTimer deadlineSecs={turnDeadlineSecs} />
+            <TurnTimer key={deadlineKey} deadlineSecs={turnDeadlineSecs} />
           )}
         </h3>
         <p className="text-sm text-muted-foreground">

@@ -251,6 +251,156 @@ describe('useOnlineGame', () => {
     });
   });
 
+  // --- Helper: connect and open WS ---
+
+  async function connectWs() {
+    fetchResponses.push({ ok: true, status: 200 });
+    const hook = renderHook(() => useOnlineGame('ABCDEF', 'valid-token', 0));
+    await waitFor(() => expect(mockWsInstances.length).toBe(1));
+    const ws = mockWsInstances[0];
+    act(() => { ws.onopen?.(); });
+    return { hook, ws };
+  }
+
+  function makeGameState(currentPlayer: number) {
+    return {
+      num_players: 2,
+      player_names: ['Alice', 'Bob'],
+      num_rows: 3,
+      num_cols: 4,
+      round_number: 0,
+      current_player: currentPlayer,
+      action_needed: { type: 'ChooseDraw', player: currentPlayer, drawable_piles: [0] },
+      boards: [[{ Revealed: 5 }], [{ Revealed: 3 }]],
+      discard_tops: [3],
+      discard_sizes: [1],
+      deck_remaining: 100,
+      cumulative_scores: [0, 0],
+      going_out_player: null,
+      is_final_turn: false,
+      last_column_clears: [],
+    };
+  }
+
+  describe('deadlineKey increments on new deadlines (#26)', () => {
+    it('deadlineKey starts at 0', async () => {
+      const { hook } = await connectWs();
+      expect(hook.result.current.deadlineKey).toBe(0);
+    });
+
+    it('increments deadlineKey on GameState with deadline', async () => {
+      const { hook, ws } = await connectWs();
+
+      act(() => {
+        ws.onmessage?.({ data: JSON.stringify({
+          type: 'GameState',
+          state: makeGameState(0),
+          turn_deadline_secs: 30,
+        }) });
+      });
+
+      expect(hook.result.current.deadlineKey).toBe(1);
+      expect(hook.result.current.turnDeadlineSecs).toBe(30);
+    });
+
+    it('does not increment deadlineKey when deadline is null', async () => {
+      const { hook, ws } = await connectWs();
+
+      act(() => {
+        ws.onmessage?.({ data: JSON.stringify({
+          type: 'GameState',
+          state: makeGameState(0),
+          turn_deadline_secs: null,
+        }) });
+      });
+
+      expect(hook.result.current.deadlineKey).toBe(0);
+      expect(hook.result.current.turnDeadlineSecs).toBeNull();
+    });
+
+    it('increments deadlineKey on TimeoutAction even with same deadline value', async () => {
+      const { hook, ws } = await connectWs();
+
+      // First: GameState sets deadline to 30
+      act(() => {
+        ws.onmessage?.({ data: JSON.stringify({
+          type: 'GameState',
+          state: makeGameState(0),
+          turn_deadline_secs: 30,
+        }) });
+      });
+
+      expect(hook.result.current.deadlineKey).toBe(1);
+
+      // Timeout: same deadline value (30) — this is the bug scenario
+      act(() => {
+        ws.onmessage?.({ data: JSON.stringify({
+          type: 'TimeoutAction',
+          player: 0,
+          action: { type: 'DrawFromDeck' },
+          state: makeGameState(1),
+          turn_deadline_secs: 30,
+        }) });
+      });
+
+      // Key must increment even though value is still 30
+      expect(hook.result.current.deadlineKey).toBe(2);
+      expect(hook.result.current.turnDeadlineSecs).toBe(30);
+      expect(hook.result.current.wasTimeout).toBe(true);
+    });
+
+    it('increments deadlineKey on ActionApplied', async () => {
+      const { hook, ws } = await connectWs();
+
+      act(() => {
+        ws.onmessage?.({ data: JSON.stringify({
+          type: 'ActionApplied',
+          player: 0,
+          action: { type: 'DrawFromDeck' },
+          state: makeGameState(1),
+          turn_deadline_secs: 30,
+        }) });
+      });
+
+      expect(hook.result.current.deadlineKey).toBe(1);
+    });
+
+    it('increments deadlineKey on BotAction', async () => {
+      const { hook, ws } = await connectWs();
+
+      act(() => {
+        ws.onmessage?.({ data: JSON.stringify({
+          type: 'BotAction',
+          player: 1,
+          action: { type: 'DrawFromDeck' },
+          state: makeGameState(0),
+          turn_deadline_secs: 30,
+        }) });
+      });
+
+      expect(hook.result.current.deadlineKey).toBe(1);
+    });
+
+    it('increments on each successive message (monotonic)', async () => {
+      const { hook, ws } = await connectWs();
+
+      // Simulate 3 turns all with deadline=30
+      for (let i = 0; i < 3; i++) {
+        act(() => {
+          ws.onmessage?.({ data: JSON.stringify({
+            type: 'ActionApplied',
+            player: i % 2,
+            action: { type: 'DrawFromDeck' },
+            state: makeGameState((i + 1) % 2),
+            turn_deadline_secs: 30,
+          }) });
+        });
+      }
+
+      expect(hook.result.current.deadlineKey).toBe(3);
+    });
+  });
+
   describe('network error on validation', () => {
     it('retries when validation fetch throws (network error)', async () => {
       // First call throws (network error), second succeeds
