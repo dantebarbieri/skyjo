@@ -7,22 +7,14 @@
  * any conditional returns, preventing the bug from being reintroduced.
  */
 import { describe, it, expect } from 'vitest';
-import * as fs from 'fs';
-import * as path from 'path';
+import source from '../play-online.tsx?raw';
 
 describe('OnlinePlayBoard hooks ordering (Issue #19 regression)', () => {
-  const source = fs.readFileSync(
-    path.resolve(__dirname, '../play-online.tsx'),
-    'utf-8',
-  );
-
   // Extract the OnlinePlayBoard function body
   const fnStart = source.indexOf('function OnlinePlayBoard(');
   expect(fnStart).toBeGreaterThan(-1);
 
   // Find the opening brace of the function body (skip the parameter/type block)
-  // The function signature has ): { ... } where the body brace follows `) {`
-  // We need to find the closing `)` of the params first, then the `{` after it
   let parenDepth = 0;
   let bodyOpenBrace = -1;
   for (let i = fnStart; i < source.length; i++) {
@@ -30,7 +22,6 @@ describe('OnlinePlayBoard hooks ordering (Issue #19 regression)', () => {
     else if (source[i] === ')') {
       parenDepth--;
       if (parenDepth === 0) {
-        // Find the next '{' after the closing paren
         for (let j = i + 1; j < source.length; j++) {
           if (source[j] === '{') {
             bodyOpenBrace = j;
@@ -43,7 +34,7 @@ describe('OnlinePlayBoard hooks ordering (Issue #19 regression)', () => {
   }
   expect(bodyOpenBrace).toBeGreaterThan(-1);
 
-  // Now find the matching closing brace
+  // Find the matching closing brace
   let braceDepth = 1;
   let bodyEnd = -1;
   for (let i = bodyOpenBrace + 1; i < source.length; i++) {
@@ -79,12 +70,8 @@ describe('OnlinePlayBoard hooks ordering (Issue #19 regression)', () => {
         lastHookLine = i;
       }
 
-      // Detect early returns: "if (...) {" followed later by "return (" patterns,
-      // or direct "return (" that renders sub-components (not the final return)
+      // Detect early returns that render RoundOver/GameOver sub-components
       if (/^\s*return\s*[(<]/.test(lines[i])) {
-        // Check if a subsequent line has the final `return (` with the main JSX
-        // Early returns are those inside `if` blocks for RoundOver/GameOver
-        // We detect them by checking if the return is followed by component names
         const context = lines.slice(Math.max(0, i - 3), i + 3).join('\n');
         if (/OnlineRoundSummary|OnlineGameOver/.test(context)) {
           if (firstEarlyReturnLine === -1) {

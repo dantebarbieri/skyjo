@@ -986,7 +986,10 @@ mod tests {
         // Verify top-level structure
         assert_eq!(json["type"], "ActionApplied");
         assert_eq!(json["player"], 1);
-        assert!(json.get("turn_deadline_secs").is_none(), "None should be skipped");
+        assert!(
+            json.get("turn_deadline_secs").is_none(),
+            "None should be skipped"
+        );
 
         // Verify action
         assert_eq!(json["action"]["type"], "KeepDeckDraw");
@@ -996,7 +999,10 @@ mod tests {
         assert_eq!(s["num_players"], 2);
         assert_eq!(s["action_needed"]["type"], "RoundOver");
         assert_eq!(s["action_needed"]["round_number"], 0);
-        assert_eq!(s["action_needed"]["round_scores"], serde_json::json!([45, 63]));
+        assert_eq!(
+            s["action_needed"]["round_scores"],
+            serde_json::json!([45, 63])
+        );
         assert_eq!(s["action_needed"]["going_out_player"], 0);
         assert_eq!(s["going_out_player"], 0);
         assert_eq!(s["is_final_turn"], true);
@@ -1074,8 +1080,14 @@ mod tests {
         let json = serde_json::to_value(&msg).unwrap();
 
         assert_eq!(json["state"]["action_needed"]["type"], "GameOver");
-        assert_eq!(json["state"]["action_needed"]["final_scores"], serde_json::json!([105, 89]));
-        assert_eq!(json["state"]["action_needed"]["winners"], serde_json::json!([1]));
+        assert_eq!(
+            json["state"]["action_needed"]["final_scores"],
+            serde_json::json!([105, 89])
+        );
+        assert_eq!(
+            json["state"]["action_needed"]["winners"],
+            serde_json::json!([1])
+        );
 
         // Write fixture
         let json_str = serde_json::to_string_pretty(&json).unwrap();
