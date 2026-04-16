@@ -13,21 +13,20 @@ use skyjo_core::strategy::Strategy;
 use skyjo_core::{
     ARCHITECTURE_VERSION, ClearerStrategy, DefensiveStrategy, GENOME_SIZE, GeneticStrategy,
     GreedyStrategy, HIDDEN_SIZE, HIDDEN1_SIZE, HIDDEN2_SIZE, INPUT_GROUPS, INPUT_LABELS,
-    INPUT_SIZE, OUTPUT_GROUPS, OUTPUT_LABELS, OUTPUT_SIZE, RandomStrategy, StatisticianStrategy,
+    INPUT_SIZE, OUTPUT_GROUPS, OUTPUT_LABELS, OUTPUT_SIZE, RusherStrategy, StatisticianStrategy,
 };
 
 // --- Configuration constants ---
 
-pub const POPULATION_SIZE: usize = 100;
-pub const GAMES_PER_INDIVIDUAL: usize = 30;
-pub const TOURNAMENT_SIZE: usize = 5;
+pub const POPULATION_SIZE: usize = 300;
+pub const GAMES_PER_INDIVIDUAL: usize = 80;
+pub const TOURNAMENT_SIZE: usize = 7;
 pub const BASE_MUTATION_RATE: f64 = 0.05;
 pub const BASE_MUTATION_SIGMA: f32 = 0.3;
 pub const BASE_RESET_RATE: f64 = 0.005;
-pub const ELITISM_COUNT: usize = 5;
-pub const NUM_OPPONENTS: usize = 3; // opponents per game (4-player games)
+pub const ELITISM_COUNT: usize = 15;
 /// Number of recent generations to track for adaptive mutation.
-pub const STAGNATION_WINDOW: usize = 20;
+pub const STAGNATION_WINDOW: usize = 30;
 /// Periodic checkpoint interval (in generations).
 pub const CHECKPOINT_INTERVAL: usize = 1000;
 /// Maximum number of periodic checkpoints to retain (older ones are pruned).
@@ -37,8 +36,8 @@ pub const MAX_PERIODIC_CHECKPOINTS: usize = 10;
 /// Early generations use fewer games for faster exploration.
 fn games_per_individual(generation: usize) -> usize {
     match generation {
-        0..=50 => 10,
-        51..=200 => 20,
+        0..=50 => 30,
+        51..=200 => 50,
         _ => GAMES_PER_INDIVIDUAL,
     }
 }
@@ -206,6 +205,8 @@ pub struct GeneticTrainingState {
     pub current_mutation_sigma: f32,
     /// Current adaptive reset rate (starts at BASE_RESET_RATE).
     pub current_reset_rate: f64,
+    /// Counter for consecutive stagnation windows (used for restart injection).
+    pub stagnation_counter: usize,
 }
 
 impl GeneticTrainingState {
@@ -238,6 +239,7 @@ impl GeneticTrainingState {
             current_mutation_rate: BASE_MUTATION_RATE,
             current_mutation_sigma: BASE_MUTATION_SIGMA,
             current_reset_rate: BASE_RESET_RATE,
+            stagnation_counter: 0,
         }
     }
 
@@ -312,6 +314,7 @@ impl GeneticTrainingState {
                             current_mutation_rate: BASE_MUTATION_RATE,
                             current_mutation_sigma: BASE_MUTATION_SIGMA,
                             current_reset_rate: BASE_RESET_RATE,
+                            stagnation_counter: 0,
                         };
                     }
                     Err(e) => tracing::warn!("Failed to parse genetic model: {e}"),
@@ -524,11 +527,12 @@ impl GeneticTrainingState {
         self.current_mutation_rate = BASE_MUTATION_RATE;
         self.current_mutation_sigma = BASE_MUTATION_SIGMA;
         self.current_reset_rate = BASE_RESET_RATE;
+        self.stagnation_counter = 0;
         save_model(self);
         Ok(())
     }
 
-    /// Reset to a new random population (Generation 0) with a new lineage hash.
+    /// Reset to a new random population(Generation 0) with a new lineage hash.
     /// Preserved saved generations are kept (they have their own lineage hashes).
     pub fn reset(&mut self) {
         let mut rng = StdRng::from_os_rng();
@@ -544,6 +548,7 @@ impl GeneticTrainingState {
         self.current_mutation_rate = BASE_MUTATION_RATE;
         self.current_mutation_sigma = BASE_MUTATION_SIGMA;
         self.current_reset_rate = BASE_RESET_RATE;
+        self.stagnation_counter = 0;
         save_model(self);
     }
 }
@@ -596,21 +601,27 @@ fn tournament_select(population: &[Vec<f32>], fitnesses: &[f64], rng: &mut impl 
     population[best_idx].clone()
 }
 
-/// BLX-α blend crossover: for each gene, sample uniformly from the interval
-/// [min(a,b) - α*d, max(a,b) + α*d] where d = |a - b| and α = 0.5.
-/// This explores beyond the parents' range, unlike simple arithmetic crossover.
+/// Simulated Binary Crossover (SBX) with distribution index η.
+/// Unlike BLX-α, SBX preserves locality: offspring tend to cluster near parents
+/// with occasional exploration, making it much more effective in high dimensions.
 fn crossover(parent_a: &[f32], parent_b: &[f32], rng: &mut impl Rng) -> Vec<f32> {
-    const ALPHA: f32 = 0.5;
+    const ETA: f32 = 20.0; // distribution index: higher = more exploitation
     parent_a
         .iter()
         .zip(parent_b.iter())
         .map(|(&a, &b)| {
-            let lo = a.min(b);
-            let hi = a.max(b);
-            let d = hi - lo;
-            let expanded_lo = lo - ALPHA * d;
-            let expanded_hi = hi + ALPHA * d;
-            rng.random_range(expanded_lo..=expanded_hi)
+            let u: f32 = rng.random();
+            let beta = if u <= 0.5 {
+                (2.0 * u).powf(1.0 / (ETA + 1.0))
+            } else {
+                (1.0 / (2.0 * (1.0 - u))).powf(1.0 / (ETA + 1.0))
+            };
+            // Randomly pick one of the two symmetric offspring
+            if rng.random_bool(0.5) {
+                0.5 * ((1.0 + beta) * a + (1.0 - beta) * b)
+            } else {
+                0.5 * ((1.0 - beta) * a + (1.0 + beta) * b)
+            }
         })
         .collect()
 }
@@ -638,7 +649,7 @@ fn mutate(
 }
 
 /// Select an opponent strategy based on the weighted mix.
-/// 40% Statistician, 20% Defensive/Clearer, 20% self-play, 20% Greedy/Random.
+/// 50% Statistician, 30% self-play, 10% Defensive/Clearer, 10% Greedy/Rusher.
 fn select_opponent(
     rng: &mut impl Rng,
     population: &[Vec<f32>],
@@ -646,14 +657,8 @@ fn select_opponent(
     games_trained: usize,
 ) -> Box<dyn Strategy> {
     let r: f64 = rng.random();
-    if r < 0.40 {
+    if r < 0.50 {
         Box::new(StatisticianStrategy)
-    } else if r < 0.60 {
-        if rng.random_bool(0.5) {
-            Box::new(DefensiveStrategy)
-        } else {
-            Box::new(ClearerStrategy)
-        }
     } else if r < 0.80 {
         // Self-play: pick a random other individual
         let mut idx = rng.random_range(0..population.len());
@@ -661,15 +666,38 @@ fn select_opponent(
             idx = (idx + 1) % population.len();
         }
         Box::new(GeneticStrategy::new(population[idx].clone(), games_trained))
+    } else if r < 0.90 {
+        if rng.random_bool(0.5) {
+            Box::new(DefensiveStrategy)
+        } else {
+            Box::new(ClearerStrategy)
+        }
     } else if rng.random_bool(0.5) {
         Box::new(GreedyStrategy)
     } else {
-        Box::new(RandomStrategy)
+        Box::new(RusherStrategy)
+    }
+}
+
+/// Select the number of players for a training game.
+/// 30% 2-player, 30% 3-player, 25% 4-player, 15% 5-6 player.
+fn select_player_count(rng: &mut impl Rng) -> usize {
+    let r: f64 = rng.random();
+    if r < 0.30 {
+        2
+    } else if r < 0.60 {
+        3
+    } else if r < 0.85 {
+        4
+    } else if r < 0.925 {
+        5
+    } else {
+        6
     }
 }
 
 /// Evaluate fitness for a single individual by playing games.
-/// Returns a composite fitness score (higher = better).
+/// Fitness = negative average score (lower score = higher fitness).
 fn evaluate_individual(
     genome: &[f32],
     individual_idx: usize,
@@ -679,19 +707,18 @@ fn evaluate_individual(
     num_games: usize,
 ) -> f64 {
     let mut total_score: f64 = 0.0;
-    let mut total_wins: usize = 0;
-    let mut total_score_diff: f64 = 0.0;
     let mut rng = StdRng::seed_from_u64(base_seed);
 
     for game_idx in 0..num_games {
         let seed = base_seed.wrapping_add(game_idx as u64);
+        let num_players = select_player_count(&mut rng);
 
-        let mut strategies: Vec<Box<dyn Strategy>> = Vec::with_capacity(1 + NUM_OPPONENTS);
+        let mut strategies: Vec<Box<dyn Strategy>> = Vec::with_capacity(num_players);
         strategies.push(Box::new(GeneticStrategy::new(
             genome.to_vec(),
             games_trained,
         )));
-        for _ in 0..NUM_OPPONENTS {
+        for _ in 1..num_players {
             strategies.push(select_opponent(
                 &mut rng,
                 population,
@@ -704,29 +731,7 @@ fn evaluate_individual(
         match Game::new(rules, strategies, seed) {
             Ok(game) => match game.play() {
                 Ok(history) => {
-                    let my_score = history.final_scores[0] as f64;
-                    let min_other = history.final_scores[1..]
-                        .iter()
-                        .copied()
-                        .min()
-                        .unwrap_or(i32::MAX) as f64;
-                    let is_winner = history.winners.contains(&0);
-
-                    // Base score penalty
-                    let penalized = if !is_winner && my_score > 0.0 {
-                        my_score * 2.0
-                    } else {
-                        my_score
-                    };
-                    total_score += penalized;
-
-                    // Win bonus
-                    if is_winner {
-                        total_wins += 1;
-                    }
-
-                    // Score differential (how much better than best opponent)
-                    total_score_diff += min_other - my_score;
+                    total_score += history.final_scores[0] as f64;
                 }
                 Err(e) => {
                     tracing::warn!("Game play error during training: {e}");
@@ -740,17 +745,13 @@ fn evaluate_individual(
         }
     }
 
-    let n = num_games as f64;
-    // Fitness = -(avg score) + win bonus + score differential bonus
-    let avg_score = total_score / n;
-    let win_rate = total_wins as f64 / n;
-    let avg_diff = total_score_diff / n;
-
-    -avg_score + (win_rate * 10.0) + (avg_diff * 0.1)
+    // Fitness = negative average score (lower score = better)
+    -(total_score / num_games as f64)
 }
 
 /// Run one generation of the genetic algorithm.
 /// Returns (new_population, fitnesses, best_idx, games_played).
+#[allow(clippy::too_many_arguments)]
 fn run_generation(
     population: &[Vec<f32>],
     generation_seed: u64,
@@ -759,6 +760,7 @@ fn run_generation(
     mutation_sigma: f32,
     reset_rate: f64,
     generation: usize,
+    restart_fraction: f64,
 ) -> (Vec<Vec<f32>>, Vec<f64>, usize, usize) {
     let mut rng = StdRng::seed_from_u64(generation_seed);
 
@@ -807,6 +809,20 @@ fn run_generation(
             reset_rate,
         );
         next_population.push(child);
+    }
+
+    // Inject fresh random individuals if restart_fraction > 0 (stagnation restart)
+    if restart_fraction > 0.0 {
+        let inject_count = ((population.len() as f64 * restart_fraction) as usize)
+            .min(population.len() - ELITISM_COUNT);
+        let start = population.len() - inject_count;
+        for item in next_population
+            .iter_mut()
+            .take(population.len())
+            .skip(start)
+        {
+            *item = random_genome(&mut rng);
+        }
     }
 
     let games_played = population.len() * num_games;
@@ -883,6 +899,7 @@ pub async fn train_generations(state: Arc<Mutex<GeneticTrainingState>>, num_gene
             mutation_rate,
             mutation_sigma,
             reset_rate,
+            stagnation_counter,
         ) = {
             let s = state.lock().await;
             if !s.is_training {
@@ -898,8 +915,11 @@ pub async fn train_generations(state: Arc<Mutex<GeneticTrainingState>>, num_gene
                 s.current_mutation_rate,
                 s.current_mutation_sigma,
                 s.current_reset_rate,
+                s.stagnation_counter,
             )
         };
+
+        let restart_fraction = if stagnation_counter >= 2 { 0.20 } else { 0.0 };
 
         // Run the CPU-intensive evaluation without holding the lock
         let generation_seed = (generation_num as u64).wrapping_mul(7919) ^ 0xDEADBEEF;
@@ -913,6 +933,7 @@ pub async fn train_generations(state: Arc<Mutex<GeneticTrainingState>>, num_gene
                     mutation_sigma,
                     reset_rate,
                     generation_num,
+                    restart_fraction,
                 )
             })
             .await
@@ -975,6 +996,15 @@ pub async fn train_generations(state: Arc<Mutex<GeneticTrainingState>>, num_gene
             );
             return;
         }
+
+        if restart_fraction > 0.0 {
+            let mut s = state.lock().await;
+            s.stagnation_counter = 0;
+            tracing::info!(
+                "Stagnation restart: injected {:.0}% fresh individuals",
+                restart_fraction * 100.0
+            );
+        }
     }
 
     // Mark training as complete
@@ -1018,13 +1048,13 @@ fn auto_save_training_result(state: &mut GeneticTrainingState) {
 }
 
 /// Update adaptive mutation parameters based on fitness history.
+/// Uses a restart-based approach: on stagnation, inject fresh random individuals
+/// rather than increasing mutation to destructive levels.
 fn update_adaptive_mutation(state: &mut GeneticTrainingState) {
-    // Add current best fitness to history
     if state.best_fitness.is_finite() {
         state.fitness_history.push(state.best_fitness);
     }
 
-    // Need at least STAGNATION_WINDOW entries to assess
     if state.fitness_history.len() < STAGNATION_WINDOW {
         return;
     }
@@ -1044,18 +1074,20 @@ fn update_adaptive_mutation(state: &mut GeneticTrainingState) {
         (newest - oldest) * 100.0
     };
 
-    // Stagnation: less than 1% improvement over window
-    if improvement_pct < 1.0 {
-        // Increase mutation (bounded)
-        state.current_mutation_rate = (state.current_mutation_rate * 1.2).min(0.15);
-        state.current_mutation_sigma = (state.current_mutation_sigma * 1.2).min(1.0);
-        state.current_reset_rate = (state.current_reset_rate * 1.5).min(0.02);
+    // Stagnation: less than 0.5% improvement over window
+    if improvement_pct < 0.5 {
+        // Moderate increase in mutation (capped conservatively)
+        state.current_mutation_rate = (state.current_mutation_rate * 1.1).min(0.10);
+        state.current_mutation_sigma = (state.current_mutation_sigma * 1.1).min(0.5);
+        state.current_reset_rate = (state.current_reset_rate * 1.2).min(0.01);
+        state.stagnation_counter += 1;
     } else {
         // Good progress — decrease toward baseline
         state.current_mutation_rate = (state.current_mutation_rate * 0.95).max(BASE_MUTATION_RATE);
         state.current_mutation_sigma =
             (state.current_mutation_sigma * 0.95).max(BASE_MUTATION_SIGMA);
         state.current_reset_rate = (state.current_reset_rate * 0.95).max(BASE_RESET_RATE);
+        state.stagnation_counter = 0;
     }
 }
 
@@ -1370,20 +1402,27 @@ mod tests {
         let parent_b: Vec<f32> = (0..GENOME_SIZE).map(|i| -(i as f32)).collect();
         let child = crossover(&parent_a, &parent_b, &mut rng);
         assert_eq!(child.len(), GENOME_SIZE);
-        // BLX-α: each gene should be within the expanded interval [min - α*d, max + α*d]
+        // SBX: offspring should cluster near parents (most genes within parent range
+        // or close to it), but can occasionally exceed the range.
+        let mut within_range = 0;
         for (i, &gene) in child.iter().enumerate() {
             let a = parent_a[i];
             let b = parent_b[i];
             let lo = a.min(b);
             let hi = a.max(b);
             let d = hi - lo;
-            let expanded_lo = lo - 0.5 * d;
-            let expanded_hi = hi + 0.5 * d;
-            assert!(
-                gene >= expanded_lo && gene <= expanded_hi,
-                "Gene {i} should be within BLX-α range [{expanded_lo}, {expanded_hi}], got {gene}"
-            );
+            // Allow a small margin beyond parent range for SBX exploration
+            if gene >= lo - 0.5 * d && gene <= hi + 0.5 * d {
+                within_range += 1;
+            }
         }
+        // With η=20, the vast majority should be near the parents
+        let fraction = within_range as f64 / GENOME_SIZE as f64;
+        assert!(
+            fraction > 0.90,
+            "SBX with η=20 should keep >90% of genes near parents, got {:.1}%",
+            fraction * 100.0
+        );
     }
 
     #[test]

@@ -7,17 +7,19 @@ use crate::strategy::{
     PhaseDescription, Strategy, StrategyDescription, StrategyView,
 };
 
-use super::common::{average_unknown_value, column_analysis, expected_score};
+use super::common::{
+    average_unknown_value, column_analysis, count_remaining, deck_distribution, expected_score,
+};
 
 // --- Architecture constants ---
 
 /// Architecture version for model compatibility checking.
-/// v1 = original (48→32→39 tanh), v2 = improved (INPUT_SIZE→64→32→39 ReLU)
-pub const ARCHITECTURE_VERSION: u32 = 2;
+/// v1 = original (48→32→39 tanh), v2 = 62→64→32→39 ReLU, v3 = 78→48→24→39 (card counting)
+pub const ARCHITECTURE_VERSION: u32 = 3;
 
-pub const INPUT_SIZE: usize = 62; // expanded features
-pub const HIDDEN1_SIZE: usize = 64;
-pub const HIDDEN2_SIZE: usize = 32;
+pub const INPUT_SIZE: usize = 78; // card counting + round progress features
+pub const HIDDEN1_SIZE: usize = 48;
+pub const HIDDEN2_SIZE: usize = 24;
 pub const OUTPUT_SIZE: usize = 39;
 /// Total number of f32 weights in the genome.
 /// Layout: [W_ih1, b_h1, W_h1h2, b_h2, W_h2o, b_o]
@@ -104,6 +106,24 @@ pub const INPUT_LABELS: &[&str] = &[
     "Opp 2 Near Done",
     "Opp 3 Near Done",
     "Opp 4 Near Done",
+    // Card counting distribution
+    "Remaining -2",
+    "Remaining -1",
+    "Remaining 0",
+    "Remaining 1",
+    "Remaining 2",
+    "Remaining 3",
+    "Remaining 4",
+    "Remaining 5",
+    "Remaining 6",
+    "Remaining 7",
+    "Remaining 8",
+    "Remaining 9",
+    "Remaining 10",
+    "Remaining 11",
+    "Remaining 12",
+    // Round progress
+    "Round Progress",
 ];
 
 /// Labels for each output, used by the frontend NN visualization.
@@ -170,6 +190,8 @@ pub const INPUT_GROUPS: &[(&str, usize, usize)] = &[
     ("Discard Pile Depth", 55, 56),
     ("Score Rank", 56, 57),
     ("Opp Near Done (5)", 57, 62),
+    ("Card Counting (15)", 62, 77),
+    ("Round Progress", 77, 78),
 ];
 
 /// Grouped output labels for the frontend visualization (collapsed view).
@@ -450,6 +472,38 @@ pub fn extract_features(view: &StrategyView, drawn_card: Option<CardValue>) -> V
     for i in 0..5 {
         features.push(opp_revealed_ratios.get(i).copied().unwrap_or(0.0));
     }
+
+    // Card counting distribution: fraction of each value remaining unseen
+    let dist = deck_distribution();
+    for value in -2i8..=12i8 {
+        let total = dist.get(&value).copied().unwrap_or(0);
+        let remaining = count_remaining(view, value);
+        features.push(if total > 0 {
+            remaining as f32 / total as f32
+        } else {
+            0.0
+        });
+    }
+
+    // Round progress: fraction of all cards revealed or cleared across all boards
+    let total_slots =
+        view.my_board.len() + view.opponent_boards.iter().map(|b| b.len()).sum::<usize>();
+    let revealed_or_cleared = view
+        .my_board
+        .iter()
+        .filter(|s| !matches!(s, VisibleSlot::Hidden))
+        .count()
+        + view
+            .opponent_boards
+            .iter()
+            .flat_map(|b| b.iter())
+            .filter(|s| !matches!(s, VisibleSlot::Hidden))
+            .count();
+    features.push(if total_slots > 0 {
+        revealed_or_cleared as f32 / total_slots as f32
+    } else {
+        0.0
+    });
 
     assert_eq!(features.len(), INPUT_SIZE);
     features
