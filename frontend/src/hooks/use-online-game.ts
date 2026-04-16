@@ -490,6 +490,9 @@ export function useOnlineGame(
     setConnectionStatus('disconnected');
     setRoomState(null);
     setGameState(null);
+    setTurnDeadlineSecs(null);
+    setDeadlineKey(0);
+    setWasTimeout(false);
     setLastError(null);
     setKicked(false);
     setSessionExpired(false);
