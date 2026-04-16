@@ -98,7 +98,7 @@ export default function PlayOnlineRoute() {
           navigate('/play/online', { replace: true });
         });
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [urlRoomCode, sessionToken, navigate]);
 
   const handleCreate = useCallback(async (playerName: string, numPlayers: number, rules: string) => {
     setFormError(null);
@@ -464,11 +464,12 @@ function RoomTimer({ initialSecs }: { initialSecs: number }) {
     setSecs(initialSecs);
   }, [initialSecs]);
 
+  const isActive = secs > 0;
   useEffect(() => {
-    if (secs <= 0) return;
+    if (!isActive) return;
     const id = setInterval(() => setSecs(s => Math.max(0, s - 1)), 1000);
     return () => clearInterval(id);
-  }, [secs > 0]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isActive]);
 
   const mins = Math.floor(secs / 60);
   const seconds = secs % 60;
@@ -859,11 +860,12 @@ function TurnTimer({ deadlineSecs }: { deadlineSecs: number }) {
     setSecs(deadlineSecs);
   }, [deadlineSecs]);
 
+  const isActive = secs > 0;
   useEffect(() => {
-    if (secs <= 0) return;
+    if (!isActive) return;
     const id = setInterval(() => setSecs(s => Math.max(0, s - 1)), 1000);
     return () => clearInterval(id);
-  }, [secs > 0]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isActive]);
 
   return (
     <span className={cn(
