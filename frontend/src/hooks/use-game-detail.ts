@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { ZodError } from 'zod';
 import { useAuth } from '@/contexts/auth-context';
 import { GameDetailSchema, GameHistorySchema } from '@/schemas';
 import type { GameDetail, GameHistory } from '@/types';
@@ -44,7 +45,11 @@ export function useGameDetail(gameId: string) {
         }
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Failed to load game');
+          if (err instanceof ZodError) {
+            setError('Failed to load game: unexpected data format from server');
+          } else {
+            setError(err instanceof Error ? err.message : 'Failed to load game');
+          }
         }
       } finally {
         if (!cancelled) {
@@ -76,7 +81,11 @@ export function useGameDetail(gameId: string) {
       const parsed = GameHistorySchema.parse(data);
       setReplay(parsed);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load replay');
+      if (err instanceof ZodError) {
+        setError('Failed to load replay: unexpected data format from server');
+      } else {
+        setError(err instanceof Error ? err.message : 'Failed to load replay');
+      }
     } finally {
       setReplayLoading(false);
     }

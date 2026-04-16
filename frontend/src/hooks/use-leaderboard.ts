@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { ZodError } from 'zod';
 import { useAuth } from '@/contexts/auth-context';
 import { GameListResponseSchema } from '@/schemas';
 import type { GameSummary } from '@/types';
@@ -87,7 +88,11 @@ export function useLeaderboard() {
       setGames(parsed.games);
       setTotal(parsed.total);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load games');
+      if (err instanceof ZodError) {
+        setError('Failed to load games: unexpected data format from server');
+      } else {
+        setError(err instanceof Error ? err.message : 'Failed to load games');
+      }
       setGames([]);
       setTotal(0);
     } finally {

@@ -828,6 +828,22 @@ describe('Leaderboard schemas', () => {
     expect(GameSummarySchema.parse(data)).toEqual(data);
   });
 
+  it('GameSummarySchema accepts zero num_rounds', () => {
+    const data = {
+      id: 'game-003',
+      room_code: null,
+      rules: 'Standard',
+      num_players: 2,
+      num_rounds: 0,
+      created_at: '2025-01-15T12:00:00Z',
+      players: [
+        { name: 'Alice', final_score: 0, is_winner: false, is_bot: false },
+        { name: 'Bob', final_score: 0, is_winner: false, is_bot: false },
+      ],
+    };
+    expect(GameSummarySchema.parse(data)).toEqual(data);
+  });
+
   it('GameListResponseSchema accepts valid data', () => {
     const data = {
       games: [{
@@ -914,6 +930,23 @@ describe('Leaderboard schemas', () => {
           ],
         },
       ],
+    };
+    expect(GameDetailSchema.parse(data)).toEqual(data);
+  });
+
+  it('GameDetailSchema accepts zero num_rounds', () => {
+    const data = {
+      id: 'game-003',
+      room_code: null,
+      rules: 'Standard',
+      num_players: 2,
+      num_rounds: 0,
+      created_at: '2025-01-15T12:00:00Z',
+      players: [
+        { name: 'Alice', final_score: 0, is_winner: false, is_bot: false },
+        { name: 'Bob', final_score: 0, is_winner: false, is_bot: false },
+      ],
+      rounds: [],
     };
     expect(GameDetailSchema.parse(data)).toEqual(data);
   });
