@@ -98,7 +98,7 @@ export default function PlayOnlineRoute() {
           navigate('/play/online', { replace: true });
         });
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [urlRoomCode, sessionToken, navigate]);
 
   const handleCreate = useCallback(async (playerName: string, numPlayers: number, rules: string) => {
     setFormError(null);
@@ -224,6 +224,7 @@ export default function PlayOnlineRoute() {
             state={game.gameState}
             playerIndex={playerIndex!}
             turnDeadlineSecs={game.turnDeadlineSecs}
+            deadlineKey={game.deadlineKey}
             wasTimeout={game.wasTimeout}
             onAction={game.applyAction}
             onContinueRound={game.readyForNextRound}
@@ -463,11 +464,12 @@ function RoomTimer({ initialSecs }: { initialSecs: number }) {
     setSecs(initialSecs);
   }, [initialSecs]);
 
+  const isActive = secs > 0;
   useEffect(() => {
-    if (secs <= 0) return;
+    if (!isActive) return;
     const id = setInterval(() => setSecs(s => Math.max(0, s - 1)), 1000);
     return () => clearInterval(id);
-  }, [secs > 0]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isActive]);
 
   const mins = Math.floor(secs / 60);
   const seconds = secs % 60;
@@ -858,11 +860,12 @@ function TurnTimer({ deadlineSecs }: { deadlineSecs: number }) {
     setSecs(deadlineSecs);
   }, [deadlineSecs]);
 
+  const isActive = secs > 0;
   useEffect(() => {
-    if (secs <= 0) return;
+    if (!isActive) return;
     const id = setInterval(() => setSecs(s => Math.max(0, s - 1)), 1000);
     return () => clearInterval(id);
-  }, [secs > 0]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isActive]);
 
   return (
     <span className={cn(
@@ -880,6 +883,7 @@ function OnlinePlayBoard({
   state,
   playerIndex,
   turnDeadlineSecs,
+  deadlineKey,
   wasTimeout,
   onAction,
   onContinueRound,
@@ -892,6 +896,7 @@ function OnlinePlayBoard({
   state: InteractiveGameState;
   playerIndex: number;
   turnDeadlineSecs: number | null;
+  deadlineKey: number;
   wasTimeout: boolean;
   onAction: (action: PlayerAction) => void;
   onContinueRound: () => void;
@@ -1101,7 +1106,7 @@ function OnlinePlayBoard({
             {state.is_final_turn ? 'Final Turn!' : 'Turn'}
           </span>
           {turnDeadlineSecs != null && turnDeadlineSecs > 0 && (
-            <TurnTimer deadlineSecs={turnDeadlineSecs} />
+            <TurnTimer key={deadlineKey} deadlineSecs={turnDeadlineSecs} />
           )}
         </h3>
         <p className="text-sm text-muted-foreground">
