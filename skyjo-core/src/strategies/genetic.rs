@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 
@@ -7,9 +9,7 @@ use crate::strategy::{
     PhaseDescription, Strategy, StrategyDescription, StrategyView,
 };
 
-use super::common::{
-    average_unknown_value, column_analysis, count_remaining, deck_distribution, expected_score,
-};
+use super::common::{average_unknown_value, column_analysis, deck_distribution, expected_score};
 
 // --- Architecture constants ---
 
@@ -474,10 +474,30 @@ pub fn extract_features(view: &StrategyView, drawn_card: Option<CardValue>) -> V
     }
 
     // Card counting distribution: fraction of each value remaining unseen
+    // Precompute all visible counts in a single pass to avoid repeated board scans
     let dist = deck_distribution();
+    let mut visible_counts: HashMap<CardValue, usize> = HashMap::new();
+    for slot in &view.my_board {
+        if let VisibleSlot::Revealed(v) = slot {
+            *visible_counts.entry(*v).or_insert(0) += 1;
+        }
+    }
+    for board in &view.opponent_boards {
+        for slot in board {
+            if let VisibleSlot::Revealed(v) = slot {
+                *visible_counts.entry(*v).or_insert(0) += 1;
+            }
+        }
+    }
+    for pile in &view.discard_piles {
+        for &v in pile {
+            *visible_counts.entry(v).or_insert(0) += 1;
+        }
+    }
     for value in -2i8..=12i8 {
         let total = dist.get(&value).copied().unwrap_or(0);
-        let remaining = count_remaining(view, value);
+        let visible = visible_counts.get(&value).copied().unwrap_or(0);
+        let remaining = total.saturating_sub(visible);
         features.push(if total > 0 {
             remaining as f32 / total as f32
         } else {

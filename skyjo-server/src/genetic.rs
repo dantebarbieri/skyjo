@@ -532,7 +532,7 @@ impl GeneticTrainingState {
         Ok(())
     }
 
-    /// Reset to a new random population(Generation 0) with a new lineage hash.
+    /// Reset to a new random population (Generation 0) with a new lineage hash.
     /// Preserved saved generations are kept (they have their own lineage hashes).
     pub fn reset(&mut self) {
         let mut rng = StdRng::from_os_rng();
@@ -749,11 +749,8 @@ fn evaluate_individual(
     -(total_score / num_games as f64)
 }
 
-/// Run one generation of the genetic algorithm.
-/// Returns (new_population, fitnesses, best_idx, games_played).
-#[allow(clippy::too_many_arguments)]
-fn run_generation(
-    population: &[Vec<f32>],
+/// Configuration for a single generation of the genetic algorithm.
+struct GenerationConfig {
     generation_seed: u64,
     games_trained: usize,
     mutation_rate: f64,
@@ -761,18 +758,32 @@ fn run_generation(
     reset_rate: f64,
     generation: usize,
     restart_fraction: f64,
-) -> (Vec<Vec<f32>>, Vec<f64>, usize, usize) {
-    let mut rng = StdRng::seed_from_u64(generation_seed);
+}
 
-    let num_games = games_per_individual(generation);
+/// Run one generation of the genetic algorithm.
+/// Returns (new_population, fitnesses, best_idx, games_played).
+fn run_generation(
+    population: &[Vec<f32>],
+    config: &GenerationConfig,
+) -> (Vec<Vec<f32>>, Vec<f64>, usize, usize) {
+    let mut rng = StdRng::seed_from_u64(config.generation_seed);
+
+    let num_games = games_per_individual(config.generation);
 
     // Evaluate fitness for each individual in parallel
     let fitnesses: Vec<f64> = population
         .par_iter()
         .enumerate()
         .map(|(idx, genome)| {
-            let seed = generation_seed.wrapping_add((idx * 1000) as u64);
-            evaluate_individual(genome, idx, population, seed, games_trained, num_games)
+            let seed = config.generation_seed.wrapping_add((idx * 1000) as u64);
+            evaluate_individual(
+                genome,
+                idx,
+                population,
+                seed,
+                config.games_trained,
+                num_games,
+            )
         })
         .collect();
 
@@ -804,17 +815,18 @@ fn run_generation(
         mutate(
             &mut child,
             &mut rng,
-            mutation_rate,
-            mutation_sigma,
-            reset_rate,
+            config.mutation_rate,
+            config.mutation_sigma,
+            config.reset_rate,
         );
         next_population.push(child);
     }
 
     // Inject fresh random individuals if restart_fraction > 0 (stagnation restart)
-    if restart_fraction > 0.0 {
-        let inject_count = ((population.len() as f64 * restart_fraction) as usize)
-            .min(population.len() - ELITISM_COUNT);
+    if config.restart_fraction > 0.0 {
+        let available_restart_slots = population.len().saturating_sub(ELITISM_COUNT);
+        let inject_count = ((population.len() as f64 * config.restart_fraction) as usize)
+            .min(available_restart_slots);
         let start = population.len() - inject_count;
         for item in next_population
             .iter_mut()
@@ -923,21 +935,19 @@ pub async fn train_generations(state: Arc<Mutex<GeneticTrainingState>>, num_gene
 
         // Run the CPU-intensive evaluation without holding the lock
         let generation_seed = (generation_num as u64).wrapping_mul(7919) ^ 0xDEADBEEF;
+        let gen_config = GenerationConfig {
+            generation_seed,
+            games_trained,
+            mutation_rate,
+            mutation_sigma,
+            reset_rate,
+            generation: generation_num,
+            restart_fraction,
+        };
         let (new_population, fitnesses, best_idx, games_played) =
-            tokio::task::spawn_blocking(move || {
-                run_generation(
-                    &population,
-                    generation_seed,
-                    games_trained,
-                    mutation_rate,
-                    mutation_sigma,
-                    reset_rate,
-                    generation_num,
-                    restart_fraction,
-                )
-            })
-            .await
-            .expect("Training task panicked");
+            tokio::task::spawn_blocking(move || run_generation(&population, &gen_config))
+                .await
+                .expect("Training task panicked");
 
         // Write back results (brief lock)
         let should_stop = {
@@ -1706,13 +1716,15 @@ mod tests {
 
         let (new_pop, _, _, _) = run_generation(
             &population,
-            999, // seed
-            0,   // games_trained
-            BASE_MUTATION_RATE,
-            BASE_MUTATION_SIGMA,
-            BASE_RESET_RATE,
-            0,    // generation
-            0.20, // restart_fraction: inject 20% fresh
+            &GenerationConfig {
+                generation_seed: 999,
+                games_trained: 0,
+                mutation_rate: BASE_MUTATION_RATE,
+                mutation_sigma: BASE_MUTATION_SIGMA,
+                reset_rate: BASE_RESET_RATE,
+                generation: 0,
+                restart_fraction: 0.20,
+            },
         );
 
         assert_eq!(new_pop.len(), pop_size);
