@@ -39,7 +39,7 @@ interface NeuralNetworkVizProps {
 }
 
 export function NeuralNetworkViz({ className }: NeuralNetworkVizProps) {
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, connectivityStatus } = useAuth();
   const canManage = isAuthenticated && user && (user.permission === 'admin' || user.permission === 'moderator');
   const [model, setModel] = useState<GeneticModelData | null>(null);
   const [status, setStatus] = useState<GeneticTrainingStatus | null>(null);
@@ -101,8 +101,17 @@ export function NeuralNetworkViz({ className }: NeuralNetworkVizProps) {
     fetchSaved();
   }, [fetchModel, fetchStatus, fetchSaved]);
 
+  // Re-fetch when server connectivity is restored after an error
+  useEffect(() => {
+    if (connectivityStatus === 'online' && error) {
+      fetchModel();
+      fetchStatus();
+      fetchSaved();
+    }
+  }, [connectivityStatus, error, fetchModel, fetchStatus, fetchSaved]);
+
   // Adaptive polling: speeds up when data changes, slows down when stale
-  const POLL_MIN_MS = 250;
+  const POLL_MIN_MS = 200;
   const POLL_MAX_MS = 5000;
   const POLL_WINDOW = 5;
 
@@ -110,10 +119,11 @@ export function NeuralNetworkViz({ className }: NeuralNetworkVizProps) {
     stopPolling();
     pollRef.current = setTimeout(async () => {
       const s = await fetchStatus();
-      // Freshness: only check generation and last-gen ETA snapshot (not elapsed time)
+      // Freshness: check generation, last-gen ETA snapshot, and individual progress
       const hadNewData = s != null && (
         s.generation !== lastGenRef.current ||
-        s.training_last_gen_elapsed_ms !== (statusRef.current?.training_last_gen_elapsed_ms ?? 0)
+        s.training_last_gen_elapsed_ms !== (statusRef.current?.training_last_gen_elapsed_ms ?? 0) ||
+        s.individuals_evaluated !== (statusRef.current?.individuals_evaluated ?? 0)
       );
       if (s) {
         statusRef.current = s;
@@ -389,8 +399,15 @@ export function NeuralNetworkViz({ className }: NeuralNetworkVizProps) {
   if (error) {
     return (
       <Card className={className}>
-        <CardContent className="py-8 text-center text-muted-foreground">
+        <CardContent className="py-8 text-center text-muted-foreground space-y-3">
           <p className="text-sm">{error}</p>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => { fetchModel(); fetchStatus(); fetchSaved(); }}
+          >
+            Retry
+          </Button>
         </CardContent>
       </Card>
     );
@@ -464,7 +481,7 @@ export function NeuralNetworkViz({ className }: NeuralNetworkVizProps) {
                 Train
               </Button>
               <p className="text-xs text-muted-foreground w-full">
-                Each generation takes ~20–30s. 50 gens ≈ 15–25 min.
+                Training time depends on server hardware and build profile. Live ETA appears after the first generation completes.
               </p>
             </TabsContent>
 
@@ -483,7 +500,7 @@ export function NeuralNetworkViz({ className }: NeuralNetworkVizProps) {
                 Current: {status?.generation ?? model?.generation ?? 0}
               </span>
               <p className="text-xs text-muted-foreground w-full">
-                Each generation takes ~20–30s. Target should be current + desired training count.
+                Target should be current + desired training count. Live ETA appears after the first generation completes.
               </p>
             </TabsContent>
 
@@ -564,11 +581,35 @@ export function NeuralNetworkViz({ className }: NeuralNetworkVizProps) {
                     </>
                   )}
                 </div>
-                <div className="h-2 bg-muted rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-primary rounded-full transition-all duration-300"
-                    style={{ width: gensTotal > 0 ? `${(gensDone / gensTotal) * 100}%` : '0%' }}
-                  />
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground w-24 shrink-0 text-right">Generations</span>
+                    <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-primary rounded-full transition-all duration-300"
+                        style={{ width: gensTotal > 0 ? `${(gensDone / gensTotal) * 100}%` : '0%' }}
+                      />
+                    </div>
+                    <span className="text-xs text-muted-foreground w-16 shrink-0">{gensDone}/{gensTotal}</span>
+                  </div>
+                  {status.population_size > 0 && (() => {
+                    const genGamesTotal = status.population_size * status.games_per_eval;
+                    const genGamesDone = status.individuals_evaluated * status.games_per_eval;
+                    return (
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-muted-foreground w-24 shrink-0 text-right">Games</span>
+                        <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-primary/60 rounded-full transition-[width] duration-500 ease-linear"
+                            style={{ width: `${genGamesTotal > 0 ? (genGamesDone / genGamesTotal) * 100 : 0}%` }}
+                          />
+                        </div>
+                        <span className="text-xs text-muted-foreground w-16 shrink-0">
+                          {genGamesDone.toLocaleString()}/{genGamesTotal.toLocaleString()}
+                        </span>
+                      </div>
+                    );
+                  })()}
                 </div>
                 <div className="flex justify-between items-center text-xs text-muted-foreground">
                   <span>Elapsed: {formatTime(elapsedSec)}</span>
@@ -635,7 +676,7 @@ export function NeuralNetworkViz({ className }: NeuralNetworkVizProps) {
           Generation: {model.generation}
         </Badge>
         <Badge variant="outline" className="text-xs">
-          Games Trained: {model.total_games_trained.toLocaleString()}
+          Games Trained: {(isTraining && status ? status.total_games_trained : model.total_games_trained).toLocaleString()}
         </Badge>
         <Badge variant="outline" className="text-xs">
           Fitness: {status && status.best_fitness !== 0 ? status.best_fitness.toFixed(1) : 'N/A'}

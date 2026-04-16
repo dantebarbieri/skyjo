@@ -464,6 +464,9 @@ export const GeneticTrainingStatusSchema = z.object({
   lineage_hash: z.string(),
   current_mutation_rate: z.number().nonnegative().default(0),
   current_mutation_sigma: z.number().nonnegative().default(0),
+  individuals_evaluated: z.number().int().nonnegative().default(0),
+  population_size: z.number().int().nonnegative().default(0),
+  games_per_eval: z.number().int().nonnegative().default(0),
 });
 
 // ─── Leaderboard / Game History API Schemas ─────────────────────────
