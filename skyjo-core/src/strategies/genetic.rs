@@ -639,6 +639,14 @@ impl Strategy for GeneticStrategy {
                         .into(),
                 },
                 ConceptReference {
+                    id: "card_counting".into(),
+                    label: "Card Counting".into(),
+                    used_for: "Input feature — the network receives the fraction of each \
+                               card value (-2 through 12) remaining unseen, enabling \
+                               probability-aware decisions"
+                        .into(),
+                },
+                ConceptReference {
                     id: "expected_score".into(),
                     label: "Expected Score".into(),
                     used_for: "Input feature — provides the network with an estimate of \
