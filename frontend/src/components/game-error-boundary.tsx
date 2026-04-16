@@ -48,7 +48,7 @@ export class GameErrorBoundary extends Component<Props, State> {
             <p className="text-sm text-muted-foreground text-center">
               {this.props.fallbackMessage ?? 'An unexpected error occurred during rendering.'}
             </p>
-            {this.state.error && (
+            {import.meta.env.DEV && this.state.error && (
               <pre className="text-xs bg-muted p-3 rounded-md overflow-auto max-h-40">
                 {this.state.error.message}
               </pre>

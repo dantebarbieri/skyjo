@@ -979,6 +979,7 @@ mod tests {
             action: PlayerAction::KeepDeckDraw { position: 5 },
             state,
             turn_deadline_secs: None,
+            round_ready: None,
         };
 
         let json = serde_json::to_value(&msg).unwrap();
@@ -1022,16 +1023,18 @@ mod tests {
         // Fourth slot: Cleared
         assert_eq!(board0[3], "Cleared");
 
-        // Write fixture for frontend test
-        let json_str = serde_json::to_string_pretty(&json).unwrap();
-        let fixture_path =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../frontend/src/__fixtures__");
-        std::fs::create_dir_all(&fixture_path).ok();
-        std::fs::write(
-            fixture_path.join("round-end-action-applied.json"),
-            &json_str,
-        )
-        .expect("Failed to write fixture file");
+        // Write fixture for frontend test (opt-in via UPDATE_FIXTURES=1)
+        if std::env::var("UPDATE_FIXTURES").is_ok() {
+            let json_str = serde_json::to_string_pretty(&json).unwrap();
+            let fixture_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../frontend/src/__fixtures__");
+            std::fs::create_dir_all(&fixture_path).ok();
+            std::fs::write(
+                fixture_path.join("round-end-action-applied.json"),
+                &json_str,
+            )
+            .expect("Failed to write fixture file");
+        }
     }
 
     /// Construct a realistic game-over ActionApplied message and verify JSON structure.
@@ -1075,6 +1078,7 @@ mod tests {
             action: PlayerAction::DiscardAndFlip { position: 3 },
             state,
             turn_deadline_secs: None,
+            round_ready: None,
         };
 
         let json = serde_json::to_value(&msg).unwrap();
@@ -1090,15 +1094,17 @@ mod tests {
         );
 
         // Write fixture
-        let json_str = serde_json::to_string_pretty(&json).unwrap();
-        let fixture_path =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../frontend/src/__fixtures__");
-        std::fs::create_dir_all(&fixture_path).ok();
-        std::fs::write(
-            fixture_path.join("game-over-action-applied.json"),
-            &json_str,
-        )
-        .expect("Failed to write fixture file");
+        if std::env::var("UPDATE_FIXTURES").is_ok() {
+            let json_str = serde_json::to_string_pretty(&json).unwrap();
+            let fixture_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../frontend/src/__fixtures__");
+            std::fs::create_dir_all(&fixture_path).ok();
+            std::fs::write(
+                fixture_path.join("game-over-action-applied.json"),
+                &json_str,
+            )
+            .expect("Failed to write fixture file");
+        }
     }
 
     /// Play an actual game to round-end via InteractiveGame and validate the serialized
@@ -1117,15 +1123,23 @@ mod tests {
             let strategy = RandomStrategy;
 
             // Play until round-over or game-over
-            for _ in 0..2000 {
+            let mut reached_round_end = false;
+            for _ in 0..500 {
                 let action_needed = game.get_action_needed();
                 match action_needed {
                     skyjo_core::interactive::ActionNeeded::RoundOver { .. }
-                    | skyjo_core::interactive::ActionNeeded::GameOver { .. } => break,
+                    | skyjo_core::interactive::ActionNeeded::GameOver { .. } => {
+                        reached_round_end = true;
+                        break;
+                    }
                     _ => {}
                 }
                 let action = game.get_bot_action(&strategy).unwrap();
                 game.apply_action(action).unwrap();
+            }
+
+            if !reached_round_end {
+                panic!("seed {seed}: did not reach RoundOver or GameOver within 500 actions");
             }
 
             // Get the player state and construct the message
@@ -1135,6 +1149,7 @@ mod tests {
                 action: PlayerAction::DiscardAndFlip { position: 0 },
                 state: state.clone(),
                 turn_deadline_secs: None,
+                round_ready: None,
             };
 
             // Serialize to JSON and verify it round-trips
@@ -1148,8 +1163,8 @@ mod tests {
                 "seed {seed}: expected RoundOver or GameOver, got {an_type}"
             );
 
-            // Write ONE fixture from an actual game for the frontend test
-            if seed == 0 {
+            // Write ONE fixture from an actual game for the frontend test (opt-in)
+            if seed == 0 && std::env::var("UPDATE_FIXTURES").is_ok() {
                 let fixture_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                     .join("../frontend/src/__fixtures__");
                 std::fs::create_dir_all(&fixture_path).ok();
