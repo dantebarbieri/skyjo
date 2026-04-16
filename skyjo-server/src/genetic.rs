@@ -1001,6 +1001,9 @@ pub async fn train_generations(state: Arc<Mutex<GeneticTrainingState>>, num_gene
             s.population = new_population;
             s.generation += 1;
             s.total_games_trained += games_played;
+            // Reset the in-progress counter now that games are committed
+            s.current_gen_individuals_evaluated
+                .store(0, Ordering::Relaxed);
             s.training_last_gen_elapsed_ms = s
                 .training_started_at
                 .map(|t| t.elapsed().as_millis() as u64)
@@ -1067,7 +1070,11 @@ fn auto_save_training_result(state: &mut GeneticTrainingState) {
         return;
     }
     let name = format!("Gen {}", state.generation);
-    if state.saved_generations.iter().any(|sg| sg.name == name) {
+    if state
+        .saved_generations
+        .iter()
+        .any(|sg| sg.name == name && sg.lineage_hash == state.lineage_hash)
+    {
         return;
     }
     let saved = SavedGeneration {
