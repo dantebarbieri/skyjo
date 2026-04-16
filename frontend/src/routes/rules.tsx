@@ -72,7 +72,7 @@ function TableOfContents() {
   }, []);
 
   return (
-    <nav className="sticky top-0 lg:top-8 z-10 bg-background py-2 lg:py-0 shrink-0 border-b lg:border-b-0 -mx-3 px-3 sm:-mx-4 sm:px-4 lg:mx-0 lg:px-0 self-start">
+    <nav className="sticky top-0 lg:top-8 z-10 bg-background py-2 lg:py-0 shrink-0 border-b lg:border-b-0 -mx-3 px-3 sm:-mx-4 sm:px-4 lg:mx-0 lg:px-0 lg:self-start">
       {/* Horizontal scrollable nav on small/medium screens, vertical sidebar on large */}
       <ul className="flex lg:flex-col gap-1 text-sm overflow-x-auto pb-1 lg:pb-0 lg:w-48">
         {sections.map(({ id, label }) => (

@@ -838,7 +838,7 @@ function NetworkDiagram({ model }: { model: GeneticModelData }) {
     <div className="w-full overflow-x-auto">
       <svg
         viewBox={`0 0 ${svgWidth} ${svgHeight}`}
-        className="w-full max-w-[900px] min-w-[600px] mx-auto"
+        className="w-full max-w-[900px] min-w-[400px] sm:min-w-[600px] mx-auto"
         style={{ minHeight: 200 }}
       >
         {/* Edges: input → hidden1 (distributed along hidden1 box height) */}

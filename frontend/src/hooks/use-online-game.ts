@@ -54,6 +54,7 @@ interface UseOnlineGameReturn {
   roomState: RoomLobbyState | null;
   gameState: InteractiveGameState | null;
   turnDeadlineSecs: number | null;
+  deadlineKey: number;
   wasTimeout: boolean;
   playerIndex: number | null;
   lastError: string | null;
@@ -87,6 +88,7 @@ export function useOnlineGame(
   const [roomState, setRoomState] = useState<RoomLobbyState | null>(null);
   const [gameState, setGameState] = useState<InteractiveGameState | null>(null);
   const [turnDeadlineSecs, setTurnDeadlineSecs] = useState<number | null>(null);
+  const [deadlineKey, setDeadlineKey] = useState(0);
   const [wasTimeout, setWasTimeout] = useState(false);
   const [lastError, setLastError] = useState<string | null>(null);
   const [kicked, setKicked] = useState(false);
@@ -213,6 +215,7 @@ export function useOnlineGame(
               setPendingClearColumns(null);
               setGameState(msg.state);
               setTurnDeadlineSecs(msg.turn_deadline_secs ?? null);
+              if (msg.turn_deadline_secs != null) setDeadlineKey(k => k + 1);
               setRoundReady(msg.round_ready ?? null);
               setWasTimeout(false);
               break;
@@ -229,6 +232,7 @@ export function useOnlineGame(
                 setPendingClearColumns(clearCols);
                 setGameState(preClearState);
                 setTurnDeadlineSecs(msg.turn_deadline_secs ?? null);
+                if (msg.turn_deadline_secs != null) setDeadlineKey(k => k + 1);
                 setWasTimeout(false);
                 if (pendingClearTimeoutRef.current) clearTimeout(pendingClearTimeoutRef.current);
                 pendingClearTimeoutRef.current = setTimeout(() => {
@@ -239,6 +243,7 @@ export function useOnlineGame(
               } else {
                 setGameState(msg.state);
                 setTurnDeadlineSecs(msg.turn_deadline_secs ?? null);
+                if (msg.turn_deadline_secs != null) setDeadlineKey(k => k + 1);
                 setWasTimeout(false);
               }
               break;
@@ -255,6 +260,7 @@ export function useOnlineGame(
                 setPendingClearColumns(clearCols);
                 setGameState(preClearState);
                 setTurnDeadlineSecs(msg.turn_deadline_secs ?? null);
+                if (msg.turn_deadline_secs != null) setDeadlineKey(k => k + 1);
                 setWasTimeout(true);
                 if (pendingClearTimeoutRef.current) clearTimeout(pendingClearTimeoutRef.current);
                 pendingClearTimeoutRef.current = setTimeout(() => {
@@ -265,6 +271,7 @@ export function useOnlineGame(
               } else {
                 setGameState(msg.state);
                 setTurnDeadlineSecs(msg.turn_deadline_secs ?? null);
+                if (msg.turn_deadline_secs != null) setDeadlineKey(k => k + 1);
                 setWasTimeout(true);
               }
               break;
@@ -483,6 +490,9 @@ export function useOnlineGame(
     setConnectionStatus('disconnected');
     setRoomState(null);
     setGameState(null);
+    setTurnDeadlineSecs(null);
+    setDeadlineKey(0);
+    setWasTimeout(false);
     setLastError(null);
     setKicked(false);
     setSessionExpired(false);
@@ -495,6 +505,7 @@ export function useOnlineGame(
     roomState,
     gameState,
     turnDeadlineSecs,
+    deadlineKey,
     wasTimeout,
     playerIndex,
     lastError,
