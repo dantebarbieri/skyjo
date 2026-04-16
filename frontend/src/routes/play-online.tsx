@@ -191,7 +191,14 @@ export default function PlayOnlineRoute() {
 
   return (
     <div className="space-y-4">
-      <ConnectionIndicator status={game.connectionStatus} roomCode={roomCode} />
+      <ConnectionIndicator
+        status={game.connectionStatus}
+        roomCode={roomCode}
+        reconnectAttempt={game.reconnectAttempt}
+        maxReconnectAttempts={game.maxReconnectAttempts}
+        retryConnect={game.retryConnect}
+        onLeave={handleLeave}
+      />
 
       {game.lastError && (
         <div className="bg-destructive/15 text-destructive px-4 py-2 rounded-md text-sm">
@@ -485,37 +492,70 @@ function RoomTimer({ initialSecs }: { initialSecs: number }) {
 
 // --- Connection Indicator ---
 
-function ConnectionIndicator({ status, roomCode }: { status: ConnectionStatus; roomCode: string }) {
+function ConnectionIndicator({
+  status,
+  roomCode,
+  reconnectAttempt,
+  maxReconnectAttempts,
+  retryConnect,
+  onLeave,
+}: {
+  status: ConnectionStatus;
+  roomCode: string;
+  reconnectAttempt: number;
+  maxReconnectAttempts: number;
+  retryConnect: () => void;
+  onLeave: () => void;
+}) {
+  const isReconnecting = (status === 'connecting' || status === 'disconnected') && reconnectAttempt > 0 && reconnectAttempt < maxReconnectAttempts;
+  const failedAllRetries = status === 'disconnected' && reconnectAttempt >= maxReconnectAttempts;
+
   return (
-    <div className="flex items-center gap-2 text-sm">
-      <div className={cn(
-        'w-2 h-2 rounded-full',
-        status === 'connected' && 'bg-green-500',
-        status === 'connecting' && 'bg-yellow-500 animate-pulse',
-        status === 'disconnected' && 'bg-red-500',
-      )} />
-      <span className="text-muted-foreground">
-        {status === 'connected' && 'Connected'}
-        {status === 'connecting' && 'Connecting...'}
-        {status === 'disconnected' && 'Disconnected'}
-      </span>
-      <Badge variant="outline" className="font-mono ml-auto">
-        {roomCode}
-      </Badge>
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => navigator.clipboard.writeText(roomCode)}
-      >
-        Copy Code
-      </Button>
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => navigator.clipboard.writeText(`${window.location.origin}/play/online/${roomCode}`)}
-      >
-        Copy Link
-      </Button>
+    <div className="space-y-1">
+      <div className="flex items-center gap-2 text-sm">
+        <div className={cn(
+          'w-2 h-2 rounded-full',
+          status === 'connected' && 'bg-green-500',
+          status === 'connecting' && 'bg-yellow-500 animate-pulse',
+          status === 'disconnected' && 'bg-red-500',
+        )} />
+        <span className="text-muted-foreground">
+          {status === 'connected' && 'Connected'}
+          {isReconnecting && `Reconnecting… (attempt ${reconnectAttempt}/${maxReconnectAttempts})`}
+          {failedAllRetries && 'Connection failed'}
+          {status === 'disconnected' && reconnectAttempt === 0 && 'Disconnected'}
+          {status === 'connecting' && reconnectAttempt === 0 && 'Connecting…'}
+        </span>
+        <Badge variant="outline" className="font-mono ml-auto">
+          {roomCode}
+        </Badge>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => navigator.clipboard.writeText(roomCode)}
+        >
+          Copy Code
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => navigator.clipboard.writeText(`${window.location.origin}/play/online/${roomCode}`)}
+        >
+          Copy Link
+        </Button>
+      </div>
+      {(isReconnecting || failedAllRetries) && (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground pl-4">
+          {failedAllRetries && (
+            <Button variant="outline" size="sm" className="h-7 text-xs" onClick={retryConnect}>
+              Retry
+            </Button>
+          )}
+          <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={onLeave}>
+            Leave Game
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

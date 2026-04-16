@@ -22,6 +22,7 @@ export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected';
 const WS_CLOSE_SESSION_EXPIRED = 4001;
 
 const COLUMN_CLEAR_DELAY_MS = 2500;
+const MAX_RECONNECT_ATTEMPTS = 10;
 
 /**
  * Build an intermediate "pre-clear" state from a post-clear state.
@@ -61,6 +62,8 @@ interface UseOnlineGameReturn {
   sessionExpired: boolean;
   pendingClearColumns: PendingColumnClear[] | null;
   roundReady: boolean[] | null;
+  reconnectAttempt: number;
+  maxReconnectAttempts: number;
   applyAction: (action: PlayerAction) => void;
   configureSlot: (slot: number, playerType: string) => void;
   setNumPlayers: (numPlayers: number) => void;
@@ -76,6 +79,7 @@ interface UseOnlineGameReturn {
   playAgain: () => void;
   returnToLobby: () => void;
   disconnect: () => void;
+  retryConnect: () => void;
 }
 
 export function useOnlineGame(
@@ -93,6 +97,7 @@ export function useOnlineGame(
   const [sessionExpired, setSessionExpired] = useState(false);
   const [pendingClearColumns, setPendingClearColumns] = useState<PendingColumnClear[] | null>(null);
   const [roundReady, setRoundReady] = useState<boolean[] | null>(null);
+  const [reconnectAttempt, setReconnectAttempt] = useState(0);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const reconnectAttemptRef = useRef(0);
@@ -132,6 +137,7 @@ export function useOnlineGame(
           setSessionExpired(true);
           setConnectionStatus('disconnected');
           reconnectAttemptRef.current = 999;
+          setReconnectAttempt(999);
           return;
         }
 
@@ -139,10 +145,11 @@ export function useOnlineGame(
           // Non-auth error (404, 500, etc.) — treat as transient, retry with backoff
           setConnectionStatus('disconnected');
           const attempt = reconnectAttemptRef.current;
-          if (attempt < 10) {
+          if (attempt < MAX_RECONNECT_ATTEMPTS) {
             const delay = Math.min(1000 * Math.pow(2, attempt), 30000);
             reconnectTimeoutRef.current = setTimeout(() => {
               reconnectAttemptRef.current++;
+              setReconnectAttempt(reconnectAttemptRef.current);
               connect();
             }, delay);
           }
@@ -162,6 +169,7 @@ export function useOnlineGame(
           setConnectionStatus('connected');
           setLastError(null);
           reconnectAttemptRef.current = 0;
+          setReconnectAttempt(0);
         };
 
         ws.onmessage = (event) => {
@@ -344,15 +352,17 @@ export function useOnlineGame(
           if (event.code === WS_CLOSE_SESSION_EXPIRED) {
             setSessionExpired(true);
             reconnectAttemptRef.current = 999;
+            setReconnectAttempt(999);
             return;
           }
 
           // Exponential backoff reconnection for network failures
           const attempt = reconnectAttemptRef.current;
-          if (attempt < 10) {
+          if (attempt < MAX_RECONNECT_ATTEMPTS) {
             const delay = Math.min(1000 * Math.pow(2, attempt), 30000);
             reconnectTimeoutRef.current = setTimeout(() => {
               reconnectAttemptRef.current++;
+              setReconnectAttempt(reconnectAttemptRef.current);
               connect();
             }, delay);
           }
@@ -370,10 +380,11 @@ export function useOnlineGame(
         // Network error on validation fetch — treat as temporary, retry with backoff
         setConnectionStatus('disconnected');
         const attempt = reconnectAttemptRef.current;
-        if (attempt < 10) {
+        if (attempt < MAX_RECONNECT_ATTEMPTS) {
           const delay = Math.min(1000 * Math.pow(2, attempt), 30000);
           reconnectTimeoutRef.current = setTimeout(() => {
             reconnectAttemptRef.current++;
+            setReconnectAttempt(reconnectAttemptRef.current);
             connect();
           }, delay);
         }
@@ -468,6 +479,7 @@ export function useOnlineGame(
 
   const disconnect = useCallback(() => {
     reconnectAttemptRef.current = 999; // Prevent reconnect
+    setReconnectAttempt(999);
     connectAbortRef.current?.abort();
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
@@ -490,6 +502,12 @@ export function useOnlineGame(
     setRoundReady(null);
   }, []);
 
+  const retryConnect = useCallback(() => {
+    reconnectAttemptRef.current = 0;
+    setReconnectAttempt(0);
+    connect();
+  }, [connect]);
+
   return {
     connectionStatus,
     roomState,
@@ -502,6 +520,8 @@ export function useOnlineGame(
     sessionExpired,
     pendingClearColumns,
     roundReady,
+    reconnectAttempt,
+    maxReconnectAttempts: MAX_RECONNECT_ATTEMPTS,
     applyAction,
     configureSlot,
     setNumPlayers,
@@ -517,5 +537,6 @@ export function useOnlineGame(
     playAgain,
     returnToLobby,
     disconnect,
+    retryConnect,
   };
 }
