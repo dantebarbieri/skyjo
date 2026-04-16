@@ -6,6 +6,9 @@ use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use uuid::Uuid;
 
+use crate::messages::PlayerSlotType;
+use crate::room::{PlayerSlotSnapshot, RoomPhase, RoomSnapshot};
+
 #[derive(Debug)]
 pub enum PersistenceError {
     Sqlx(sqlx::Error),
@@ -92,6 +95,10 @@ impl Persistence {
                 "003_leaderboard",
                 include_str!("../../migrations/003_leaderboard.sql"),
             ),
+            (
+                "004_snapshot_normalization",
+                include_str!("../../migrations/004_snapshot_normalization.sql"),
+            ),
         ];
 
         for (name, sql) in migrations {
@@ -122,33 +129,295 @@ impl Persistence {
     // 003_leaderboard. Use save_complete_game, list_games, get_game_detail,
     // reconstruct_game_history, and the player_lifetime_stats VIEW instead.
 
-    /// Save a room snapshot.
-    /// TODO: Rewrite to use normalized room_snapshots schema (phase_id, child tables)
+    /// Save a room snapshot using normalized tables.
     pub async fn save_room_snapshot(
         &self,
-        _room_code: &str,
-        _snapshot_json: &str,
+        snapshot: &RoomSnapshot,
     ) -> Result<(), PersistenceError> {
-        // Room snapshot persistence temporarily disabled during schema migration.
-        // The old BYTEA-based `snapshot` column has been replaced with relational columns.
+        let mut tx = self.pool.begin().await?;
+
+        let phase_id = room_phase_to_id(&snapshot.phase);
+
+        // Upsert the main snapshot row
+        sqlx::query(
+            "INSERT INTO room_snapshots (room_code, phase_id, num_players, rules_name, creator,
+                turn_timer_secs, disconnect_bot_timeout_secs, game_state_json)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+             ON CONFLICT (room_code) DO UPDATE SET
+                phase_id = EXCLUDED.phase_id,
+                num_players = EXCLUDED.num_players,
+                rules_name = EXCLUDED.rules_name,
+                creator = EXCLUDED.creator,
+                turn_timer_secs = EXCLUDED.turn_timer_secs,
+                disconnect_bot_timeout_secs = EXCLUDED.disconnect_bot_timeout_secs,
+                game_state_json = EXCLUDED.game_state_json,
+                updated_at = NOW()",
+        )
+        .bind(&snapshot.code)
+        .bind(phase_id)
+        .bind(snapshot.num_players as i32)
+        .bind(&snapshot.rules_name)
+        .bind(snapshot.creator as i32)
+        .bind(snapshot.turn_timer_secs.map(|v| v as i64))
+        .bind(snapshot.disconnect_bot_timeout_secs.map(|v| v as i32))
+        .bind(&snapshot.game_state_json)
+        .execute(&mut *tx)
+        .await?;
+
+        // Replace player slots
+        sqlx::query("DELETE FROM room_snapshot_players WHERE room_code = $1")
+            .bind(&snapshot.code)
+            .execute(&mut *tx)
+            .await?;
+
+        for (idx, player) in snapshot.players.iter().enumerate() {
+            let (slot_type_id, strategy_name) = player_slot_type_to_row(&player.slot_type);
+            sqlx::query(
+                "INSERT INTO room_snapshot_players
+                    (room_code, slot_index, slot_type_id, player_name, strategy_name, was_human)
+                 VALUES ($1, $2, $3, $4, $5, $6)",
+            )
+            .bind(&snapshot.code)
+            .bind(idx as i32)
+            .bind(slot_type_id)
+            .bind(&player.name)
+            .bind(strategy_name)
+            .bind(player.was_human)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        // Replace banned IPs
+        sqlx::query("DELETE FROM room_snapshot_banned_ips WHERE room_code = $1")
+            .bind(&snapshot.code)
+            .execute(&mut *tx)
+            .await?;
+
+        for ip in &snapshot.banned_ips {
+            sqlx::query(
+                "INSERT INTO room_snapshot_banned_ips (room_code, ip_address) VALUES ($1, $2)",
+            )
+            .bind(&snapshot.code)
+            .bind(ip)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        // Replace last winners
+        sqlx::query("DELETE FROM room_snapshot_last_winners WHERE room_code = $1")
+            .bind(&snapshot.code)
+            .execute(&mut *tx)
+            .await?;
+
+        for &winner_idx in &snapshot.last_winners {
+            sqlx::query(
+                "INSERT INTO room_snapshot_last_winners (room_code, player_index) VALUES ($1, $2)",
+            )
+            .bind(&snapshot.code)
+            .bind(winner_idx as i32)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        tx.commit().await?;
         Ok(())
     }
 
-    /// Load a room snapshot.
-    /// TODO: Rewrite to use normalized room_snapshots schema
+    /// Load a room snapshot by room code.
     pub async fn load_room_snapshot(
         &self,
-        _room_code: &str,
-    ) -> Result<Option<Vec<u8>>, PersistenceError> {
-        Ok(None)
+        room_code: &str,
+    ) -> Result<Option<RoomSnapshot>, PersistenceError> {
+        let row: Option<SnapshotRow> = sqlx::query_as(
+            "SELECT room_code, phase_id, num_players, rules_name, creator,
+                    turn_timer_secs, disconnect_bot_timeout_secs, game_state_json
+             FROM room_snapshots WHERE room_code = $1",
+        )
+        .bind(room_code)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        let Some(row) = row else {
+            return Ok(None);
+        };
+
+        let snapshot = self.build_room_snapshot(row).await?;
+        Ok(Some(snapshot))
     }
 
     /// Load all room snapshots (for crash recovery on startup).
-    /// TODO: Rewrite to use normalized room_snapshots schema
-    pub async fn load_all_room_snapshots(
+    /// Validates each snapshot and skips invalid ones with a warning log.
+    pub async fn load_all_room_snapshots(&self) -> Result<Vec<RoomSnapshot>, PersistenceError> {
+        let rows: Vec<SnapshotRow> = sqlx::query_as(
+            "SELECT room_code, phase_id, num_players, rules_name, creator,
+                    turn_timer_secs, disconnect_bot_timeout_secs, game_state_json
+             FROM room_snapshots",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        if rows.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let room_codes: Vec<String> = rows.iter().map(|r| r.room_code.clone()).collect();
+
+        // Batch-fetch all child rows
+        let all_players: Vec<BatchedSnapshotPlayerRow> = sqlx::query_as(
+            "SELECT room_code, slot_index, slot_type_id, player_name, strategy_name, was_human
+             FROM room_snapshot_players WHERE room_code = ANY($1) ORDER BY room_code, slot_index",
+        )
+        .bind(&room_codes)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let all_banned: Vec<(String, String)> = sqlx::query_as(
+            "SELECT room_code, ip_address FROM room_snapshot_banned_ips
+             WHERE room_code = ANY($1) ORDER BY room_code, ip_address",
+        )
+        .bind(&room_codes)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let all_winners: Vec<(String, i32)> = sqlx::query_as(
+            "SELECT room_code, player_index FROM room_snapshot_last_winners
+             WHERE room_code = ANY($1) ORDER BY room_code, player_index",
+        )
+        .bind(&room_codes)
+        .fetch_all(&self.pool)
+        .await?;
+
+        // Group child rows by room_code
+        let mut players_by_room: std::collections::HashMap<String, Vec<PlayerSlotSnapshot>> =
+            std::collections::HashMap::new();
+        for p in all_players {
+            players_by_room
+                .entry(p.room_code)
+                .or_default()
+                .push(PlayerSlotSnapshot {
+                    name: p.player_name.unwrap_or_default(),
+                    slot_type: row_to_player_slot_type(p.slot_type_id, p.strategy_name),
+                    was_human: p.was_human,
+                });
+        }
+
+        let mut banned_by_room: std::collections::HashMap<String, Vec<String>> =
+            std::collections::HashMap::new();
+        for (code, ip) in all_banned {
+            banned_by_room.entry(code).or_default().push(ip);
+        }
+
+        let mut winners_by_room: std::collections::HashMap<String, Vec<usize>> =
+            std::collections::HashMap::new();
+        for (code, idx) in all_winners {
+            winners_by_room.entry(code).or_default().push(idx as usize);
+        }
+
+        // Assemble and validate snapshots
+        let mut snapshots = Vec::with_capacity(rows.len());
+        for row in rows {
+            let code = row.room_code.clone();
+            let num_players = row.num_players.unwrap_or(0) as usize;
+            let creator = row.creator as usize;
+            let rules_name = row.rules_name.clone().unwrap_or_default();
+            let players = players_by_room.remove(&code).unwrap_or_default();
+
+            // Validate: skip corrupted/incomplete snapshots
+            if num_players == 0 {
+                tracing::warn!(room = %code, "Skipping snapshot: num_players is 0");
+                continue;
+            }
+            if rules_name.is_empty() {
+                tracing::warn!(room = %code, "Skipping snapshot: rules_name is empty");
+                continue;
+            }
+            if players.len() != num_players {
+                tracing::warn!(
+                    room = %code,
+                    expected = num_players,
+                    actual = players.len(),
+                    "Skipping snapshot: player count mismatch"
+                );
+                continue;
+            }
+            if creator >= num_players {
+                tracing::warn!(
+                    room = %code,
+                    creator,
+                    num_players,
+                    "Skipping snapshot: creator index out of bounds"
+                );
+                continue;
+            }
+
+            snapshots.push(RoomSnapshot {
+                code: row.room_code,
+                phase: id_to_room_phase(row.phase_id),
+                num_players,
+                creator,
+                players,
+                rules_name,
+                turn_timer_secs: row.turn_timer_secs.map(|v| v as u64),
+                disconnect_bot_timeout_secs: row.disconnect_bot_timeout_secs.map(|v| v as u32),
+                game_state_json: row.game_state_json,
+                banned_ips: banned_by_room.remove(&code).unwrap_or_default(),
+                last_winners: winners_by_room.remove(&code).unwrap_or_default(),
+            });
+        }
+        Ok(snapshots)
+    }
+
+    /// Build a `RoomSnapshot` from a DB row + child table queries.
+    async fn build_room_snapshot(
         &self,
-    ) -> Result<Vec<(String, Vec<u8>)>, PersistenceError> {
-        Ok(Vec::new())
+        row: SnapshotRow,
+    ) -> Result<RoomSnapshot, PersistenceError> {
+        let player_rows: Vec<SnapshotPlayerRow> = sqlx::query_as(
+            "SELECT slot_index, slot_type_id, player_name, strategy_name, was_human
+             FROM room_snapshot_players WHERE room_code = $1 ORDER BY slot_index",
+        )
+        .bind(&row.room_code)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let banned_ips: Vec<String> = sqlx::query_scalar(
+            "SELECT ip_address FROM room_snapshot_banned_ips WHERE room_code = $1
+             ORDER BY ip_address",
+        )
+        .bind(&row.room_code)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let last_winners: Vec<i32> = sqlx::query_scalar(
+            "SELECT player_index FROM room_snapshot_last_winners WHERE room_code = $1
+             ORDER BY player_index",
+        )
+        .bind(&row.room_code)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let players = player_rows
+            .into_iter()
+            .map(|p| PlayerSlotSnapshot {
+                name: p.player_name.unwrap_or_default(),
+                slot_type: row_to_player_slot_type(p.slot_type_id, p.strategy_name),
+                was_human: p.was_human,
+            })
+            .collect();
+
+        Ok(RoomSnapshot {
+            code: row.room_code,
+            phase: id_to_room_phase(row.phase_id),
+            num_players: row.num_players.unwrap_or(0) as usize,
+            creator: row.creator as usize,
+            players,
+            rules_name: row.rules_name.unwrap_or_default(),
+            turn_timer_secs: row.turn_timer_secs.map(|v| v as u64),
+            disconnect_bot_timeout_secs: row.disconnect_bot_timeout_secs.map(|v| v as u32),
+            game_state_json: row.game_state_json,
+            banned_ips,
+            last_winners: last_winners.into_iter().map(|i| i as usize).collect(),
+        })
     }
 
     /// Delete a room snapshot (when room is cleaned up).
@@ -714,12 +983,15 @@ impl Persistence {
             )
             .await?;
 
-        // Fetch players for each game
-        // TODO: N+1 query — batch player+room_code fetches into single queries using ANY($1)
-        let mut games = Vec::with_capacity(games_rows.len());
-        for row in &games_rows {
-            let player_rows: Vec<GamePlayerSummaryRow> = sqlx::query_as(
+        // Batch-fetch players and room codes for all games
+        let game_ids: Vec<Uuid> = games_rows.iter().map(|r| r.game_id).collect();
+
+        let player_rows: Vec<BatchedPlayerRow> = if game_ids.is_empty() {
+            Vec::new()
+        } else {
+            sqlx::query_as(
                 "SELECT
+                    gfs.game_id,
                     gfs.player_name AS name,
                     gfs.final_score,
                     (gw.player_index IS NOT NULL) AS is_winner,
@@ -727,36 +999,52 @@ impl Persistence {
                  FROM game_final_scores gfs
                  JOIN game_players gp ON gp.game_id = gfs.game_id AND gp.player_index = gfs.player_index
                  LEFT JOIN game_winners gw ON gw.game_id = gfs.game_id AND gw.player_index = gfs.player_index
-                 WHERE gfs.game_id = $1
-                 ORDER BY gfs.player_index",
+                 WHERE gfs.game_id = ANY($1)
+                 ORDER BY gfs.game_id, gfs.player_index",
             )
-            .bind(row.game_id)
+            .bind(&game_ids)
             .fetch_all(&self.pool)
-            .await?;
+            .await?
+        };
 
-            let room_code: Option<String> =
-                sqlx::query_scalar("SELECT room_code FROM games WHERE id = $1")
-                    .bind(row.game_id)
-                    .fetch_optional(&self.pool)
-                    .await?
-                    .flatten();
+        let room_code_rows: Vec<(Uuid, Option<String>)> = if game_ids.is_empty() {
+            Vec::new()
+        } else {
+            sqlx::query_as("SELECT id, room_code FROM games WHERE id = ANY($1)")
+                .bind(&game_ids)
+                .fetch_all(&self.pool)
+                .await?
+        };
 
+        // Index players by game_id
+        let mut players_by_game: std::collections::HashMap<Uuid, Vec<GamePlayerSummary>> =
+            std::collections::HashMap::new();
+        for p in player_rows {
+            players_by_game
+                .entry(p.game_id)
+                .or_default()
+                .push(GamePlayerSummary {
+                    name: p.name,
+                    final_score: p.final_score,
+                    is_winner: p.is_winner,
+                    is_bot: p.is_bot,
+                });
+        }
+
+        // Index room codes by game_id
+        let room_codes: std::collections::HashMap<Uuid, Option<String>> =
+            room_code_rows.into_iter().collect();
+
+        let mut games = Vec::with_capacity(games_rows.len());
+        for row in &games_rows {
             games.push(GameSummary {
                 id: row.game_id,
-                room_code,
+                room_code: room_codes.get(&row.game_id).cloned().unwrap_or_default(),
                 rules: row.rules_name.clone(),
                 num_players: row.num_players,
                 num_rounds: row.num_rounds,
                 created_at: row.created_at,
-                players: player_rows
-                    .into_iter()
-                    .map(|p| GamePlayerSummary {
-                        name: p.name,
-                        final_score: p.final_score,
-                        is_winner: p.is_winner,
-                        is_bot: p.is_bot,
-                    })
-                    .collect(),
+                players: players_by_game.remove(&row.game_id).unwrap_or_default(),
             });
         }
 
@@ -1157,12 +1445,29 @@ impl Persistence {
     }
 
     /// Find games stuck in 'in_progress' state (for cleanup on server restart).
-    pub async fn find_orphaned_in_progress_games(&self) -> Result<Vec<Uuid>, PersistenceError> {
+    /// Excludes games associated with the given room codes (which were restored).
+    pub async fn find_orphaned_in_progress_games(
+        &self,
+        restored_room_codes: &[String],
+    ) -> Result<Vec<Uuid>, PersistenceError> {
+        if restored_room_codes.is_empty() {
+            let rows: Vec<(Uuid,)> = sqlx::query_as(
+                "SELECT g.id FROM games g
+                 JOIN game_states gs ON gs.id = g.game_state_id
+                 WHERE gs.name = 'in_progress'",
+            )
+            .fetch_all(&self.pool)
+            .await?;
+            return Ok(rows.into_iter().map(|(id,)| id).collect());
+        }
+
         let rows: Vec<(Uuid,)> = sqlx::query_as(
             "SELECT g.id FROM games g
              JOIN game_states gs ON gs.id = g.game_state_id
-             WHERE gs.name = 'in_progress'",
+             WHERE gs.name = 'in_progress'
+               AND (g.room_code IS NULL OR g.room_code != ALL($1))",
         )
+        .bind(restored_room_codes)
         .fetch_all(&self.pool)
         .await?;
         Ok(rows.into_iter().map(|(id,)| id).collect())
@@ -1183,6 +1488,31 @@ impl Persistence {
         .fetch_optional(&self.pool)
         .await?;
         Ok(score.map(|s| s as i32))
+    }
+
+    /// Get a user's final scores for multiple games in a single query.
+    pub async fn get_user_scores_for_games(
+        &self,
+        game_ids: &[Uuid],
+        user_id: Uuid,
+    ) -> Result<std::collections::HashMap<Uuid, i32>, PersistenceError> {
+        if game_ids.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+
+        let rows: Vec<(Uuid, i64)> = sqlx::query_as(
+            "SELECT game_id, final_score FROM game_final_scores
+             WHERE game_id = ANY($1) AND user_id = $2",
+        )
+        .bind(game_ids)
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|(game_id, score)| (game_id, score as i32))
+            .collect())
     }
 }
 
@@ -1302,7 +1632,8 @@ struct GameSummaryRow {
 }
 
 #[derive(Debug, sqlx::FromRow)]
-struct GamePlayerSummaryRow {
+struct BatchedPlayerRow {
+    game_id: Uuid,
     name: String,
     final_score: i64,
     is_winner: bool,
@@ -1358,6 +1689,39 @@ struct ColumnClearDbRow {
     column_index: i32,
     card_value: i16,
     player_index: i32,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct SnapshotRow {
+    room_code: String,
+    phase_id: Option<i32>,
+    num_players: Option<i32>,
+    rules_name: Option<String>,
+    creator: i32,
+    turn_timer_secs: Option<i64>,
+    disconnect_bot_timeout_secs: Option<i32>,
+    game_state_json: Option<String>,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct SnapshotPlayerRow {
+    #[allow(dead_code)]
+    slot_index: i32,
+    slot_type_id: i32,
+    player_name: Option<String>,
+    strategy_name: Option<String>,
+    was_human: bool,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct BatchedSnapshotPlayerRow {
+    room_code: String,
+    #[allow(dead_code)]
+    slot_index: i32,
+    slot_type_id: i32,
+    player_name: Option<String>,
+    strategy_name: Option<String>,
+    was_human: bool,
 }
 
 // ── Helper functions ────────────────────────────────────────────────
@@ -1564,4 +1928,40 @@ fn bind_game_list_filters_query_as<'q>(
         query = query.bind(*uid);
     }
     query
+}
+
+// ── Room snapshot helpers ───────────────────────────────────────────
+
+fn room_phase_to_id(phase: &RoomPhase) -> i32 {
+    match phase {
+        RoomPhase::Lobby => 1,
+        RoomPhase::InGame => 2,
+        RoomPhase::GameOver => 3,
+    }
+}
+
+fn id_to_room_phase(id: Option<i32>) -> RoomPhase {
+    match id {
+        Some(2) => RoomPhase::InGame,
+        Some(3) => RoomPhase::GameOver,
+        _ => RoomPhase::Lobby,
+    }
+}
+
+fn player_slot_type_to_row(slot_type: &PlayerSlotType) -> (i32, Option<&str>) {
+    match slot_type {
+        PlayerSlotType::Human => (1, None),
+        PlayerSlotType::Bot { strategy } => (2, Some(strategy.as_str())),
+        PlayerSlotType::Empty => (3, None),
+    }
+}
+
+fn row_to_player_slot_type(slot_type_id: i32, strategy_name: Option<String>) -> PlayerSlotType {
+    match slot_type_id {
+        1 => PlayerSlotType::Human,
+        2 => PlayerSlotType::Bot {
+            strategy: strategy_name.unwrap_or_else(|| "Random".to_string()),
+        },
+        _ => PlayerSlotType::Empty,
+    }
 }

@@ -19,7 +19,7 @@ use skyjo_server::genetic::{self, GeneticTrainingState};
 use skyjo_server::lobby::Lobby;
 use skyjo_server::messages::ServerMessage;
 use skyjo_server::persistence::Persistence;
-use skyjo_server::room::{RoomPhase, RoomSnapshot};
+use skyjo_server::room::RoomPhase;
 use skyjo_server::ws;
 use skyjo_server::{AppState, AppStateInner};
 
@@ -110,34 +110,19 @@ async fn main() {
     });
 
     // Restore rooms from snapshots (best-effort crash recovery)
+    let mut restored_room_codes: Vec<String> = Vec::new();
     {
         match persistence.load_all_room_snapshots().await {
             Ok(snapshots) => {
                 let count = snapshots.len();
-                for (code, data) in snapshots {
-                    match String::from_utf8(data) {
-                        Ok(json) => match serde_json::from_str::<RoomSnapshot>(&json) {
-                            Ok(snapshot) => {
-                                let room = skyjo_server::room::Room::from_snapshot(snapshot);
-                                let shared = Arc::new(tokio::sync::Mutex::new(room));
-                                app_state.lobby.rooms.insert(code.clone(), shared);
-                                tracing::info!(room = %code, "Restored room from snapshot");
-                            }
-                            Err(e) => {
-                                tracing::warn!(
-                                    room = %code,
-                                    "Failed to deserialize room snapshot: {e}"
-                                );
-                            }
-                        },
-                        Err(e) => {
-                            tracing::warn!(
-                                room = %code,
-                                "Failed to decode room snapshot as UTF-8: {e}"
-                            );
-                        }
-                    }
-                    // Clean up snapshot after restoration attempt
+                for snapshot in snapshots {
+                    let code = snapshot.code.clone();
+                    let room = skyjo_server::room::Room::from_snapshot(snapshot);
+                    let shared = Arc::new(tokio::sync::Mutex::new(room));
+                    app_state.lobby.rooms.insert(code.clone(), shared);
+                    tracing::info!(room = %code, "Restored room from snapshot");
+                    restored_room_codes.push(code.clone());
+                    // Clean up snapshot after restoration
                     if let Err(e) = persistence.delete_room_snapshot(&code).await {
                         tracing::warn!(room = %code, "Failed to delete snapshot: {e}");
                     }
@@ -152,10 +137,12 @@ async fn main() {
         }
     }
 
-    // Mark any orphaned in-progress games as abandoned (from previous server crashes)
-    // TODO: Once room snapshot restore is re-enabled, this should check against
-    // restored rooms and only mark games as abandoned if their room was not restored.
-    match persistence.find_orphaned_in_progress_games().await {
+    // Mark any orphaned in-progress games as abandoned (from previous server crashes).
+    // Skip games whose rooms were just restored from snapshots.
+    match persistence
+        .find_orphaned_in_progress_games(&restored_room_codes)
+        .await
+    {
         Ok(orphaned) => {
             if !orphaned.is_empty() {
                 tracing::info!(
@@ -203,16 +190,15 @@ async fn main() {
             for entry in cleanup_state.lobby.rooms.iter() {
                 let code = entry.key().clone();
                 // Capture snapshot while holding the lock, then drop before awaiting
-                let json = if let Ok(room) = entry.value().try_lock()
+                let snapshot = if let Ok(room) = entry.value().try_lock()
                     && room.phase == skyjo_server::room::RoomPhase::InGame
                 {
-                    let snapshot = room.to_snapshot();
-                    serde_json::to_string(&snapshot).ok()
+                    Some(room.to_snapshot())
                 } else {
                     None
                 };
-                if let Some(json) = json
-                    && let Err(e) = cleanup_persistence.save_room_snapshot(&code, &json).await
+                if let Some(snapshot) = snapshot
+                    && let Err(e) = cleanup_persistence.save_room_snapshot(&snapshot).await
                 {
                     tracing::warn!(room = %code, "Failed to save snapshot: {e}");
                 }
@@ -388,16 +374,16 @@ async fn main() {
 
             // Snapshot rooms that have active players or are in-game
             let has_connected = room.players.iter().any(|p| p.connected);
-            let snapshot_json = if room.phase != RoomPhase::Lobby || has_connected {
-                serde_json::to_string(&room.to_snapshot()).ok()
+            let snapshot = if room.phase != RoomPhase::Lobby || has_connected {
+                Some(room.to_snapshot())
             } else {
                 None
             };
 
             drop(room);
 
-            if let Some(json) = snapshot_json {
-                match shutdown_persistence.save_room_snapshot(&code, &json).await {
+            if let Some(snapshot) = snapshot {
+                match shutdown_persistence.save_room_snapshot(&snapshot).await {
                     Ok(()) => {
                         snapshot_count += 1;
                     }
