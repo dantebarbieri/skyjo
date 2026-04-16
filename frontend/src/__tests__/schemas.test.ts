@@ -778,6 +778,9 @@ describe('Genetic model schemas', () => {
       lineage_hash: 'def456',
       current_mutation_rate: 0.05,
       current_mutation_sigma: 0.3,
+      individuals_evaluated: 150,
+      population_size: 300,
+      games_per_eval: 30,
     };
     expect(GeneticTrainingStatusSchema.parse(status)).toEqual(status);
   });

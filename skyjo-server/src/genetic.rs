@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use rand::rngs::StdRng;
 use rand::{Rng, RngCore, SeedableRng};
@@ -172,6 +173,10 @@ pub struct TrainingStatus {
     pub current_mutation_sigma: f32,
     /// Number of games per individual in the current generation's evaluation.
     pub games_per_eval: usize,
+    /// Number of individuals evaluated so far in the current generation (live progress).
+    pub individuals_evaluated: usize,
+    /// Total individuals in the population (for progress denominator).
+    pub population_size: usize,
 }
 
 /// Mutable training state, shared behind Arc<Mutex<>>.
@@ -207,6 +212,9 @@ pub struct GeneticTrainingState {
     pub current_reset_rate: f64,
     /// Counter for consecutive stagnation windows (used for restart injection).
     pub stagnation_counter: usize,
+    /// Live progress: number of individuals evaluated in the current generation.
+    /// Shared with the background training task via `Arc<AtomicUsize>`.
+    pub current_gen_individuals_evaluated: Arc<AtomicUsize>,
 }
 
 impl GeneticTrainingState {
@@ -240,6 +248,7 @@ impl GeneticTrainingState {
             current_mutation_sigma: BASE_MUTATION_SIGMA,
             current_reset_rate: BASE_RESET_RATE,
             stagnation_counter: 0,
+            current_gen_individuals_evaluated: Arc::new(AtomicUsize::new(0)),
         }
     }
 
@@ -315,6 +324,7 @@ impl GeneticTrainingState {
                             current_mutation_sigma: BASE_MUTATION_SIGMA,
                             current_reset_rate: BASE_RESET_RATE,
                             stagnation_counter: 0,
+                            current_gen_individuals_evaluated: Arc::new(AtomicUsize::new(0)),
                         };
                     }
                     Err(e) => tracing::warn!("Failed to parse genetic model: {e}"),
@@ -335,10 +345,15 @@ impl GeneticTrainingState {
             .training_started_at
             .map(|t| t.elapsed().as_millis() as u64)
             .unwrap_or(0);
+        let individuals_done = self
+            .current_gen_individuals_evaluated
+            .load(Ordering::Relaxed);
+        let games_per = games_per_individual(self.generation);
+        let in_progress_games = individuals_done * games_per;
         TrainingStatus {
             is_training: self.is_training,
             generation: self.generation,
-            total_games_trained: self.total_games_trained,
+            total_games_trained: self.total_games_trained + in_progress_games,
             best_fitness: if self.best_fitness.is_finite() {
                 self.best_fitness
             } else {
@@ -355,6 +370,10 @@ impl GeneticTrainingState {
             current_mutation_rate: self.current_mutation_rate,
             current_mutation_sigma: self.current_mutation_sigma,
             games_per_eval: games_per_individual(self.generation),
+            individuals_evaluated: self
+                .current_gen_individuals_evaluated
+                .load(Ordering::Relaxed),
+            population_size: self.population.len(),
         }
     }
 
@@ -765,10 +784,14 @@ struct GenerationConfig {
 fn run_generation(
     population: &[Vec<f32>],
     config: &GenerationConfig,
+    progress: &AtomicUsize,
 ) -> (Vec<Vec<f32>>, Vec<f64>, usize, usize) {
     let mut rng = StdRng::seed_from_u64(config.generation_seed);
 
     let num_games = games_per_individual(config.generation);
+
+    // Reset progress counter for this generation
+    progress.store(0, Ordering::Relaxed);
 
     // Evaluate fitness for each individual in parallel
     let fitnesses: Vec<f64> = population
@@ -776,14 +799,16 @@ fn run_generation(
         .enumerate()
         .map(|(idx, genome)| {
             let seed = config.generation_seed.wrapping_add((idx * 1000) as u64);
-            evaluate_individual(
+            let fitness = evaluate_individual(
                 genome,
                 idx,
                 population,
                 seed,
                 config.games_trained,
                 num_games,
-            )
+            );
+            progress.fetch_add(1, Ordering::Relaxed);
+            fitness
         })
         .collect();
 
@@ -852,7 +877,11 @@ fn auto_save_milestone(state: &mut GeneticTrainingState) {
     while power <= generation {
         if power == generation {
             let name = format!("Gen {generation}");
-            if state.saved_generations.iter().any(|sg| sg.name == name) {
+            if state
+                .saved_generations
+                .iter()
+                .any(|sg| sg.name == name && sg.lineage_hash == state.lineage_hash)
+            {
                 return;
             }
             let saved = SavedGeneration {
@@ -912,6 +941,7 @@ pub async fn train_generations(state: Arc<Mutex<GeneticTrainingState>>, num_gene
             mutation_sigma,
             reset_rate,
             stagnation_counter,
+            progress,
         ) = {
             let s = state.lock().await;
             if !s.is_training {
@@ -928,6 +958,7 @@ pub async fn train_generations(state: Arc<Mutex<GeneticTrainingState>>, num_gene
                 s.current_mutation_sigma,
                 s.current_reset_rate,
                 s.stagnation_counter,
+                Arc::clone(&s.current_gen_individuals_evaluated),
             )
         };
 
@@ -945,9 +976,11 @@ pub async fn train_generations(state: Arc<Mutex<GeneticTrainingState>>, num_gene
             restart_fraction,
         };
         let (new_population, fitnesses, best_idx, games_played) =
-            tokio::task::spawn_blocking(move || run_generation(&population, &gen_config))
-                .await
-                .expect("Training task panicked");
+            tokio::task::spawn_blocking(move || {
+                run_generation(&population, &gen_config, &progress)
+            })
+            .await
+            .expect("Training task panicked");
 
         // Write back results (brief lock)
         let should_stop = {
@@ -968,6 +1001,9 @@ pub async fn train_generations(state: Arc<Mutex<GeneticTrainingState>>, num_gene
             s.population = new_population;
             s.generation += 1;
             s.total_games_trained += games_played;
+            // Reset the in-progress counter now that games are committed
+            s.current_gen_individuals_evaluated
+                .store(0, Ordering::Relaxed);
             s.training_last_gen_elapsed_ms = s
                 .training_started_at
                 .map(|t| t.elapsed().as_millis() as u64)
@@ -1034,7 +1070,11 @@ fn auto_save_training_result(state: &mut GeneticTrainingState) {
         return;
     }
     let name = format!("Gen {}", state.generation);
-    if state.saved_generations.iter().any(|sg| sg.name == name) {
+    if state
+        .saved_generations
+        .iter()
+        .any(|sg| sg.name == name && sg.lineage_hash == state.lineage_hash)
+    {
         return;
     }
     let saved = SavedGeneration {
@@ -1107,7 +1147,11 @@ fn auto_save_checkpoint(state: &mut GeneticTrainingState) {
         return;
     }
     let name = format!("Gen {}", state.generation);
-    if state.saved_generations.iter().any(|sg| sg.name == name) {
+    if state
+        .saved_generations
+        .iter()
+        .any(|sg| sg.name == name && sg.lineage_hash == state.lineage_hash)
+    {
         return;
     }
     let saved = SavedGeneration {
