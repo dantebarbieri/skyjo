@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 
 // --- Mock WASM dependencies ---
@@ -73,6 +74,7 @@ import StrategiesRoute from '../strategies';
 import RulesRoute from '../rules';
 import AdminRoute from '../admin';
 import GeneticManageRoute from '../genetic-manage';
+import NavBar from '@/components/nav-bar';
 
 function renderWithRouter(ui: React.ReactElement, initialEntries = ['/']) {
   return render(<MemoryRouter initialEntries={initialEntries}>{ui}</MemoryRouter>);
@@ -142,6 +144,54 @@ describe('Mobile responsiveness regression tests', () => {
       expect(form).not.toBeNull();
       const selectTrigger = form!.querySelector('[class*="w-full"][class*="sm\\:w-"]');
       expect(selectTrigger).not.toBeNull();
+    });
+  });
+
+  describe('Nav bar', () => {
+    it('renders a hamburger trigger visible only on mobile', () => {
+      const { container } = renderWithRouter(<NavBar />);
+      const trigger = screen.getByRole('button', { name: /open menu/i });
+      expect(trigger).toBeInTheDocument();
+      // Trigger lives inside the sm:hidden container
+      const mobileWrapper = container.querySelector('.sm\\:hidden');
+      expect(mobileWrapper).not.toBeNull();
+      expect(mobileWrapper!.contains(trigger)).toBe(true);
+    });
+
+    it('desktop links container is hidden below sm', () => {
+      const { container } = renderWithRouter(<NavBar />);
+      const desktopLinks = container.querySelector('.hidden.sm\\:flex');
+      expect(desktopLinks).not.toBeNull();
+    });
+
+    it('does not show main nav links in the document until the drawer is opened', () => {
+      renderWithRouter(<NavBar />);
+      // Desktop links container is `hidden` on mobile viewports, but JSDOM does not
+      // evaluate media queries — so we assert that the drawer's portal hasn't
+      // rendered a duplicate set of links yet by counting occurrences.
+      // With the drawer closed there should be exactly one "Rules" link (desktop).
+      expect(screen.getAllByRole('link', { name: 'Rules' })).toHaveLength(1);
+    });
+
+    it('opens the drawer and shows vertical links when hamburger is clicked', async () => {
+      const user = userEvent.setup();
+      renderWithRouter(<NavBar />);
+      await user.click(screen.getByRole('button', { name: /open menu/i }));
+      const dialog = await screen.findByRole('dialog');
+      // All main links should appear inside the drawer
+      expect(within(dialog).getByRole('link', { name: 'Rules' })).toBeInTheDocument();
+      expect(within(dialog).getByRole('link', { name: 'Play' })).toBeInTheDocument();
+      expect(within(dialog).getByRole('link', { name: 'Simulator' })).toBeInTheDocument();
+      expect(within(dialog).getByRole('link', { name: /Leaderboard/ })).toBeInTheDocument();
+    });
+
+    it('closes the drawer when a link inside it is clicked', async () => {
+      const user = userEvent.setup();
+      renderWithRouter(<NavBar />);
+      await user.click(screen.getByRole('button', { name: /open menu/i }));
+      const dialog = await screen.findByRole('dialog');
+      await user.click(within(dialog).getByRole('link', { name: 'Rules' }));
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     });
   });
 
